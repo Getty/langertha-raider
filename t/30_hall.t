@@ -9,6 +9,7 @@ use IO::Async::Loop;
 use File::Temp qw( tempdir );
 
 use Langertha::Raider::CLI;  # for pack discovery path
+use Langertha::Raider::CLI::Main;
 
 BEGIN {
   my $repo = Path::Tiny::path(__FILE__)->parent->parent->absolute;
@@ -147,9 +148,8 @@ subtest 'queued singleton mission is replayed as text' => sub {
 };
 
 subtest 'raider cli accepts pack option used by hall' => sub {
-  my $repo = path(__FILE__)->parent->parent->absolute;
-  my $script = $repo->child('bin', 'raider')->slurp_utf8;
-  like($script, qr/'pack=s\@'/, 'bin/raider declares --pack option');
+  my ($opt) = Langertha::Raider::CLI::Main->new->parse_options(qw( --pack git-guru --pack polite ));
+  is_deeply($opt->{packs}, [qw( git-guru polite )], 'raider accepts repeated --pack');
 };
 
 subtest 'spawn result structure' => sub {
