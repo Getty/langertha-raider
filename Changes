@@ -28,6 +28,8 @@ Revision history for Langertha-Raider
     - Fix Telegram replies: a raider spawned for a Telegram message gets
       its bot and chat id (RAIDER_HALL_TELEGRAM_BOT/_CHAT_ID), and
       telegram_reply is bound to that chat, needing only text.
+    - Fix raider hall start/spawn/attach/logs/kill treating options as
+      positional arguments (e.g. `start --daemon DIR` ignored DIR).
     - Fix Hall singleton queue replay, --pack propagation, Telegram
       future retention, and MCP tool result handling.
     - Add `--pack NAME` CLI parsing for one-shot pack activation.

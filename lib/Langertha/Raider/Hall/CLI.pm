@@ -185,6 +185,7 @@ sub run_start {
   local @ARGV = @args;
   Getopt::Long::GetOptions(\%opt, 'daemon', 'acp-port=i', 'acp-host=s', 'help');
   return print_start_help() if $opt{help};
+  @args = @ARGV;
 
   my $dir = hall_dir(@args);
   $dir = path($dir);
@@ -328,6 +329,7 @@ sub run_spawn {
   local @ARGV = @args;
   Getopt::Long::GetOptions(\%opt, 'attach', 'help');
   return print_spawn_help() if $opt{help};
+  @args = @ARGV;
 
   my $dir = hall_dir(@args);
   die "Usage: raider hall spawn NAME MISSION [--attach]\n" unless @args >= 2;
@@ -376,6 +378,7 @@ sub run_attach {
   local @ARGV = @args;
   Getopt::Long::GetOptions(\%opt, 'help');
   return print_attach_help() if $opt{help};
+  @args = @ARGV;
 
   my $dir = hall_dir(@args);
   die "Usage: raider hall attach ID\n" unless @args;
@@ -415,6 +418,7 @@ sub run_logs {
   local @ARGV = @args;
   Getopt::Long::GetOptions(\%opt, 'follow', 'help');
   return print_logs_help() if $opt{help};
+  @args = @ARGV;
 
   my $dir = hall_dir(@args);
   die "Usage: raider hall logs ID [--follow]\n" unless @args;
@@ -450,6 +454,7 @@ sub run_kill {
   local @ARGV = @args;
   Getopt::Long::GetOptions(\%opt, 'help');
   return print_kill_help() if $opt{help};
+  @args = @ARGV;
 
   my $dir = hall_dir(@args);
   die "Usage: raider hall kill ID\n" unless @args;
