@@ -44,6 +44,12 @@ Revision history for Langertha-Raider
       working root with the private lib; perl_check says BEGIN/use run;
       real errors are no longer reported as "timeout"; perl_cpanm rejects
       targets outside the root.
+    - Explicit -m and -k beat model:/api_key: from .raider.yml, and the
+      banner shows the model the engine is actually built with.
+    - /reload and /pack keep a mission given with -M.
+    - New raider config explain [options] and REPL /config: every
+      effective setting with its source (flag, .raider.yml layer,
+      environment, default).
     - Fix Hall singleton queue replay, --pack propagation, Telegram
       future retention, and MCP tool result handling.
     - Add `--pack NAME` CLI parsing for one-shot pack activation.
