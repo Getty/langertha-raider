@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T23:38:18Z
+claimed_by: worker-followup
+class: standard
+completed: 2026-09-24T23:38:18Z
+created: 2026-09-24T23:29:23Z
+id: 46
+priority: medium
+started: 2026-09-24T23:29:44Z
+status: done
+tags:
+- bug
+- packs
+title: 'Packs.pm: Pack-Verzeichnis ohne SKILL.md crasht build_packs'
+updated: 2026-09-24T23:38:18Z
+---
+
+Aus #45: skill_text bekommt undef gegen Str-Typ. Test + Fix (skill_text optional lassen).
