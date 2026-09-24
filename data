@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-24T22:00:46Z
+claimed_by: worker-hall
+class: standard
+completed: 2026-09-24T22:00:46Z
+created: 2026-09-24T19:49:13Z
+id: 26
+priority: low
+started: 2026-09-24T21:50:55Z
+status: done
+tags:
+- bug
+- hall
+- telegram
+title: 'Telegram telegram.in: first_name/username aus chat statt from'
+updated: 2026-09-24T22:00:46Z
+---
+
+Beobachtet bei #12: telegram.in-Event nimmt first_name/username aus message.chat statt message.from (in Gruppen falsch). Klein fixen, mit #16 zusammen moeglich.
