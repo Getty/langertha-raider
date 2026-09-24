@@ -354,6 +354,8 @@ has trace => (
 
 Enable the PerlTools MCP server (perl_eval, perl_check, perl_cpanm).
 Off by default; set via C<--perl> CLI flag or C<perl: true> in F<.raider.yml>.
+Without either, the tools also come with the C<perl> pack, which is
+detected in a Perl workspace; see L</perl_tools_enabled>.
 
 =cut
 
@@ -362,6 +364,26 @@ has perl => (
   isa     => 'Bool',
   default => 0,
 );
+
+=method perl_tools_enabled
+
+Whether the PerlTools server is mounted: C<--perl> turns it on; else an
+explicit C<perl:> (in F<.raider.yml> or C<-o perl=>) decides either way;
+else it is on when an active pack requests the C<perl> tools (the bundled
+C<perl> pack, detected by F<cpanfile>, F<dist.ini>, F<Makefile.PL> or
+F<lib/**/*.pm>). Granting a pack's request here stands in for the local
+tool policy of ADR 0005, which does not exist yet; C<perl: false> is the
+local denial.
+
+=cut
+
+sub perl_tools_enabled {
+  my ($self) = @_;
+  return 1 if $self->perl;
+  my $yml = $self->_load_yml_options->{perl};
+  return $yml ? 1 : 0 if defined $yml;
+  return ( grep { $_ eq 'perl' } @{$self->packs->requested_tools} ) ? 1 : 0;
+}
 
 =attr preferred_lib_target
 
@@ -866,7 +888,7 @@ sub _build_mcps {
     push @clients, $client;
   }
 
-  if ($self->perl || $yml->{perl}) {
+  if ($self->perl_tools_enabled) {
     my $lib_target = $self->has_preferred_lib_target
       ? $self->preferred_lib_target
       : ($yml->{preferred_lib_target} // undef);

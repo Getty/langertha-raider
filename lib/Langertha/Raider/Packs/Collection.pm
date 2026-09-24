@@ -250,6 +250,25 @@ sub skill_texts {
   return @texts;
 }
 
+=method requested_tools
+
+    my @servers = @{ $collection->requested_tools };   # ['perl']
+
+The built-in tool servers the enabled packs request (C<tools:> in
+F<pack.yml>), sorted and deduplicated. A request, not a grant.
+
+=cut
+
+sub requested_tools {
+  my ($self) = @_;
+  my %seen;
+  for my $name (@{$self->enabled_pack_names}) {
+    my $pack = $self->packs_by_name->{$name} or next;
+    $seen{$_}++ for @{$pack->tools};
+  }
+  return [ sort keys %seen ];
+}
+
 =method active_pack_names
 
 Returns pack names that are currently enabled.

@@ -23,6 +23,10 @@ has extra_mcp     => (is => 'ro', isa => 'ArrayRef', default => sub { [] });
 has add_allowed_commands => (is => 'ro', isa => 'ArrayRef', default => sub { [] });
 has engine_options => (is => 'ro', isa => 'HashRef', default => sub { {} });
 
+# Built-in tool servers the pack requests (tools: in pack.yml, e.g. [perl]);
+# a request, the CLI decides whether to grant it (ADR 0005).
+has tools         => (is => 'ro', isa => 'ArrayRef[Str]', default => sub { [] });
+
 # Default detection rule from pack.yml; validated when it is evaluated.
 has detect        => (is => 'ro', predicate => 'has_detect');
 

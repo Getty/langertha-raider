@@ -124,6 +124,7 @@ sub build_packs {
         extra_mcp     => $config->{mcp} // [],
         add_allowed_commands => $config->{add_allowed_commands} // [],
         engine_options => $config->{engine_options} // {},
+        tools         => $config->{tools} // [],
         ( exists $config->{detect} ? ( detect => $config->{detect} ) : () ),
       });
 
