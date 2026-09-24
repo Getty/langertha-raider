@@ -45,13 +45,25 @@ sub cwd {
   path('.')->absolute->stringify;
 }
 
+# DIR is only ever the first positional and is removed from @$args when
+# taken. Where it is the sole positional (start, stop, status, ps, install)
+# any existing directory counts. Where $need more positionals (NAME, ID)
+# must follow, it counts only if they remain and it looks like a hall, so a
+# NAME or ID that happens to be a directory is not swallowed.
 sub hall_dir {
-  my (@args) = @_;
-  return cwd unless @args && $args[0] !~ /^-/;
-  my $d = $args[0];
-  return cwd unless -d $d;
-  shift @args;
-  return path($d // '.')->absolute->stringify;
+  my ( $args, $need ) = @_;
+  $need //= 0;
+  my $d = $args->[0];
+  return cwd unless defined $d && $d !~ /^-/ && -d $d;
+  return cwd if $need && ( @$args <= $need || !is_hall_dir($d) );
+  shift @$args;
+  return path($d)->absolute->stringify;
+}
+
+sub is_hall_dir {
+  my ( $d ) = @_;
+  return -e path($d)->child('.raider-hall.yml')
+    || -e path($d)->child('.raider-hall.socket');
 }
 
 sub usage {
@@ -187,7 +199,7 @@ sub run_start {
   return print_start_help() if $opt{help};
   @args = @ARGV;
 
-  my $dir = hall_dir(@args);
+  my $dir = hall_dir(\@args);
   $dir = path($dir);
 
   # --acp-port wins over yml; persist nothing, pass through env.
@@ -243,7 +255,7 @@ EOF
 
 sub run_stop {
   my (@args) = @_;
-  my $dir = hall_dir(@args);
+  my $dir = hall_dir(\@args);
   $dir = path($dir);
 
   my $pidfile = $dir->child('.raider-hall.pid');
@@ -261,7 +273,7 @@ sub run_stop {
 
 sub run_status {
   my (@args) = @_;
-  my $dir = hall_dir(@args);
+  my $dir = hall_dir(\@args);
   my $socket = path($dir)->child('.raider-hall.socket');
   die "Hall not running (no socket found)\n" unless -e $socket;
 
@@ -272,7 +284,7 @@ sub run_status {
 
 sub run_ps {
   my (@args) = @_;
-  my $dir = hall_dir(@args);
+  my $dir = hall_dir(\@args);
   my $socket = path($dir)->child('.raider-hall.socket');
   die "Hall not running (no socket found)\n" unless -e $socket;
 
@@ -331,7 +343,7 @@ sub run_spawn {
   return print_spawn_help() if $opt{help};
   @args = @ARGV;
 
-  my $dir = hall_dir(@args);
+  my $dir = hall_dir(\@args, 2);
   die "Usage: raider hall spawn NAME MISSION [--attach]\n" unless @args >= 2;
 
   my $name = shift @args;
@@ -380,7 +392,7 @@ sub run_attach {
   return print_attach_help() if $opt{help};
   @args = @ARGV;
 
-  my $dir = hall_dir(@args);
+  my $dir = hall_dir(\@args, 1);
   die "Usage: raider hall attach ID\n" unless @args;
 
   my $id = shift @args;
@@ -420,7 +432,7 @@ sub run_logs {
   return print_logs_help() if $opt{help};
   @args = @ARGV;
 
-  my $dir = hall_dir(@args);
+  my $dir = hall_dir(\@args, 1);
   die "Usage: raider hall logs ID [--follow]\n" unless @args;
 
   my $id = shift @args;
@@ -456,7 +468,7 @@ sub run_kill {
   return print_kill_help() if $opt{help};
   @args = @ARGV;
 
-  my $dir = hall_dir(@args);
+  my $dir = hall_dir(\@args, 1);
   die "Usage: raider hall kill ID\n" unless @args;
 
   my $id = shift @args;
@@ -495,7 +507,7 @@ sub run_install {
     'acp-port=i', 'acp-host=s', 'stdout', 'help');
   return print_install_help() if $opt{help};
 
-  my $dir = hall_dir(@ARGV);
+  my $dir = hall_dir(\@ARGV);
   $dir = path($dir);
   my $cwd = $dir->stringify;
   my $unit_name = $opt{name} // 'raider-hall';

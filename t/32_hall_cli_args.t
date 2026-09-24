@@ -103,4 +103,93 @@ subtest 'kill: ID after --' => sub {
   is( $p, { cmd => 'kill', id => 'r42' }, 'kill -- r42' );
 };
 
+# DIR is only ever the first positional and must be removed from the list
+# before NAME/ID/MISSION are read (k27). Where a NAME or ID follows, only a
+# directory that looks like a hall (.raider-hall.yml or .raider-hall.socket)
+# counts as DIR, and never the last remaining positional.
+
+# Run a subcommand from a plain cwd (no hall) with a hall at $hall_dir.
+# Returns the payload sent and the socket it was sent to.
+sub run_in {
+  my ( $cwd, @argv ) = @_;
+  chdir $cwd or die "chdir $cwd: $!";
+  my ( $sent, $socket );
+  no warnings 'redefine';
+  local *Langertha::Raider::Hall::CLI::_send_command = sub {
+    my ( $s, $msg ) = @_;
+    ( $socket, $sent ) = ( "$s", $msg->{payload} );
+    return { id => 'r1', pid => 1, slot => 's1', log_path => 'x', log => '',
+      killed => 1, raiders => [] };
+  };
+  my $out = '';
+  my $err;
+  {
+    local *STDOUT;
+    open STDOUT, '>', \$out or die $!;
+    $err = dies { Langertha::Raider::Hall::CLI->main(@argv) };
+  }
+  chdir $orig_cwd or die "chdir $orig_cwd: $!";
+  return ( $sent, $socket, $err, $out );
+}
+
+sub new_hall {
+  my $dir = path( tempdir( CLEANUP => 1 ) )->realpath;
+  $dir->child('.raider-hall.socket')->touch;
+  return $dir;
+}
+
+subtest 'DIR is consumed before the positionals that follow it' => sub {
+  my $hall = new_hall();
+  my $cwd  = tempdir( CLEANUP => 1 );
+  my $sock = $hall->child('.raider-hall.socket')->stringify;
+
+  my ( $p, $s, $err ) = run_in( $cwd, 'spawn', "$hall", 'Bjorn', 'raid', 'the', 'coast' );
+  is( $err, undef, 'spawn DIR NAME MISSION lives' );
+  is( $p, { cmd => 'spawn', name => 'Bjorn', mission => 'raid the coast', attach => 0 },
+    'spawn: NAME and MISSION follow DIR' );
+  is( $s, $sock, 'spawn: socket of DIR' );
+
+  for my $cmd (qw( attach logs kill )) {
+    ( $p, $s, $err ) = run_in( $cwd, $cmd, "$hall", 'r42' );
+    is( $err, undef, "$cmd DIR ID lives" );
+    is( $p, { cmd => $cmd, id => 'r42' }, "$cmd: ID follows DIR" );
+    is( $s, $sock, "$cmd: socket of DIR" );
+  }
+
+  for my $cmd (qw( status ps )) {
+    ( $p, $s, $err ) = run_in( $cwd, $cmd, "$hall" );
+    is( $err, undef, "$cmd DIR lives" );
+    is( $s, $sock, "$cmd: socket of DIR" );
+  }
+
+  $hall->child('.raider-hall.pid')->spew('not-a-pid');
+  ( undef, undef, $err ) = run_in( $cwd, 'stop', "$hall" );
+  like( $err, qr/Invalid PID file/, 'stop: reads the pidfile of DIR' );
+
+  my $out;
+  ( undef, undef, $err, $out ) = run_in( $cwd, 'install', "$hall", '--stdout' );
+  is( $err, undef, 'install DIR --stdout lives' );
+  like( $out, qr/^WorkingDirectory=\Q$hall\E$/m, 'install: unit runs in DIR' );
+};
+
+subtest 'a NAME or ID that happens to be a directory is not DIR' => sub {
+  my $hall = new_hall();
+  $hall->child('Bjorn')->mkpath;          # plain directory, not a hall
+  my $inner = $hall->child('r42');        # even a hall-looking one ...
+  $inner->mkpath;
+  $inner->child('.raider-hall.yml')->touch;
+  my $sock = $hall->child('.raider-hall.socket')->stringify;
+
+  my ( $p, $s ) = run_in( "$hall", 'spawn', 'Bjorn', 'raid' );
+  is( $p, { cmd => 'spawn', name => 'Bjorn', mission => 'raid', attach => 0 },
+    'spawn: plain directory NAME stays the NAME' );
+  is( $s, $sock, 'spawn: socket of cwd' );
+
+  for my $cmd (qw( attach logs kill )) {
+    ( $p, $s ) = run_in( "$hall", $cmd, 'r42' );
+    is( $p, { cmd => $cmd, id => 'r42' }, "$cmd: ... is still the ID when it is the only positional" );
+    is( $s, $sock, "$cmd: socket of cwd" );
+  }
+};
+
 done_testing;
