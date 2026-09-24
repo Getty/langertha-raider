@@ -920,10 +920,8 @@ into the underlying L<Langertha::Raider>. An explicit L</mission> is kept.
 sub reload_mission {
   my ($self) = @_;
   my $new = $self->_build_mission;
-  # Raider's `mission` is 'ro' and has no writer; set it through its
-  # attribute (type-checked) to hot-swap without dropping history or metrics.
-  my $raider = $self->_raider;
-  $raider->meta->find_attribute_by_name('mission')->set_value($raider, $new);
+  # Hot-swap on the running raider, history and metrics stay.
+  $self->_raider->_set_mission($new);
   return $new;
 }
 

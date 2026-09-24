@@ -120,6 +120,7 @@ has mission => (
   is => 'ro',
   isa => 'Str',
   predicate => 'has_mission',
+  writer => '_set_mission',
 );
 
 =attr mission

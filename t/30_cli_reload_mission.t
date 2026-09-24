@@ -48,4 +48,11 @@ subtest 'generated mission picks up .raider.md on reload' => sub {
   is(scalar @{ $raider->history }, 1, 'history kept');
 };
 
+subtest 'raider mission writer' => sub {
+  my $raider = app()->raider;
+  $raider->_set_mission('Swapped.');
+  is($raider->mission, 'Swapped.', '_set_mission sets the mission');
+  like(dies { $raider->_set_mission([]) }, qr/Str/, 'type-checked');
+};
+
 done_testing;
