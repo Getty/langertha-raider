@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T22:18:40Z
+claimed_by: worker-misc
+class: standard
+completed: 2026-09-24T22:18:40Z
+created: 2026-09-24T22:08:05Z
+id: 38
+priority: low
+started: 2026-09-24T22:08:12Z
+status: done
+tags:
+- bug
+- perl-tools
+title: 'PerlTools: Retry nach Auto-Install ohne Fehlerbehandlung'
+updated: 2026-09-24T22:18:40Z
+---
+
+Aus #36: in perl_eval ist der Retry nach Auto-Install nicht in die Fehlerbehandlung des ersten Laufs eingepackt; Timeout im Retry geht als Exception an die MCP-Schicht statt error=>timeout. Kind wird gekillt. Nebenbei: t/20_perltools.t warnt "cannot remove path when cwd is ..." beim Cleanup.
