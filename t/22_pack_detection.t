@@ -197,7 +197,6 @@ subtest 'invalid rules stop the start' => sub {
   my $bad = path(tempdir(CLEANUP => 1));
   $bad->child('det-broken')->mkpath;
   $bad->child('det-broken', 'pack.yml')->spew_utf8("detect:\n  must: [ { dir: '../x' } ]\n");
-  $bad->child('det-broken', 'SKILL.md')->spew_utf8("x\n");
   local $ENV{RAIDER_PACK_DIRS} = "$pack_dir:$bad";
   like(dies { app(workspace())->packs }, qr/Invalid detect rule .*det-broken\/pack\.yml detect\.must\[0\]: dir must not contain '\.\.'/,
     'a broken pack default names the pack file');

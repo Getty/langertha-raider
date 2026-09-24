@@ -103,4 +103,20 @@ subtest 'unknown pack name returns undef from pack_info' => sub {
   $coll->enable('nonexistent');  # should be no-op
 };
 
+subtest 'a pack without SKILL.md loads' => sub {
+  my $dir = Path::Tiny->tempdir;
+  $dir->child('bare')->mkpath;
+  $dir->child('bare', 'pack.yml')->spew_utf8("exclusive_group: power\n");
+  local $ENV{RAIDER_PACK_DIRS} = "$dir";
+
+  my $coll = eval { Langertha::Raider::Packs::build_packs(root => path('share')->absolute) };
+  ok($coll, 'build_packs survives a pack without SKILL.md') or return diag($@);
+  my $pack = $coll->packs_by_name->{bare};
+  ok($pack && !$pack->has_skill_text, 'bare pack loaded without skill text');
+
+  $coll->enable('bare');
+  ok($coll->is_active('bare'), 'bare pack can be enabled');
+  unlike(join("\n", $coll->skill_texts), qr/Pack: bare/, 'no skill text contributed');
+};
+
 done_testing;

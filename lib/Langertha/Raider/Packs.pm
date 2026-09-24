@@ -112,13 +112,10 @@ sub build_packs {
         $config = eval { YAML::PP->new->load_string($yml_file->slurp_utf8) } // {};
       }
 
-      my $skill_text;
-      $skill_text = $skill_file->slurp_utf8 if -f $skill_file;
-
       my $pack = Langertha::Raider::Packs::Pack->new({
         name          => $name,
         path          => $pack_dir->stringify,
-        skill_text    => $skill_text,
+        ( -f $skill_file ? ( skill_text => $skill_file->slurp_utf8 ) : () ),
         exclusive_group => $config->{exclusive_group} // 'power',
         enabled_by_default => $config->{enabled_by_default} // 0,
         extra_mcp     => $config->{mcp} // [],
