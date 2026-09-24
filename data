@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-24T22:00:58Z
+claimed_by: worker-engine
+class: standard
+completed: 2026-09-24T22:00:58Z
+created: 2026-09-24T15:30:15Z
+id: 15
+priority: medium
+started: 2026-09-24T21:51:20Z
+status: done
+tags:
+- bug
+- engine
+- m0
+title: Plugin-Self-Tools werden doppelt gelistet
+updated: 2026-09-24T22:00:58Z
+---
+
+Reproduziert (Ausgabe my_tool,my_tool): Raider.pm:1542-1545 nimmt sie in die Inline-MCP auf (gelistet :1503) und haengt sie :1527-1531 zusaetzlich direkt an. Kein Test vorhanden. Fix + Regressionstest.
