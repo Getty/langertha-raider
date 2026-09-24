@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-09-24T22:27:26Z
+claimed_by: worker-cli2
+class: standard
+completed: 2026-09-24T22:27:26Z
+created: 2026-09-24T02:23:52Z
+id: 10
+priority: low
+started: 2026-09-24T22:02:44Z
+status: done
+tags:
+- naming
+title: Leftover app-raider identifiers (MCP server names, Claude skill name/path)
+updated: 2026-09-24T22:27:26Z
+---
+
+Lowercase app-raider strings were left unchanged (not part of the confirmed rename): MCP server names app-raider-files/-web/-perl/-hall (FileTools, WebTools, PerlTools, HallTools), Skill.pm default skill name app-raider and path .claude/skills/app-raider/SKILL.md (also bin/raider help, README). Renaming changes user-visible output paths; decide.
