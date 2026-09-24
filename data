@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-24T23:29:19Z
+claimed_by: worker-detect
+class: standard
+completed: 2026-09-24T23:29:19Z
+created: 2026-09-24T23:09:30Z
+id: 45
+priority: low
+started: 2026-09-24T23:09:55Z
+status: done
+tags:
+- packs
+- detection
+- perl-tools
+title: 'Pack-Detektion 3: Perl als Pack mit Standardregel (ADR 0012)'
+updated: 2026-09-24T23:29:19Z
+---
+
+ADR 0012, nach Detektion 2. perl: true/--perl als Pack mit Standardregel (cpanfile/dist.ini/Makefile.PL/lib/**/*.pm) abbilden; Aussenvertrag von perl: true/--perl bleibt. Pack fordert perl-Tools an, gewaehrt sie nicht (ADR 0005) - bis Policy existiert, bestehendes Verhalten.
