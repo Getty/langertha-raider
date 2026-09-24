@@ -6,8 +6,8 @@ Revision history for Langertha-Raider
       agent engine extracted from Langertha core. Langertha::Raider,
       Langertha::Raider::Result and the Langertha::Raid orchestration layer
       (Raid::Loop, Raid::Parallel, Raid::Sequential) ship here under their
-      own names; Langertha::Raider::Result is self-contained, and the
-      current-protocol MCP client is Langertha::Raider::MCP. Every
+      own names; Langertha::Raider::Result is self-contained, and MCP
+      tools go through Net::Async::MCP 0.004 or higher. Every
       App::Raider::* module is renamed to Langertha::Raider::*, with the CLI
       entry point App::Raider becoming Langertha::Raider::CLI; the raider and
       raider-hall executables keep their names. Requires Langertha 0.503.
@@ -30,6 +30,20 @@ Revision history for Langertha-Raider
       telegram_reply is bound to that chat, needing only text.
     - Fix raider hall start/spawn/attach/logs/kill treating options as
       positional arguments (e.g. `start --daemon DIR` ignored DIR).
+    - raider hall spawn/attach/logs/kill take an optional hall DIR as
+      first argument without it leaking into NAME, MISSION or ID; a name
+      that is a plain directory stays a name.
+    - raider hall logs --follow prints new log output until the raider
+      exits.
+    - telegram.in events carry the sender's first_name and username, also
+      in group chats.
+    - Document that engine: is optional for hall raiders, and the hall
+      MCP adapter (.raider-hall.mcp) as not implemented.
+    - Fix plugin self-tools being offered to the model twice per raid.
+    - Fix perl tools: perl_eval and perl_check run the current perl in the
+      working root with the private lib; perl_check says BEGIN/use run;
+      real errors are no longer reported as "timeout"; perl_cpanm rejects
+      targets outside the root.
     - Fix Hall singleton queue replay, --pack propagation, Telegram
       future retention, and MCP tool result handling.
     - Add `--pack NAME` CLI parsing for one-shot pack activation.
