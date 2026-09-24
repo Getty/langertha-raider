@@ -14,12 +14,12 @@ use Term::ReadLine;                   # Core; upgrades to Gnu if installed
 use IO::Prompt::Tiny qw( prompt );    # Fallback when Gnu is not available
 use Path::Tiny;
 use Langertha::Raider::CLI;
+use Langertha::Raider::CLI::Commands;
 use Langertha::Raider::CLI::Output;
 use Langertha::Raider::Config;
 use Langertha::Raider::ACP::CLI;
 use Langertha::Raider::Hall::CLI;
 use Langertha::Raider::Skill;
-use Langertha::Raider;
 
 binmode STDOUT, ':encoding(UTF-8)';
 binmode STDIN,  ':encoding(UTF-8)';
@@ -193,6 +193,7 @@ my %saved_now = $config_cmd ? ()
 $args{cli_skill_sources} = \@skill_specs if @skill_specs;
 
 my $app = Langertha::Raider::CLI->new(%args);
+my $commands = Langertha::Raider::CLI::Commands->new(app => $app, output => $out);
 
 if ($config_cmd) {
   print_config_report($app->explain_config);
@@ -285,329 +286,10 @@ sub banner {
         c(accent => "/quit"), c(meta => " to leave"), "\n\n";
 }
 
-sub collapse_model_list {
-  my ($list, $current) = @_;
-  my %all    = map { $_ => 1 } @$list;
-  my %groups;   # base => [snapshot variants]
-  my %is_snap;  # id => 1
-
-  for my $id (@$list) {
-    if (my ($base) = ($id =~ /^(.+?)-\d{4}-\d{2}-\d{2}(?:-.+)?$/)) {
-      push @{$groups{$base}}, $id;
-      $is_snap{$id} = 1;
-    }
-    elsif (my ($base2) = ($id =~ /^(.+)-\d{4}$/)) {
-      push @{$groups{$base2}}, $id;
-      $is_snap{$id} = 1;
-    }
-  }
-
-  my @rows;
-  for my $id (sort @$list) {
-    next if $is_snap{$id};
-    my @snaps = sort @{$groups{$id} // []};
-    push @rows, {
-      id      => $id,
-      snaps   => \@snaps,
-      current => ($id eq $current || !!(grep { $_ eq $current } @snaps)),
-    };
-  }
-
-  # orphaned snapshot families whose base isn't a standalone model
-  my %seen = map { $_->{id} => 1 } @rows;
-  for my $base (sort keys %groups) {
-    next if $seen{$base};
-    my @snaps = sort @{$groups{$base}};
-    push @rows, {
-      id      => $base,
-      snaps   => \@snaps,
-      orphan  => 1,
-      current => !!(grep { $_ eq $current } @snaps),
-    };
-  }
-
-  return sort { $a->{id} cmp $b->{id} } @rows;
-}
-
 sub print_config_report { $out->config_report(@_) }
 sub print_agent { $out->say_agent(@_) }
 sub print_meta  { $out->say_meta(@_) }
 sub print_err   { $out->say_error(@_) }
-
-sub handle_slash {
-  my ($app, $line) = @_;
-  my ($cmd, @rest) = split /\s+/, $line;
-  $cmd =~ s{^/}{};
-  my $arg = join ' ', @rest;
-
-  if ($cmd eq 'help') {
-    print_meta("commands:");
-    print_meta("  /help                 show this help");
-    print_meta("  /clear                reset conversation history");
-    print_meta("  /metrics              show cumulative raid metrics");
-    print_meta("  /stats                show token usage (when trace is on)");
-    print_meta("  /reload               reload .raider.md into the mission");
-    print_meta("  /prompt               launch the prompt-builder (edits .raider.md)");
-    print_meta("  /skill [PATH]         export plain-markdown skill doc");
-    print_meta("  /skill-claude [PATH]  export Claude Code SKILL.md with frontmatter");
-    print_meta("  /config               show each setting and where it came from");
-    print_meta("  /model [NAME]         set+save model to .raider.yml");
-    print_meta("  /model list [FILTER]  list available models (optionally filtered)");
-    print_meta("  /packs                list all available packs and their state");
-    print_meta("  /pack on NAME         enable a pack (toggle on)");
-    print_meta("  /pack off NAME        disable a pack");
-    print_meta("  /pack NAME            toggle pack on/off");
-    print_meta("  /quit /exit :q        leave the REPL");
-    return;
-  }
-  if ($cmd eq 'clear') {
-    $app->raider->clear_history;
-    my $t = $app->trace_plugin;
-    $t->token_stats({ prompt => 0, completion => 0, total => 0, calls => 0 }) if $t;
-    print_meta("history cleared.");
-    return;
-  }
-  if ($cmd eq 'metrics') {
-    my $m = $app->raider->metrics;
-    print_meta(sprintf(
-      "raids=%d iterations=%d tool_calls=%d time_ms=%d",
-      $m->{raids}, $m->{iterations}, $m->{tool_calls}, $m->{time_ms},
-    ));
-    return;
-  }
-  if ($cmd eq 'stats') {
-    my $s = $app->token_stats;
-    unless ($s) {
-      print_meta("stats unavailable (trace is off — start without --no-trace).");
-      return;
-    }
-    print_meta(sprintf(
-      "llm calls: %d | tokens in: %d | out: %d | total: %d",
-      $s->{calls}, $s->{prompt}, $s->{completion}, $s->{total},
-    ));
-    return;
-  }
-  if ($cmd eq 'reload') {
-    my $new = $app->reload_mission;
-    my $file = path($app->root)->child('.raider.md');
-    my $status = -f $file ? "custom (.raider.md loaded)" : "Langertha (default, no .raider.md)";
-    print_meta("mission reloaded: $status (" . length($new) . " chars)");
-    return;
-  }
-  if ($cmd eq 'prompt') {
-    run_prompt_builder($app);
-    return;
-  }
-  if ($cmd eq 'config') {
-    my $report = eval { $app->explain_config };
-    unless ($report) {
-      my $err = $@; chomp $err;
-      print_err($err);
-      return;
-    }
-    print_config_report($report);
-    return;
-  }
-  if ($cmd eq 'skill') {
-    my $path = $arg || Path::Tiny::path($app->root)->child('RAIDER-SKILL.md')->stringify;
-    my $p = Langertha::Raider::Skill->new(app => $app)->write_markdown($path);
-    print_meta("wrote $p");
-    return;
-  }
-  if ($cmd eq 'skill-claude') {
-    my $path = length $arg ? $arg : undef;
-    my $skill = Langertha::Raider::Skill->new(app => $app);
-    my $p = $skill->write_claude_skill($path);
-    print_meta("wrote $p");
-    if (my $old = $skill->legacy_claude_skill) {
-      print_meta("note: $old is left over from an older raider, remove it");
-    }
-    return;
-  }
-  if ($cmd eq 'model') {
-    my ($subcmd, $filter) = split /\s+/, $arg, 2;
-
-    if (!length $arg || ($subcmd eq 'list')) {
-      my $current = $app->has_model ? $app->model : '';
-      print c(meta => "engine:  "), c(title => $app->engine_name), "\n";
-      print c(meta => "model:   "), c(title => length $current ? $current : '(engine default)'), "\n";
-      my $engine = eval { $app->_engine };
-      if ($engine && $engine->can('list_models')) {
-        my $list = eval { $engine->list_models };
-        if ($@) {
-          my $err = $@; chomp $err;
-          print_err("list_models failed: $err");
-        }
-        elsif (@$list) {
-          my @filtered = length($filter // '')
-            ? grep { index($_, $filter) >= 0 } @$list
-            : @$list;
-          my @rows    = collapse_model_list(\@filtered, $current);
-          my $total   = scalar @rows;
-          my $cap     = (defined $subcmd && $subcmd eq 'list') ? $total : 20;
-          my @show    = @rows[0 .. ($cap < $total ? $cap - 1 : $total - 1)];
-          print c(meta => "models" . (length($filter // '') ? " (/$filter/)" : "") . ":"), "\n";
-          for my $row (@show) {
-            my $star  = $row->{current} ? c(accent => '*') : ' ';
-            my $name  = c(title => $row->{id});
-            my $snaps = @{$row->{snaps}}
-              ? c(meta => '  [+' . scalar(@{$row->{snaps}}) . (scalar(@{$row->{snaps}}) == 1 ? ' snapshot]' : ' snapshots]'))
-              : '';
-            print "  $star $name$snaps\n";
-          }
-          if ($cap < $total) {
-            print c(meta => "    … $cap of $total shown — /model list [filter] for all"), "\n";
-          }
-        }
-      }
-      return;
-    }
-    unless (eval { $app->config->set_model($arg); 1 }) {
-      my $err = $@; chomp $err;
-      print_err($err);
-      return;
-    }
-    print c(meta => "model saved: "), c(title => $arg), c(meta => " (takes effect on next start)"), "\n";
-    return;
-  }
-  if ($cmd eq 'packs') {
-    my $collection = $app->packs;
-    my @all = @{$collection->all_pack_names};
-    if (!@all) {
-      print_meta("no packs available.");
-      return;
-    }
-    print_meta("packs:");
-    for my $name (sort @all) {
-      my $info = $collection->pack_info($name);
-      my $active = $info->{is_active} ? c(accent => '*') : ' ';
-      my $grp = $info->{exclusive_group};
-      print "  $active $name ", c(meta => "($grp)"), "\n";
-    }
-    return;
-  }
-  if ($cmd eq 'pack') {
-    my $collection = $app->packs;
-    my ($subcmd, $name) = split /\s+/, $arg, 2;
-    $name //= '';
-    $subcmd //= '';
-
-    if (!$name && ($subcmd eq '' || $subcmd eq 'list')) {
-      # /packs was handled above, so empty pack goes to error
-      print_err("usage: /pack on NAME, /pack off NAME, or /pack NAME (toggle)");
-      return;
-    }
-
-    if ($subcmd eq 'on') {
-      $collection->enable($name);
-      $app->reload_mission;
-      print_meta("pack enabled: $name");
-      return;
-    }
-    if ($subcmd eq 'off') {
-      $collection->disable($name);
-      $app->reload_mission;
-      print_meta("pack disabled: $name");
-      return;
-    }
-
-    # Toggle
-    if ($subcmd eq '') {
-      $subcmd = $name;
-      $name = '';
-    }
-    if ($name eq '' && grep { $subcmd eq $_ } @{$collection->all_pack_names}) {
-      # Direct /pack NAME (no subcmd)
-      $name = $subcmd;
-      $subcmd = '';
-    }
-
-    if ($name eq '') {
-      print_err("usage: /pack on NAME, /pack off NAME, or /pack NAME (toggle)");
-      return;
-    }
-
-    if ($subcmd eq '' || $subcmd eq 'toggle') {
-      $collection->toggle($name);
-      $app->reload_mission;
-      my $now = $collection->is_active($name) ? 'enabled' : 'disabled';
-      print_meta("pack $name $now.");
-      return;
-    }
-
-    print_err("unknown /pack subcommand: $subcmd (try /help)");
-    return;
-  }
-  print_err("unknown command: /$cmd (try /help)");
-}
-
-sub run_prompt_builder {
-  my ($app) = @_;
-  my $file = path($app->root)->child('.raider.md');
-  my $current = -f $file ? $file->slurp_utf8 : '(no .raider.md yet — Langertha default persona is active)';
-
-  my $meta_mission = <<"EOM";
-You are the raider prompt-builder. Your only job right now is to help the user
-craft a .raider.md file that customizes the persona and instructions of
-"raider" (the CLI agent; the default persona is Langertha, a viking
-shield-maiden).
-
-Current .raider.md content:
----
-$current
----
-
-Rules:
-  - Converse naturally with the user. Ask what persona, tone, rules or
-    constraints they want.
-  - When the user is satisfied, use write_file to save to:
-      @{[ $file ]}
-  - After writing, confirm what you saved and tell the user they can type
-    "/done" to return to the main agent (the main agent will auto-reload the
-    new persona).
-  - If the user asks you to cancel, do not write anything; just confirm.
-  - Do NOT call bash or any tool other than read_file / write_file / edit_file
-    during this session.
-EOM
-
-  my $builder_raider = Langertha::Raider->new(
-    engine         => $app->_engine,
-    mission        => $meta_mission,
-    max_iterations => 20,
-  );
-
-  print_meta("entering prompt-builder. /done to return, /cancel to discard.");
-  my $ps = 'raider:prompt> ';
-
-  while (1) {
-    print $ps;
-    my $line = <STDIN>;
-    last unless defined $line;
-    chomp $line;
-    $line =~ s/^\s+|\s+$//g;
-    next unless length $line;
-
-    if ($line =~ m{^/(?:done|back|exit|quit)$}i) {
-      my $new = $app->reload_mission;
-      print_meta("prompt-builder finished. mission reloaded (" . length($new) . " chars).");
-      last;
-    }
-    if ($line =~ m{^/cancel$}i) {
-      print_meta("prompt-builder cancelled.");
-      last;
-    }
-
-    my $f = $builder_raider->raid_f($line);
-    $app->loop->await($f);
-    my $r = eval { $f->get };
-    if ($@) {
-      my $err = $@; chomp $err;
-      print_err($err);
-      next;
-    }
-    print_agent("$r");
-  }
-}
 
 # --- Run one prompt -----------------------------------------------------
 
@@ -730,7 +412,7 @@ if ($opt{interactive}) {
   banner($app, $impl, \@active_profiles, \%saved_now);
 
   if ($opt{customize_prompt}) {
-    run_prompt_builder($app);
+    $commands->cmd_prompt;
   }
 
   run_one(join(' ', @ARGV)) if @ARGV;
@@ -745,7 +427,7 @@ if ($opt{interactive}) {
     }
     if ($line =~ m{^/}) {
       $term->addhistory($line) if $have_gnu;
-      handle_slash($app, $line);
+      $commands->dispatch($line);
       next;
     }
 

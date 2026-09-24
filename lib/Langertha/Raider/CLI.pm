@@ -925,6 +925,20 @@ sub reload_mission {
   return $new;
 }
 
+=method mission_source
+
+Where L</mission> comes from: C<-M> for a mission passed to the
+constructor, C<.raider.md> when that file customizes the generated one,
+C<default> otherwise.
+
+=cut
+
+sub mission_source {
+  my ($self) = @_;
+  return '-M' if $self->_has_explicit_mission;
+  return -f Path::Tiny::path($self->root)->child('.raider.md') ? '.raider.md' : 'default';
+}
+
 =method explain_config
 
     my $report = $app->explain_config;
