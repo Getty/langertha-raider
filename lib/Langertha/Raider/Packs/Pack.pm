@@ -5,7 +5,9 @@ our $VERSION = '0.503';
 =head1 DESCRIPTION
 
 Holds one pack loaded by L<Langertha::Raider::Packs>: its skill text,
-exclusive group and the MCP servers, commands and engine options it adds.
+exclusive group, the MCP servers, commands and engine options it adds, and
+its default detection rule (C<detect:> in F<pack.yml>, see
+L<Langertha::Raider::Detect>).
 
 =cut
 
@@ -20,6 +22,9 @@ has enabled_by_default => (is => 'ro', isa => 'Bool', default => 0);
 has extra_mcp     => (is => 'ro', isa => 'ArrayRef', default => sub { [] });
 has add_allowed_commands => (is => 'ro', isa => 'ArrayRef', default => sub { [] });
 has engine_options => (is => 'ro', isa => 'HashRef', default => sub { {} });
+
+# Default detection rule from pack.yml; validated when it is evaluated.
+has detect        => (is => 'ro', predicate => 'has_detect');
 
 __PACKAGE__->meta->make_immutable;
 

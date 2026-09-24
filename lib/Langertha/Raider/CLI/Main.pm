@@ -43,8 +43,8 @@ error (with C<--json>, the output is the C<{error, elapsed}> document).
 =item C<2> -- usage error: unknown option, a C<-o> that is not
 C<KEY=VALUE>, an unknown C<config> subcommand, or no prompt.
 
-=item C<3> -- configuration error: F<.raider.yml> cannot be read, or the
-engine is unknown.
+=item C<3> -- configuration error: F<.raider.yml> cannot be read, the
+engine is unknown, or a pack detection rule is invalid.
 
 =back
 
@@ -126,6 +126,7 @@ Options:
                            -o temperature=0.2 -o response_size=4096
                            Merged over .raider.yml; CLI wins. raider's own
                            .raider.yml keys (perl, packs=a,b, skills=a,b,
+                           no_detect=a,b, detect=false,
                            preferred_lib_target, engine) configure raider.
   -r, --root DIR           Working directory (default: cwd). File tools are
                            confined to this directory.
@@ -139,6 +140,10 @@ Options:
       --no-trace           Hide live tool-call progress output
       --perl               Enable perl_eval / perl_check / perl_cpanm tools
       --pack NAME          Enable a bundled pack (repeatable)
+      --no-pack NAME       Switch a pack off, also a detected or default
+                           one (repeatable)
+      --no-detect          Do not activate packs by workspace detection
+                           (--detect forces it on over detect: false)
       --customize-prompt   Launch the prompt-builder at startup
       --claude             Load Claude Code layout: CLAUDE.md +
                            .claude/skills/*/SKILL.md.
@@ -172,7 +177,7 @@ usage error.
 
 sub parse_options {
   my ( $self, @argv ) = @_;
-  my %opt = ( packs => [], skill_dirs => [] );
+  my %opt = ( packs => [], no_packs => [], skill_dirs => [] );
   my @raw_engine_opts;
   my $parser = Getopt::Long::Parser->new(config => [qw( no_ignore_case bundling )]);
   my $ok = do {
@@ -191,6 +196,8 @@ sub parse_options {
       'trace!'                => \$opt{trace},
       'perl'                  => \$opt{perl},
       'pack=s@'               => $opt{packs},
+      'no-pack=s@'            => $opt{no_packs},
+      'detect!'               => \$opt{detect},
       'customize-prompt'      => \$opt{customize_prompt},
       'claude'                => \$opt{profile_claude},
       'openai|codex'          => \$opt{profile_openai},
@@ -237,11 +244,12 @@ JSON document.
 sub app_args {
   my ( $self, $opt ) = @_;
   my %args;
-  for my $key (qw( engine model root mission api_key trace perl max_iterations )) {
+  for my $key (qw( engine model root mission api_key trace perl detect max_iterations )) {
     $args{$key} = $opt->{$key} if defined $opt->{$key};
   }
   $args{trace}          = 0                        if $opt->{json} && !defined $opt->{trace};
   $args{pack_names}     = $opt->{packs}            if @{ $opt->{packs} // [] };
+  $args{no_pack_names}  = $opt->{no_packs}         if @{ $opt->{no_packs} // [] };
   $args{engine_options} = $opt->{engine_options}   if %{ $opt->{engine_options} // {} };
   return %args;
 }
@@ -325,8 +333,9 @@ sub run {
   my %saved_now = $config_cmd ? ()
     : map { $_ => 1 } grep { !ref } $config->add_skills(@persist_skills);
 
+  # Unknown engine or an invalid detection rule: stop before anything runs.
   my $app = $self->app_class->new(%args);
-  unless (eval { $app->_engine_class; 1 }) {
+  unless (eval { $app->_engine_class; $app->packs; 1 }) {
     $self->_warn($@);
     return EXIT_CONFIG;
   }

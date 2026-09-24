@@ -6,6 +6,7 @@ use namespace::autoclean;
 use Carp qw( croak );
 use Path::Tiny;
 use YAML::PP ();
+use Langertha::Raider::Detect;
 
 =head1 SYNOPSIS
 
@@ -31,7 +32,7 @@ The file is read in three layers, later ones winning:
 =over
 
 =item C<top> -- every top-level key whose value is not a hash (plus
-C<skills>, which may be one)
+C<skills> and C<detect>, which may be one)
 
 =item C<default> -- the C<default:> section
 
@@ -50,7 +51,7 @@ error: readers croak and the writer refuses to overwrite it.
 =cut
 
 # Keys that configure raider itself and never reach the engine constructor.
-my %APP_KEY = map { $_ => 1 } qw( engine packs perl preferred_lib_target skills );
+my %APP_KEY = map { $_ => 1 } qw( detect engine no_detect packs perl preferred_lib_target skills );
 
 my %PROFILE_KEYWORD = (
   claude => 'claude',
@@ -120,7 +121,7 @@ sub file_exists { -f $_[0]->file ? 1 : 0 }
 
 sub _is_section {
   my ( $self, $key ) = @_;
-  return $key ne 'skills' && ref $self->data->{$key} eq 'HASH';
+  return $key ne 'skills' && $key ne 'detect' && ref $self->data->{$key} eq 'HASH';
 }
 
 sub _layers {
@@ -197,8 +198,9 @@ sub options {
 
     my $opts = $config->engine_options($engine_name);
 
-L</options> without raider's own keys (C<engine>, C<packs>, C<perl>,
-C<preferred_lib_target>, C<skills>): what goes to the engine constructor.
+L</options> without raider's own keys (C<detect>, C<engine>, C<no_detect>,
+C<packs>, C<perl>, C<preferred_lib_target>, C<skills>): what goes to the
+engine constructor.
 
 =cut
 
@@ -213,15 +215,87 @@ sub engine_options {
 
     $config->is_app_key('perl');   # 1
 
-True for the keys that configure raider itself (C<engine>, C<packs>,
-C<perl>, C<preferred_lib_target>, C<skills>) and never reach the engine
-constructor.
+True for the keys that configure raider itself (C<detect>, C<engine>,
+C<no_detect>, C<packs>, C<perl>, C<preferred_lib_target>, C<skills>) and
+never reach the engine constructor.
 
 =cut
 
 sub is_app_key {
   my ( $self, $key ) = @_;
   return $APP_KEY{$key} ? 1 : 0;
+}
+
+sub detect_class { 'Langertha::Raider::Detect' }
+
+=method detect_settings
+
+    my $d = $config->detect_settings($engine_name);
+    # { enabled => 1,
+    #   rules   => { perl => { must => [ { file => 'cpanfile' } ] } },
+    #   off     => { rust => 'no_detect', go => 'detect: go: false' } }
+
+Pack detection (ADR 0012) as configured in the file: L</normalize_detect>
+of the effective C<detect> and C<no_detect> values for C<$engine_name>.
+Croaks on an invalid value or rule.
+
+=cut
+
+sub detect_settings {
+  my ( $self, $engine ) = @_;
+  my $opts = $self->options($engine);
+  return $self->normalize_detect($opts->{detect}, $opts->{no_detect});
+}
+
+=method normalize_detect
+
+    my $d = $config->normalize_detect($detect, $no_detect);
+
+Checks and normalizes a C<detect> value -- a map of pack name to rule
+(L<Langertha::Raider::Detect>) or C<false>, a pack name mapped to C<false>
+switching detection off for that pack, the whole key C<false> switching
+it off entirely -- and a C<no_detect> list of pack names (or a
+comma-separated string). Returns C<enabled>, C<rules> and C<off> (pack name
+to the reason) as in L</detect_settings>; croaks naming the offending key.
+
+=cut
+
+sub normalize_detect {
+  my ( $self, $detect, $no_detect ) = @_;
+  my %settings = ( enabled => 1, rules => {}, off => {} );
+  if (defined $detect) {
+    if (ref $detect eq 'HASH') {
+      for my $name (sort keys %$detect) {
+        my $rule = $detect->{$name};
+        if (ref $rule eq 'HASH') {
+          $self->detect_class->validate_rule($rule, 'detect.'.$name);
+          $settings{rules}{$name} = $rule;
+        }
+        elsif (ref $rule || !defined $rule || ($rule && $rule ne '1')) {
+          croak 'Invalid detect setting detect.'.$name.': must be a rule or false';
+        }
+        elsif (!$rule) {
+          $settings{off}{$name} = 'detect: '.$name.': false';
+        }
+      }
+    }
+    elsif (ref $detect) {
+      croak 'Invalid detect setting detect: must be a map of pack name to rule, or false';
+    }
+    else {
+      $settings{enabled} = $detect ? 1 : 0;
+    }
+  }
+  if (defined $no_detect) {
+    my @names = ref $no_detect eq 'ARRAY' ? @$no_detect
+              : ref $no_detect            ? croak 'Invalid detect setting no_detect: must be a list of pack names'
+              :                             split /\s*,\s*/, $no_detect;
+    for my $name (@names) {
+      croak 'Invalid detect setting no_detect: must be a list of pack names' if ref $name || !length($name // '');
+      $settings{off}{$name} = 'no_detect';
+    }
+  }
+  return \%settings;
 }
 
 =method normalize_skill_spec

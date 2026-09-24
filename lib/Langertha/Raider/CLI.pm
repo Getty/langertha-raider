@@ -17,6 +17,7 @@ use Langertha::Raider::WebTools  qw( build_web_tools_server );
 use Langertha::Raider::PerlTools qw( build_perl_tools_server );
 use Langertha::Raider::Packs     qw( build_packs );
 use Langertha::Raider::Config;
+use Langertha::Raider::Detect;
 use Langertha::Raider;
 
 =head1 SYNOPSIS
@@ -390,12 +391,71 @@ has pack_names => (
   predicate => 'has_pack_names',
 );
 
+=attr no_pack_names
+
+Pack names switched off from the command line (repeatable C<--no-pack
+NAME>). They win over C<--pack>, C<packs:>, the bundled defaults and
+detection.
+
+=cut
+
+has no_pack_names => (
+  is      => 'ro',
+  isa     => 'ArrayRef[Str]',
+  default => sub { [] },
+);
+
+=attr detect
+
+Pack detection from the command line: C<0> for C<--no-detect>, C<1> for
+C<--detect>. When not given, C<detect:> in F<.raider.yml> decides; the
+default is on.
+
+=cut
+
+has detect => (
+  is        => 'ro',
+  isa       => 'Bool',
+  predicate => 'has_detect_flag',
+);
+
 =attr packs
 
 L<Langertha::Raider::Packs::Collection> of the installed packs. Defaults
-come from the bundled C<share/packs/> plus C<$RAIDER_PACK_DIRS>; the
-C<packs:> key in F<.raider.yml> (C<[caveman, git-guru]>) enables the
-listed ones exclusively.
+come from the bundled C<share/packs/> plus C<$RAIDER_PACK_DIRS>. Which are
+enabled, highest priority first (ADR 0012):
+
+=over
+
+=item 1. C<--no-pack NAME> switches a pack off; C<--pack NAME> (or
+C<-o packs=a,b>) enables the listed ones exclusively; C<--no-detect> /
+C<--detect> switch detection off or on.
+
+=item 2. C<packs:> in F<.raider.yml> (C<[caveman, git-guru]>) enables the
+listed ones exclusively when no flag named packs; C<detect: false> and
+C<no_detect: [NAME]> switch detection off entirely or per pack.
+
+=item 3. Packs whose detection rule matches L</root> are added.
+
+=back
+
+Without explicit packs the bundled defaults (C<enabled_by_default>) are
+on.
+
+Detection rules come from a pack's F<pack.yml> (C<detect:>, the pack
+default) and from C<detect:> in F<.raider.yml>, which replaces the pack
+default per pack name. Each rule is evaluated against L</root> with
+L<Langertha::Raider::Detect> when L</packs> is built and on
+L</redetect_packs> (C</reload>), never per model call. A detected pack is
+added to the enabled ones; in an exclusive group it gives way to an
+explicit pack and replaces a bundled default. The outcome per pack is in
+L<Langertha::Raider::Packs::Collection/activation_report>. An invalid rule
+croaks.
+
+Detection only decides which packs are active, it grants nothing (ADR
+0005). Rules from the project's F<.raider.yml> are evaluated right away:
+the workspace trust decision of ADR 0004, which is meant to gate them, does
+not exist yet.
 
 =cut
 
@@ -406,24 +466,129 @@ has packs => (
   builder => '_build_packs',
 );
 
+sub detect_class { 'Langertha::Raider::Detect' }
+
 sub _build_packs {
   my ($self) = @_;
-  my $yml = $self->_load_yml_options;
-  my $yml_packs = $self->has_pack_names ? $self->pack_names : $yml->{packs};
+  my ( $list, $source, $reason ) = $self->_explicit_packs;
 
   my $collection = build_packs(root => $self->root);
 
-  if ($yml_packs && ref $yml_packs eq 'ARRAY' && @$yml_packs) {
-    # Explicit packs from config — enable exactly those
+  if ($list && ref $list eq 'ARRAY' && @$list) {
+    # Explicit packs — enable exactly those
     for my $name (@{$collection->all_pack_names}) {
       $collection->disable($name);
     }
-    for my $name (@$yml_packs) {
-      $collection->enable($name);
+    for my $name (@$list) {
+      $collection->enable($name, $source, $reason);
     }
   }
+  $collection->disable($_, flag => '--no-pack') for @{$self->no_pack_names};
+  $self->_detect_packs($collection);
 
   return $collection;
+}
+
+# The explicit pack list with its source: --pack, then -o packs=, then
+# packs: in .raider.yml.
+sub _explicit_packs {
+  my ($self) = @_;
+  return ( $self->pack_names, flag => '--pack' ) if $self->has_pack_names;
+  my $opt = $self->_cli_app_options->{packs};
+  return ( $opt, flag => '-o packs' ) if defined $opt;
+  return ( $self->config->options($self->engine_name)->{packs}, config => '.raider.yml packs:' );
+}
+
+=method detection_state
+
+    my ( $on, $why ) = $app->detection_state;
+
+Whether pack detection runs, and what decided it: C<--detect>,
+C<--no-detect>, C<detect: false> or C<default>.
+
+=cut
+
+sub detection_state {
+  my ($self) = @_;
+  return ( $self->detect ? ( 1, '--detect' ) : ( 0, '--no-detect' ) ) if $self->has_detect_flag;
+  return ( 0, 'detect: false' ) unless $self->_detect_settings->{enabled};
+  return ( 1, 'default' );
+}
+
+# detect: and no_detect: from .raider.yml, -o on top.
+sub _detect_settings {
+  my ($self) = @_;
+  my $yml = $self->_load_yml_options;
+  return $self->config->normalize_detect($yml->{detect}, $yml->{no_detect});
+}
+
+sub _detect_packs {
+  my ($self, $collection) = @_;
+  my %detections;
+  $collection->detections(\%detections);
+  my ( $enabled ) = $self->detection_state;
+  return unless $enabled;
+
+  my $settings = $self->_detect_settings;
+  my %rules;
+  for my $name (@{$collection->all_pack_names}) {
+    my $pack = $collection->packs_by_name->{$name};
+    next unless $pack->has_detect;
+    $rules{$name} = [ 'pack default', $pack->detect, $pack->path.'/pack.yml detect' ];
+  }
+  $rules{$_} = [ '.raider.yml detect:', $settings->{rules}{$_}, 'detect.'.$_ ] for keys %{$settings->{rules}};
+
+  my %no_pack = map { $_ => 1 } @{$self->no_pack_names};
+  my $detect = $self->detect_class->new(root => $self->root);
+  for my $name (sort keys %rules) {
+    my ( $from, $rule, $label ) = @{$rules{$name}};
+    $self->detect_class->validate_rule($rule, $label);
+    my $record = sub {
+      my ( $result, $reason, $notes ) = @_;
+      $detections{$name} = { rule_from => $from, result => $result, reason => $reason, notes => $notes // [] };
+    };
+    my $skip = !$collection->packs_by_name->{$name} ? 'unknown pack'
+             : $no_pack{$name}                     ? '--no-pack'
+             : $settings->{off}{$name}             ? $settings->{off}{$name}
+             : $collection->is_active($name)       ? 'already active'
+             :                                        undef;
+    if ($skip) {
+      $record->(skipped => $skip);
+      next;
+    }
+    my $result = $detect->evaluate($rule, $label);
+    unless ($result->{matched}) {
+      $record->('not matched', $result->{reason}, $result->{notes});
+      next;
+    }
+    if (my $holder = $collection->enable_detected($name, $result->{reason})) {
+      my $kind = $collection->sources->{$holder}{source} eq 'detected' ? 'detected' : 'explicit';
+      $record->(skipped => $kind.' '.$holder.' holds exclusive group '.$collection->packs_by_name->{$name}->exclusive_group);
+      next;
+    }
+    $record->(matched => $result->{reason});
+  }
+  return;
+}
+
+=method redetect_packs
+
+    my @detected = $app->redetect_packs;
+
+Drops the packs that were enabled by detection, evaluates the rules again
+against L</root> and returns the names of the packs detected now. Packs
+enabled any other way stay as they are. C</reload> calls it.
+
+=cut
+
+sub redetect_packs {
+  my ($self) = @_;
+  my $collection = $self->packs;
+  for my $name (@{ [ @{$collection->active_pack_names} ] }) {
+    $collection->disable($name) if ($collection->sources->{$name}{source} // '') eq 'detected';
+  }
+  $self->_detect_packs($collection);
+  return grep { ($collection->sources->{$_}{source} // '') eq 'detected' } @{$collection->active_pack_names};
 }
 
 =attr max_context_tokens
@@ -951,6 +1116,12 @@ C<--perl>, C<--claude/--openai/--skills>), a F<.raider.yml> layer
 environment variable (C<env OPENAI_API_KEY>) or C<default>. API key values
 are never included. Builds no engine.
 
+C<detection> says whether pack detection runs (C<on>, or C<off> with what
+switched it off) and C<packs> is the
+L<Langertha::Raider::Packs::Collection/activation_report>: each pack with
+its source (C<flag>, C<config>, C<default>, C<detected>, C<manual>) and,
+for detection rules, the clause that matched or failed.
+
 =cut
 
 sub explain_config {
@@ -1003,6 +1174,8 @@ sub explain_config {
   my %flag = (
     ( $self->has_pack_names ? ( packs => [ '--pack', $self->pack_names ] ) : () ),
     ( $explicit->{perl} && $self->perl ? ( perl => [ '--perl', 1 ] ) : () ),
+    ( $self->has_detect_flag
+      ? ( detect => [ $self->detect ? '--detect' : '--no-detect', $self->detect ? 1 : 0 ] ) : () ),
   );
   my %key = map { $_ => 1 } keys %$opts, keys %yml, keys %flag;
   delete @key{qw( engine model api_key skills )};
@@ -1032,7 +1205,13 @@ sub explain_config {
     applies_to => 'raider',
   } if $self->has_cli_skill_sources;
 
-  return { %$report, values => \@values };
+  my ( $detecting, $why ) = $self->detection_state;
+  return {
+    %$report,
+    values    => \@values,
+    detection => $detecting ? 'on' : 'off ('.$why.')',
+    packs     => $self->packs->activation_report,
+  };
 }
 
 sub _yml_source {

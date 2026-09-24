@@ -152,7 +152,38 @@ sub config_report {
   for my $ign (@{ $report->{ignored} }) {
     $self->emit('  ', $self->c(warn => 'ignored '.$ign->{key}.': '.$ign->{reason}), "\n");
   }
+  if (my $packs = $report->{packs}) {
+    $self->emit($self->c(meta => 'packs:  '), $self->c(meta => '(detection '.$report->{detection}.')'), "\n");
+    for my $p (@$packs) {
+      $self->emit(sprintf("  %s %-8s  %s\n", $self->c(title => sprintf('%-20s', $p->{name})),
+        $p->{active} ? 'active' : 'inactive', $self->c(meta => $self->pack_reason($p, rule => 1))));
+      $self->emit('    ', $self->c(warn => 'note: '.$_), "\n") for @{ $p->{detection}{notes} // [] };
+    }
+  }
   return;
+}
+
+=method pack_reason
+
+    my $text = $out->pack_reason($entry, rule => 1);
+
+Why a pack of L<Langertha::Raider::Packs::Collection/activation_report> is
+on or off: C<SOURCE: REASON> (C<detected: must file=cpanfile (cpanfile)>,
+C<flag: --no-pack>), or the detection outcome of an inactive pack
+(C<not matched: ...>). With C<rule> the origin of a detection rule is
+appended (C<[rule: pack default]>).
+
+=cut
+
+sub pack_reason {
+  my ( $self, $p, %opt ) = @_;
+  my $d = $p->{detection};
+  my $text = defined $p->{source} ? $p->{source}.( defined $p->{reason} ? ': '.$p->{reason} : '' )
+           : $d                   ? $d->{result}.': '.$d->{reason}
+           :                        '';
+  $text .= ' [rule: '.$d->{rule_from}.']'
+    if $opt{rule} && $d && ( !defined $p->{source} || $p->{source} eq 'detected' );
+  return $text;
 }
 
 =method json_result

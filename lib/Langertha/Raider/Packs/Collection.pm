@@ -5,7 +5,10 @@ our $VERSION = '0.503';
 =head1 DESCRIPTION
 
 Returned by L<Langertha::Raider::Packs/build_packs>. Tracks which packs are
-enabled, honouring exclusive groups.
+enabled, honouring exclusive groups, and why: every enabled pack has a
+source (C<default>, C<flag>, C<config>, C<detected>, C<manual>) and a
+reason, and the outcome of each detection rule (ADR 0012) is kept for
+L</activation_report>.
 
 =cut
 
@@ -52,7 +55,27 @@ sub BUILD {
   }
 
   $self->enabled_pack_names([sort keys %active]);
+  $self->sources->{$_} = { source => 'default', reason => 'enabled_by_default' } for keys %active;
 }
+
+=attr sources
+
+Why each enabled pack is on: C<< { NAME => { source, reason } } >>.
+
+=attr switched_off
+
+Packs switched off explicitly (C<--no-pack>): C<< { NAME => { source, reason } } >>.
+
+=attr detections
+
+Outcome of each detection rule: C<< { NAME => { rule_from, result, reason, notes } } >>,
+C<result> being C<matched>, C<not matched> or C<skipped>.
+
+=cut
+
+has sources      => (is => 'ro', isa => 'HashRef', default => sub { {} });
+has switched_off => (is => 'ro', isa => 'HashRef', default => sub { {} });
+has detections   => (is => 'rw', isa => 'HashRef', default => sub { {} });
 
 has _init_defaults => (
   is      => 'ro',
@@ -69,12 +92,18 @@ sub _build_all_pack_names {
 
     $collection->enable('polite');   # enable polite (toggles off caveman)
     $collection->enable('git-guru');  # stack git-guru on top
+    $collection->enable('teacher', config => '.raider.yml packs:');
+
+The optional source and reason say why (L</sources>); they default to
+C<manual> and C</pack>.
 
 =cut
 
 sub enable {
-  my ($self, $name) = @_;
+  my ($self, $name, $source, $reason) = @_;
   my $pack = $self->packs_by_name->{$name} or return;
+  $self->sources->{$name} = { source => $source // 'manual', reason => $reason // '/pack' };
+  delete $self->switched_off->{$name};
   my $grp = $pack->exclusive_group;
 
   if ($grp eq 'power') {
@@ -89,6 +118,7 @@ sub enable {
 
     if (@others) {
       my %remove = map { $_ => 1 } @others;
+      delete @{$self->sources}{@others};
       @{$self->enabled_pack_names} = grep { !$remove{$_} } @{$self->enabled_pack_names};
     }
 
@@ -101,12 +131,16 @@ sub enable {
 =method disable
 
     $collection->disable('caveman');
-    $collection->disable('git-guru');
+    $collection->disable('git-guru', flag => '--no-pack');
+
+With a source and reason the pack is recorded in L</switched_off>.
 
 =cut
 
 sub disable {
-  my ($self, $name) = @_;
+  my ($self, $name, $source, $reason) = @_;
+  delete $self->sources->{$name};
+  $self->switched_off->{$name} = { source => $source, reason => $reason } if defined $source;
   my %remove = map { $_ => 1 } ($name);
   @{$self->enabled_pack_names} = grep { !$remove{$_} } @{$self->enabled_pack_names};
   return;
@@ -126,6 +160,70 @@ sub toggle {
   else {
     $self->enable($name);
   }
+}
+
+=method enable_detected
+
+    my $holder = $collection->enable_detected('perl', $clause);
+
+Enables a detected pack with source C<detected>, unless its exclusive group
+already holds a pack that is not merely a C<default> one: explicit beats
+detected, and the first detected pack of a group keeps it. Returns the
+name of that holder when the pack stays off, nothing when it was enabled.
+
+=cut
+
+sub enable_detected {
+  my ($self, $name, $reason) = @_;
+  my $pack = $self->packs_by_name->{$name} or return;
+  my $grp = $pack->exclusive_group;
+  if ($grp ne 'power') {
+    my ($holder) = grep {
+      my $p = $self->packs_by_name->{$_};
+      $_ ne $name && $p && $p->exclusive_group eq $grp
+        && ($self->sources->{$_}{source} // '') ne 'default';
+    } @{$self->enabled_pack_names};
+    return $holder if $holder;
+  }
+  $self->enable($name, detected => $reason);
+  return;
+}
+
+=method activation_report
+
+    my @packs = @{ $collection->activation_report };
+
+One entry per pack that is enabled, was switched off explicitly or has a
+detection outcome, sorted by name; rules for packs that are not installed
+come last:
+
+    { name => 'perl', exclusive_group => 'power', active => 1,
+      source => 'detected', reason => 'must file=cpanfile (cpanfile)',
+      detection => { rule_from => 'pack default', result => 'matched',
+                     reason => '...', notes => [] } }
+
+=cut
+
+sub activation_report {
+  my ($self) = @_;
+  my @report;
+  for my $name (@{$self->all_pack_names}) {
+    my $active    = $self->_is_enabled($name) ? 1 : 0;
+    my $why       = $active ? $self->sources->{$name} : $self->switched_off->{$name};
+    my $detection = $self->detections->{$name};
+    next unless $active || $why || $detection;
+    push @report, {
+      name            => $name,
+      exclusive_group => $self->packs_by_name->{$name}->exclusive_group,
+      active          => $active,
+      ( $why       ? ( source => $why->{source}, reason => $why->{reason} ) : () ),
+      ( $detection ? ( detection => $detection ) : () ),
+    };
+  }
+  for my $name (sort grep { !$self->packs_by_name->{$_} } keys %{$self->detections}) {
+    push @report, { name => $name, active => 0, detection => $self->detections->{$name} };
+  }
+  return \@report;
 }
 
 sub _is_enabled {

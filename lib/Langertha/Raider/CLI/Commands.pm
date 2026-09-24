@@ -88,7 +88,7 @@ sub cmd_help {
     '  /clear                reset conversation history',
     '  /metrics              show cumulative raid metrics',
     '  /stats                show token usage (when trace is on)',
-    '  /reload               reload .raider.md into the mission',
+    '  /reload               reload .raider.md, re-detect packs',
     '  /prompt               launch the prompt-builder (edits .raider.md)',
     '  /skill [PATH]         export plain-markdown skill doc',
     '  /skill-claude [PATH]  export Claude Code SKILL.md with frontmatter',
@@ -139,12 +139,14 @@ sub cmd_stats {
 sub cmd_reload {
   my ($self) = @_;
   my $app = $self->app;
+  my @detected = $app->redetect_packs;
   my $new = $app->reload_mission;
   my $source = $app->mission_source;
   my $status = $source eq '-M'         ? '-M mission kept, .raider.md not used'
              : $source eq '.raider.md' ? 'custom (.raider.md loaded)'
              :                           'Langertha (default, no .raider.md)';
   $self->output->say_meta('mission reloaded: '.$status.' ('.length($new).' chars)');
+  $self->output->say_meta('detected packs: '.join(', ', @detected)) if @detected;
   return;
 }
 
@@ -289,11 +291,13 @@ sub cmd_packs {
   my $collection = $self->app->packs;
   my @all = @{$collection->all_pack_names};
   return $out->say_meta('no packs available.') unless @all;
+  my %why = map { $_->{name} => $out->pack_reason($_) } @{$collection->activation_report};
   $out->say_meta('packs:');
   for my $name (sort @all) {
     my $info = $collection->pack_info($name);
     my $active = $info->{is_active} ? $out->c(accent => '*') : ' ';
-    $out->emit('  '.$active.' '.$name.' ', $out->c(meta => '('.$info->{exclusive_group}.')'), "\n");
+    $out->emit('  '.$active.' '.$name.' ', $out->c(meta => '('.$info->{exclusive_group}.')'),
+      ( length($why{$name} // '') ? ( ' ', $out->c(meta => $why{$name}) ) : () ), "\n");
   }
   return;
 }
