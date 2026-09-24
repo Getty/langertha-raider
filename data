@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T22:30:55Z
+claimed_by: worker-misc
+class: standard
+completed: 2026-09-24T22:30:55Z
+created: 2026-09-24T22:27:42Z
+id: 39
+priority: low
+started: 2026-09-24T22:28:03Z
+status: done
+tags:
+- bug
+- cli
+title: 'Skill.pm: Persona-Zeile ignoriert -M'
+updated: 2026-09-24T22:30:55Z
+---
+
+Aus #21: Skill->markdown nennt die Persona ohne -M zu beruecksichtigen; CLI->mission_source steht bereit. Test + Fix.
