@@ -113,19 +113,19 @@ sub build_perl_tools_server {
         return $finish->($h);
       };
 
-      my $rc;
-      my $ok = eval {
-        $rc = $do_run->();
-        1;
-      };
-
-      unless ($ok) {
-        $rc = -1;
+      # Both the first run and the retry after auto-install report a
+      # timeout or start failure as error, never as an exception.
+      my $guarded_run = sub {
+        my $rc;
+        return $rc if eval { $rc = $do_run->(); 1 };
         $failure = $@ =~ /^IPC::Run: timeout on timer/ ? 'timeout' : $@;
         chomp $failure;
         $err //= '';
         chomp $err;
-      }
+        return -1;
+      };
+
+      my $rc = $guarded_run->();
 
       # Auto-recover: check for "Can't locate X/Y.pm" once
       my @missing;
@@ -148,7 +148,7 @@ sub build_perl_tools_server {
         if ($i_rc == 0) {
           $auto_installed = \@missing;
           $append_to_cpanfile->($target, $_) for @missing;
-          $rc = $do_run->();
+          $rc = $guarded_run->();
         }
         else {
           $err .= "\n[auto-install failed for @missing: $i_err]";

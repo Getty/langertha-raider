@@ -15,6 +15,7 @@ my $dir = tempdir(CLEANUP => 1);
 
 # Run from a scratch cwd that is not the root, so cwd and relative-path
 # checks mean something and a regression cannot write into the checkout.
+my $orig_cwd = Path::Tiny->cwd;
 my $scratch = path(tempdir(CLEANUP => 1))->child('cwd');
 $scratch->mkpath;
 chdir $scratch or die "chdir $scratch: $!";
@@ -136,6 +137,23 @@ subtest perl_eval_timeout_kills_child => sub {
   kill 'KILL', $pid;
 };
 
+subtest perl_eval_retry_timeout_reported => sub {
+  my $marker = path($dir)->child('retry-timeout.marker');
+  $marker->remove;
+  my $res = eval {
+    call_tool('perl_eval', {
+      code    => 'if (-e "retry-timeout.marker") { sleep 30 } '
+        .'open my $f, ">", "retry-timeout.marker" or die; close $f; '
+        .'die "Can\'t locate Raider/RetryTimeout.pm in \@INC\n"',
+      timeout => 1,
+    });
+  };
+  ok($res, 'timeout in the retry does not throw') or diag $@;
+  my $d = decoded($res);
+  is($d->{error}, 'timeout', 'retry timeout reported as timeout');
+  is_deeply($d->{auto_installed}, ['Raider::RetryTimeout'], 'auto-install happened before the retry');
+};
+
 subtest perl_eval_start_failure_not_reported_as_timeout => sub {
   my $res = call_tool('perl_eval', { code => 'print 1', timeout => 'not-a-number' });
   my $d = decoded($res);
@@ -253,5 +271,8 @@ subtest perl_cpanm_failed_install_not_recorded => sub {
   my $cpanfile = path($target, 'cpanfile')->slurp_utf8;
   unlike($cpanfile, qr/\Q$module\E/, 'failed install not appended to cpanfile');
 };
+
+# Leave the tempdirs before File::Temp cleans them up.
+chdir $orig_cwd or die "chdir $orig_cwd: $!";
 
 done_testing;
