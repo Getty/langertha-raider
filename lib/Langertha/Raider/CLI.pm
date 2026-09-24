@@ -97,6 +97,8 @@ has engine_name => (
 
 sub _build_engine_name {
   my ($self) = @_;
+  my $opt = $self->_cli_app_options->{engine};
+  return $opt if defined $opt && length $opt;
   my $yml = $self->config->engine;
   return $yml if defined $yml;
   return 'anthropic' if $ENV{ANTHROPIC_API_KEY};
@@ -534,6 +536,7 @@ sub _build_skill_sources {
   my ($self) = @_;
   return [ $self->config->skill_specs(
     $self->engine_name,
+    @{ $self->_cli_app_options->{skills} // [] },
     $self->has_cli_skill_sources ? @{$self->cli_skill_sources} : (),
   ) ];
 }
@@ -587,9 +590,13 @@ sub _load_skill_texts {
 
 =attr engine_options
 
-HashRef of extra attributes forwarded to the engine constructor
-(e.g. C<temperature>, C<response_size>, C<seed>). Merged on top of values
-loaded from C<.raider.yml> in the working directory.
+HashRef of the C<-o KEY=VALUE> options. Engine attributes (e.g.
+C<temperature>, C<response_size>, C<seed>) are forwarded to the engine
+constructor, merged on top of values loaded from C<.raider.yml> in the
+working directory. Raider's own keys (see
+L<Langertha::Raider::Config/is_app_key>) configure raider like their
+F<.raider.yml> counterparts and override them; C<packs> and C<skills> take
+a comma-separated list.
 
 =cut
 
@@ -599,9 +606,31 @@ has engine_options => (
   default => sub { {} },
 );
 
+# The -o pairs that configure raider itself, the list keys split on commas
+# as they would read from .raider.yml.
+sub _cli_app_options {
+  my ($self) = @_;
+  my $opts = $self->engine_options;
+  my %app;
+  for my $key (grep { $self->config->is_app_key($_) } keys %$opts) {
+    my $value = $opts->{$key};
+    $value = [ split /,/, $value ] if ($key eq 'packs' || $key eq 'skills') && !ref $value;
+    $app{$key} = $value;
+  }
+  return \%app;
+}
+
+sub _cli_engine_options {
+  my ($self) = @_;
+  my $opts = $self->engine_options;
+  return { map { $_ => $opts->{$_} } grep { !$self->config->is_app_key($_) } keys %$opts };
+}
+
 sub _load_yml_options {
   my ($self) = @_;
-  return $self->config->options($self->engine_name);
+  my %app = %{ $self->_cli_app_options };
+  delete $app{skills};
+  return { %{ $self->config->options($self->engine_name) }, %app };
 }
 
 sub _engine_yml_options {
@@ -704,20 +733,24 @@ sub _build_engine {
   my ($self) = @_;
   my $class = $self->_engine_class;
   Module::Runtime::require_module($class);
+  return $class->new($self->_engine_args);
+}
 
-  # Engine-level overrides: .raider.yml then engine_options (CLI wins).
-  # model and api_key go last: their accessors already resolve flag over
-  # -o over .raider.yml, so an explicit -m / -k is never overwritten.
+# Engine constructor arguments: .raider.yml then -o (CLI wins), raider's
+# own keys left out. model and api_key go last: their accessors already
+# resolve flag over -o over .raider.yml, so an explicit -m / -k is never
+# overwritten.
+sub _engine_args {
+  my ($self) = @_;
   my %args = (
     %{$self->_engine_yml_options},
-    %{$self->engine_options},
+    %{$self->_cli_engine_options},
     mcp_servers => $self->_mcps,
   );
   delete @args{qw( model api_key )};
   $args{api_key} = $self->api_key if length $self->api_key;
   $args{model}   = $self->model   if $self->has_model;
-
-  return $class->new(%args);
+  return %args;
 }
 
 sub _build_raider {
@@ -913,7 +946,8 @@ sub explain_config {
   my $engine   = $self->engine_name;
   my $report   = $self->config->explain($engine);
   my $explicit = $self->_explicit;
-  my $opts     = $self->engine_options;
+  my $app_opts = $self->_cli_app_options;
+  my $opts     = { %{ $self->_cli_engine_options }, %$app_opts };
 
   # .raider.yml values as candidates: [ source, value, shadowed ]
   my ( %yml, @yml_skills );
@@ -939,6 +973,7 @@ sub explain_config {
   my @values = (
     $self->_explain_entry(engine => 'raider', [
       $explicit->{engine} ? [ '-e', $engine ] : undef,
+      defined $opts->{engine} ? [ '-o', $opts->{engine} ] : undef,
       $from_yml{engine},
     ], [ $env_key ? 'env '.$env_key : 'default', $engine ]),
     $self->_explain_entry(model => 'engine', [
@@ -958,9 +993,9 @@ sub explain_config {
     ( $explicit->{perl} && $self->perl ? ( perl => [ '--perl', 1 ] ) : () ),
   );
   my %key = map { $_ => 1 } keys %$opts, keys %yml, keys %flag;
-  delete @key{qw( engine model api_key )};
+  delete @key{qw( engine model api_key skills )};
   for my $key (sort keys %key) {
-    my $applies_to = $yml{$key} ? $yml{$key}{applies_to} : $flag{$key} ? 'raider' : 'engine';
+    my $applies_to = $self->config->is_app_key($key) ? 'raider' : 'engine';
     push @values, $self->_explain_entry($key, $applies_to, [
       $flag{$key} // ( exists $opts->{$key} ? [ '-o', $opts->{$key} ] : undef ),
       $from_yml{$key},
@@ -968,6 +1003,14 @@ sub explain_config {
   }
 
   push @values, @yml_skills;
+  push @values, {
+    key        => 'skills',
+    value      => $app_opts->{skills},
+    source     => '-o',
+    shadowed   => [],
+    merged     => 1,
+    applies_to => 'raider',
+  } if $app_opts->{skills};
   push @values, {
     key        => 'skills',
     value      => $self->cli_skill_sources,

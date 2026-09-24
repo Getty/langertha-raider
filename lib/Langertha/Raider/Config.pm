@@ -209,6 +209,21 @@ sub engine_options {
   return $opts;
 }
 
+=method is_app_key
+
+    $config->is_app_key('perl');   # 1
+
+True for the keys that configure raider itself (C<engine>, C<packs>,
+C<perl>, C<preferred_lib_target>, C<skills>) and never reach the engine
+constructor.
+
+=cut
+
+sub is_app_key {
+  my ( $self, $key ) = @_;
+  return $APP_KEY{$key} ? 1 : 0;
+}
+
 =method normalize_skill_spec
 
     my @specs = $config->normalize_skill_spec($item);

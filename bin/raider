@@ -119,7 +119,9 @@ Options:
   -k, --api-key KEY        API key (overrides *_API_KEY env var)
   -o, --option KEY=VALUE   Engine attribute (repeatable), e.g.
                            -o temperature=0.2 -o response_size=4096
-                           Merged over .raider.yml; CLI wins.
+                           Merged over .raider.yml; CLI wins. raider's own
+                           .raider.yml keys (perl, packs=a,b, skills=a,b,
+                           preferred_lib_target, engine) configure raider.
   -r, --root DIR           Working directory (default: cwd). File tools are
                            confined to this directory.
   -M, --mission TEXT       System prompt / mission
