@@ -7,6 +7,9 @@ our $VERSION = '0.503';
 Describes and dispatches the hall management tools (spawn, list, schedule,
 cancel, Telegram, status) of a L<Langertha::Raider::Hall>.
 
+No transport serves these tools yet: the hall opens no C<.raider-hall.mcp>
+socket, so nothing outside the hall process can call them.
+
 =cut
 
 use Moose;

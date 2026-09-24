@@ -27,12 +27,14 @@ features:
 
 =item * Multi-bot Telegram long-poll with routing + per-chat history.
 
-=item * MCP tool catalog on C<.raider-hall.mcp>.
-
 =item * ACP (Agent Client Protocol) adapter on a TCP port for Zed and
 other ACP-capable clients — see L<Langertha::Raider::Hall::ACP>.
 
 =back
+
+An MCP adapter on C<.raider-hall.mcp> is B<not implemented>:
+L<Langertha::Raider::Hall::MCP> describes the hall tools, but no socket is
+opened and an C<mcp> section in the config has no effect.
 
 All state flows through the event bus (JSONL pub/sub). Clients
 subscribe with C<{type: subscribe, payload: {filter: 'raider.'}}> and
@@ -53,7 +55,6 @@ C<.raider-hall.yml> in the hall root:
       bots:
         ops: { token: '...', allowlist: [42], routing: { '*': lagertha } }
     acp: { port: 38421, host: 127.0.0.1 }
-    mcp: { enable: 1 }
 
 C<engine> on a raider entry is optional. Without it the hall passes no
 C<--engine> and the spawned raider decides itself: the engine from its

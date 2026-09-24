@@ -1,6 +1,10 @@
 # Raider Hall — Claude Code Plugin
 
-This plugin lets Claude Code connect to a running `raider hall` daemon via its
+> **Not implemented.** The hall does not open the `.raider-hall.mcp` socket
+> yet; `mcp: { enable: true }` has no effect, and none of the configuration
+> below works. This page describes the planned adapter only.
+
+This plugin is meant to let Claude Code connect to a running `raider hall` daemon via its
 MCP adapter socket (`.raider-hall.mcp`).
 
 ## Requirements
@@ -19,19 +23,6 @@ settings):
     "raider-hall": {
       "command": "nc",
       "args": ["-U", ".raider-hall.mcp"]
-    }
-  }
-}
-```
-
-Alternatively, if you have the `mcp` CLI tool installed:
-
-```json
-{
-  "mcpServers": {
-    "raider-hall": {
-      "command": "raider-hall-mcp",
-      "args": [".raider-hall.mcp"]
     }
   }
 }
