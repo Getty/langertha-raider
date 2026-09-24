@@ -27,6 +27,7 @@ $fake_cpanm->spew_utf8(<<'SH');
 #!/bin/sh
 case "$*" in
   *Definitely::Not::A::Real::Raider::Module::XYZ*) exit 1 ;;
+  *Raider::Slow::Install*) sleep 30 ;;
   *) exit 0 ;;
 esac
 SH
@@ -152,6 +153,29 @@ subtest perl_eval_retry_timeout_reported => sub {
   my $d = decoded($res);
   is($d->{error}, 'timeout', 'retry timeout reported as timeout');
   is_deeply($d->{auto_installed}, ['Raider::RetryTimeout'], 'auto-install happened before the retry');
+};
+
+subtest install_timeout_is_a_result_not_an_exception => sub {
+  my $slow_server = build_perl_tools_server(root => $dir, install_timeout => 1);
+  my $call = sub {
+    my ($name, $args) = @_;
+    my ($tool) = grep { $_->name eq $name } @{ $slow_server->tools };
+    return $tool->code->($tool, $args);
+  };
+
+  my $res = eval { $call->('perl_eval', { code => 'use Raider::Slow::Install;', timeout => 5 }) };
+  ok($res, 'auto-install timeout in perl_eval does not throw') or diag $@;
+  my $d = decoded($res);
+  ok(!$d->{auto_installed}, 'nothing reported as auto-installed');
+  like($d->{stderr}, qr/auto-install failed for Raider::Slow::Install: timeout/, 'install timeout noted in stderr');
+
+  $res = eval { $call->('perl_cpanm', { module => 'Raider::Slow::Install' }) };
+  ok($res, 'perl_cpanm timeout does not throw') or diag $@;
+  $d = decoded($res);
+  is($d->{error}, 'timeout', 'perl_cpanm reports timeout');
+  ok(!$d->{installed}, 'not reported as installed');
+  my $cpanfile = path($dir)->child('.raider', 'lib', 'cpanfile')->slurp_utf8;
+  unlike($cpanfile, qr/Raider::Slow::Install/, 'timed-out install not appended to cpanfile');
 };
 
 subtest perl_eval_start_failure_not_reported_as_timeout => sub {

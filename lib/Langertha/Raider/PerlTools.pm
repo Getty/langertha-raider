@@ -17,6 +17,7 @@ our @EXPORT_OK = qw( build_perl_tools_server );
     my $server = Langertha::Raider::PerlTools::build_perl_tools_server(
         root       => '/some/dir',  # chroot root (required)
         lib_target => '.raider/lib',  # optional override
+        install_timeout => 300,       # seconds per cpanm run (default 300)
     );
 
 Returns an L<MCP::Server> instance with the tools C<perl_eval>, C<perl_check>,
@@ -28,6 +29,7 @@ sub build_perl_tools_server {
   my %args = @_;
   my $root       = path($args{root} // '.')->absolute;
   my $lib_target_override = $args{lib_target};
+  my $install_timeout     = $args{install_timeout} // 300;
 
   my $resolve_lib_target = sub {
     return path($lib_target_override)->absolute($root)->stringify if defined $lib_target_override;
@@ -59,6 +61,21 @@ sub build_perl_tools_server {
     }
     my $fr = $h->full_result;
     return defined($fr) ? ($fr >> 8) : -1;
+  };
+
+  # Runs cpanm; a timeout or start failure comes back as the second
+  # value ('timeout' or the message) instead of as an exception.
+  my $run_cpanm = sub {
+    my ($cmd, $out, $err) = @_;
+    my $empty = '';
+    my $rc;
+    return ($rc) if eval {
+      $rc = $finish->(start $cmd, \$empty, $out, $err, timeout($install_timeout));
+      1;
+    };
+    my $failure = $@ =~ /^IPC::Run: timeout on timer/ ? 'timeout' : $@;
+    chomp $failure;
+    return (-1, $failure);
   };
 
   my $ensure_lib_init = sub {
@@ -140,10 +157,7 @@ sub build_perl_tools_server {
         my ($i_out, $i_err);
         my $target = $resolve_lib_target->();
         $ensure_lib_init->($target);
-        my $empty = '';
-        my $ih = start ['cpanm', '--local-lib', $target, @missing],
-          \$empty, \$i_out, \$i_err, timeout(300);
-        my $i_rc = $finish->($ih);
+        my ($i_rc, $i_failure) = $run_cpanm->(['cpanm', '--local-lib', $target, @missing], \$i_out, \$i_err);
 
         if ($i_rc == 0) {
           $auto_installed = \@missing;
@@ -151,7 +165,7 @@ sub build_perl_tools_server {
           $rc = $guarded_run->();
         }
         else {
-          $err .= "\n[auto-install failed for @missing: $i_err]";
+          $err .= "\n[auto-install failed for @missing: ".($i_failure // $i_err // '')."]";
         }
       }
 
@@ -255,9 +269,7 @@ sub build_perl_tools_server {
       push @cmd, $module;
 
       my ($out, $err);
-      my $empty = '';
-      my $h = start \@cmd, \$empty, \$out, \$err, timeout(300);
-      my $rc = $finish->($h);
+      my ($rc, $failure) = $run_cpanm->(\@cmd, \$out, \$err);
 
       $append_to_cpanfile->($target_dir, $module) if $rc == 0;
 
@@ -269,6 +281,7 @@ sub build_perl_tools_server {
         version   => undef,
         stdout    => $out // '',
         stderr    => $err // '',
+        $failure ? ( error => $failure ) : (),
       });
     },
   );
@@ -288,7 +301,8 @@ return_value, and (optionally) auto_installed. C<error> is C<timeout> when
 the time limit hit, otherwise the message of whatever else failed.
 
 On "Can't locate X/Y.pm" in stderr, auto-installs the module once then
-retries the eval. If retry still fails, returns the error.
+retries the eval. If retry still fails, returns the error. A failed or
+timed-out install is noted in C<stderr>.
 
 =head2 perl_check
 
@@ -304,5 +318,7 @@ C<options.target> must lie inside the working root (relative paths resolve
 against it); anything else is rejected. Creates the target
 directory (with cpanfile + perl-version marker) on first install. The
 cpanfile is updated idempotently (no duplicate entries).
+C<error> is C<timeout> when cpanm hit the C<install_timeout> limit,
+otherwise the message of whatever else kept it from running.
 
 =cut
