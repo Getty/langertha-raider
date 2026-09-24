@@ -59,6 +59,22 @@ Revision history for Langertha-Raider
     - raider hall start/stop/status/ps/install fail with "Not a
       directory" when DIR is not a directory instead of using the current
       directory.
+    - MCP servers are named raider-files, raider-web, raider-perl and
+      raider-hall; the Claude skill export is named raider
+      (.claude/skills/raider/SKILL.md) and points out a leftover
+      app-raider skill.
+    - -o with raider's own keys (perl, packs=a,b, skills=a,b,
+      preferred_lib_target, engine) configures raider like .raider.yml
+      and overrides it; only engine attributes reach the engine.
+    - bin/raider is a thin wrapper around internal
+      Langertha::Raider::CLI::* classes (Main, REPL, Runner, Commands,
+      PromptBuilder, Output). raider exits 0 on success, 1 when the run
+      failed, 2 on a usage error and 3 on a configuration error; hall
+      raider.done events report exit_code 1 for failed runs.
+    - --json encodes UTF-8 once and keeps the live trace off unless
+      --trace is given; raider -i reads piped input to its end.
+    - /reload and the banner name a -M mission; the generated skill lists
+      /config, /model, /packs and /pack.
     - Fix Hall singleton queue replay, --pack propagation, Telegram
       future retention, and MCP tool result handling.
     - Add `--pack NAME` CLI parsing for one-shot pack activation.
