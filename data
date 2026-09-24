@@ -1,0 +1,19 @@
+---
+class: standard
+completed: 2026-09-24T02:54:42Z
+created: 2026-09-24T02:23:51Z
+id: 7
+priority: high
+started: 2026-09-24T02:54:42Z
+status: done
+tags:
+- release
+- versioning
+title: 'Release version: 0.502 collides with Langertha::Raider 0.502 already indexed
+  via Langertha-0.502'
+updated: 2026-09-24T02:54:42Z
+---
+
+All files carry $VERSION 0.502 (manifest target). CPAN currently indexes Langertha::Raider, Langertha::Raider::Result, Langertha::Raid* at 0.502 from Langertha-0.502, and the raw copies from core carried 0.504. A Langertha-Raider release at 0.502 is equal, not higher, so PAUSE will likely keep the index on Langertha-0.502 and `cpanm Langertha::Raider` would keep resolving to core. Decide the first version (>= 0.503, e.g. 0.504) before release; bump is one perl -pi over lib/ bin/. Langertha 0.503 must also be released first (cpanfile floor).
+
+Version auf 0.503 gesetzt (b3ae744), Freigabe durch Maintainer
