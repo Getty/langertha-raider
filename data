@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T02:24:05Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-24T15:36:12Z
+created: 2026-09-17T18:13:22Z
+id: 3
+priority: high
+started: 2026-09-24T02:15:44Z
+status: done
+tags:
+- migration
+title: App::Raider::* (13 Dateien) nach Langertha::Raider::* umbenennen, App::Raider.pm
+  -> Langertha::Raider::CLI
+updated: 2026-09-24T15:36:12Z
+---
+
+2026-09-24 02:24 App::Raider.pm -> Langertha::Raider::CLI, App::Raider::X -> Langertha::Raider::X across lib/bin/t/README/Dockerfile/.dockerignore; File::ShareDir dist App-Raider -> Langertha-Raider; Packs.pm source-tree lookup now keys on INC Langertha/Raider/CLI.pm with one extra parent level. bin/raider + bin/raider-hall --help work via -Ilib. grep for App::Raider/App-Raider/MCP::Client empty outside Changes. Lowercase app-raider ids left: k10. Multi-package files: k8.
