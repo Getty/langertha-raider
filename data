@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-24T03:03:19Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-24T03:03:19Z
+created: 2026-09-17T18:13:23Z
+id: 5
+priority: medium
+started: 2026-09-24T03:03:19Z
+status: done
+tags:
+- decision
+title: 'Entscheiden: GitHub-Repo Getty/raider umbenennen oder neues Repo + altes archivieren'
+updated: 2026-09-24T03:03:19Z
+---
+
+2026-09-24 02:24 Hardcoded repo refs: maint/release-after.pl default repo => 'Getty/p5-app-raider' (not Getty/raider!). META repository/bugtracker are empty because this checkout has no git remote (GithubMeta auto-detects).
+
+Entschieden: neues Repo github.com/Getty/langertha-raider angelegt, main gepusht. Offen: Getty/raider archivieren, Default-Repo in maint/release-after.pl umstellen.
+
+Getty/raider archiviert, release-after.pl-Default auf Getty/langertha-raider (8ce9c7c).
