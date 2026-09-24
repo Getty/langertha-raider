@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T22:27:34Z
+claimed_by: worker-cli2
+class: standard
+completed: 2026-09-24T22:27:34Z
+created: 2026-09-24T22:02:14Z
+id: 33
+priority: low
+started: 2026-09-24T22:02:53Z
+status: done
+tags:
+- refactor
+- cli
+title: 'Langertha::Raider: Writer fuer mission statt Attribut-API in reload_mission'
+updated: 2026-09-24T22:27:34Z
+---
+
+Aus #19: mission ist ro; CLI reload_mission setzt es ueber die Moose-Attribut-API. Sauber: _set_mission-Writer an Langertha::Raider, CLI nutzt ihn. Test t/30_cli_reload_mission.t bleibt gruen.
