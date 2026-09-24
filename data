@@ -1,0 +1,26 @@
+---
+class: standard
+completed: 2026-09-24T23:09:34Z
+created: 2026-09-24T21:51:46Z
+id: 32
+priority: medium
+started: 2026-09-24T23:09:34Z
+status: done
+tags:
+- idea
+- config
+- needs-adr
+title: 'Idee: Profile-Detector - Profile automatisch nach Verzeichniszustand laden'
+updated: 2026-09-24T23:09:38Z
+---
+
+Maintainer-Idee 2026-09-24: Profile definieren, die zusaetzlich geladen werden, wenn bestimmte Zustaende im Verzeichnis gegeben sind (z.B. .claude/ vorhanden -> claude-Skills, AGENTS.md -> openai/agents, cpanfile/dist.ini -> perl: true + Perl-Pack, .git -> ...). Heute muss man --claude/--openai/perl: explizit setzen bzw. persistieren (#20).
+Offen/vor Umsetzung ADR noetig:
+- Begriff: "Profile" ist doppelt belegt (CONTEXT.md: assistant/project-Profile, ADR 0002; Code: Skill-Profile claude/openai in Langertha::Raider::Config). Neuer Name oder Vereinheitlichung?
+- Trust (ADR 0004): automatisch geladene Projektinhalte nur nach Workspace-Trust; Detector darf keine Rechte/Tools aus dem Repo ableiten (ADR 0005: permissions never come from prompts).
+- Wo werden Detector-Regeln definiert (eingebaut, ~/.raider/config.yml ADR 0011, Packs)? Reihenfolge gegenueber .raider.yml und CLI-Flags; Sichtbarkeit in explain (#29).
+- Andocken an Langertha::Raider::Config (skill_specs/profiles) als zusaetzliche Ebene.
+
+ADR 0012 (proposed) geschrieben: Detektion aktiviert Packs, Regeln must/may/must_not mit file/dir/contains/matches. Umsetzung erst nach Accept.
+
+Entschieden in ADR 0012 (accepted); Umsetzung in den Pack-Detektion-Tickets 1-3.
