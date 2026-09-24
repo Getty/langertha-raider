@@ -92,4 +92,6 @@ sub setup_handlers {
   });
 }
 
+__PACKAGE__->meta->make_immutable;
+
 1;

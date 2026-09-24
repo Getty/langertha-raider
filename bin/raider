@@ -156,11 +156,11 @@ $args{engine_options} = \%engine_opts        if %engine_opts;
 my @skill_specs;
 my @cli_profiles;
 if ($opt{profile_claude}) {
-  push @skill_specs, @{ $Langertha::Raider::AGENT_PROFILES{claude} };
+  push @skill_specs, @{ $Langertha::Raider::CLI::AGENT_PROFILES{claude} };
   push @cli_profiles, 'claude';
 }
 if ($opt{profile_openai}) {
-  push @skill_specs, @{ $Langertha::Raider::AGENT_PROFILES{openai} };
+  push @skill_specs, @{ $Langertha::Raider::CLI::AGENT_PROFILES{openai} };
   push @cli_profiles, 'openai';
 }
 push @skill_specs, { type => 'dir', path => $_ } for @{ $opt{skill_dirs} // [] };
