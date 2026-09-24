@@ -1,0 +1,157 @@
+Revision history for Langertha-Raider
+
+{{$NEXT}}
+
+    - Langertha-Raider is the merge of the App-Raider distribution with the
+      agent engine extracted from Langertha core. Langertha::Raider,
+      Langertha::Raider::Result and the Langertha::Raid orchestration layer
+      (Raid::Loop, Raid::Parallel, Raid::Sequential) ship here under their
+      own names; Langertha::Raider::Result is self-contained, and the
+      current-protocol MCP client is Langertha::Raider::MCP. Every
+      App::Raider::* module is renamed to Langertha::Raider::*, with the CLI
+      entry point App::Raider becoming Langertha::Raider::CLI; the raider and
+      raider-hall executables keep their names. Requires Langertha 0.503.
+    - Fix filesystem confinement to reject symlink escapes for read and
+      write operations, with regression tests.
+    - Fix WebTools sync wrappers to await IO::Async futures through the
+      loop, with injectable HTTP/search test doubles.
+    - Fix Hall singleton queue replay, --pack propagation, Telegram
+      future retention, and MCP tool result handling.
+    - Add `--pack NAME` CLI parsing for one-shot pack activation.
+    - Filter Raider-only .raider.yml keys before constructing Langertha
+      engines.
+    - Fix PerlTools local::lib cpanm invocation and record only
+      successful installs.
+    - Add .codex to .gitignore and .dockerignore as a Codex runtime
+      mount marker.
+    - Rework Docker builds to install from the Dist::Zilla build
+      directory via cpm and the MetaCPAN resolver; no cpanfile.snapshot
+      is shipped any more.
+    - Move GitHub/Docker release publishing into maint/release-after.pl
+      so run_after_release does not depend on shell redirection or
+      conditionals.
+    - Update README and POD for pack, PerlTools, Docker dist-dir build,
+      Hall/ACP subcommands, and API-key-only Anthropic authentication.
+
+    - Slice 1 — Perl-native tools: --perl unlocks perl_eval /
+      perl_check / perl_cpanm, a private local::lib per raider, and
+      auto-recovery on missing modules.
+    - Slice 2 — Packs: toggleable persona/power bundles under
+      share/packs/ (caveman/polite/teacher + git-guru/testing-fu/
+      perl-hacker); /packs + /pack on|off|NAME slash commands.
+    - Slice 3 — raider-hall daemon. `raider hall init` / `add-raider`
+      / `start` / `ps` / `spawn` / `attach` / `kill` / `logs`. JSONL
+      event bus + command protocol over a unix socket. 1name
+      singleton queues persisted across restarts. longhouse-or-per-
+      raider local::lib targets.
+    - Slice 4 — Hall extras: non-blocking Schedule::Cron integration
+      (IO::Async::Timer::Absolute + get_next_execution_time, opt-in
+      coalesce); multi-bot Telegram long-poll via Net::Async::HTTP
+      (the previous GET_form/POST_form calls didn't exist); MCP tool
+      catalog on .raider-hall.mcp; systemd --user unit via
+      `raider hall install`.
+    - Slice 5 — ACP adapter: App::Raider::Hall::ACP speaks JSON-RPC
+      2.0 line-framed over TCP (initialize / session/new /
+      session/prompt / session/cancel). Configure via
+      `acp: { port, host }` in .raider-hall.yml or `--acp-port N` on
+      `raider hall start`.
+    - ACP client: `raider acp ping|prompt|connect HOST:PORT` drives
+      any ACP-conforming agent from the same binary. Under the hood:
+      App::Raider::ACP::Client (blocking JSON-RPC 2.0).
+    - Hall-side raider tools: telegram_reply / hall_status /
+      hall_spawn are auto-exposed to raiders spawned under a hall
+      (keyed on $RAIDER_HALL_SOCKET).
+    - Docker-aware systemd install: inside a container, the unit is
+      written to `.raider-hall/systemd/<name>.service` (the bind-mount
+      surfaces it on the host), with a `cp` one-liner printed so the
+      user just copies into ~/.config/systemd/user/. `--docker`
+      template uses `docker run --rm -v $PWD:/work -e API_KEY…` and
+      publishes the ACP port with `-p`.
+    - Hall daemon fixes: double-$^X exec wrapper removed, mission
+      passes as a single argv (not split on whitespace), Schedule::Cron
+      no longer blocks the IO::Async loop, CHLD watcher removed (was
+      double-reaping with IO::Async::Process). Shutdown grace-period
+      timer is now actually started (was never firing).
+    - App::Raider.packs attribute retyped from ArrayRef[Str] to
+      App::Raider::Packs::Collection — the builder always returned a
+      Collection and every hall-spawned raider died with a Moose
+      type-constraint error the moment it built its mission.
+    - Tests: t/20_packs.t, t/20_perltools.t, t/30_hall.t, t/40_acp.t
+      (server dispatch), t/41_acp_client.t (forked hall, real
+      client/server over TCP), t/42_acp_live.t (forked hall + real
+      OpenAI API; gated on $OPENAI_API_KEY, 2–8s per run).
+    - examples/multi-raider-hall/ walkthrough showing a minimal
+      multi-raider village wired for cron + ACP.
+
+0.003     2026-04-21 01:46:09Z
+
+    - Switch bash tool from the retired MCP::Server::Run::Bash to
+      MCP::Run::Bash (same API, renamed upstream distribution).
+    - Dockerfile installs App::Raider from the dzil-built tarball
+      instead of the source tree (no Makefile.PL in Dist::Zilla dists).
+    - Docker Hub image published as raudssus/raider. dzil release now
+      runs run_after_release hooks that create the GitHub release,
+      build the runtime-root image, and push raudssus/raider:VERSION
+      plus :latest.
+    - Ship a cpanfile.snapshot for reproducible Carton deployments.
+
+0.002     2026-04-20 20:28:50Z
+
+    - /model REPL command: show current engine and model, list available
+      models from the engine grouped by date-snapshot families (e.g.
+      gpt-4o [+3 snapshots]); /model list [FILTER] for the full or
+      substring-filtered list; /model NAME saves the chosen model to
+      .raider.yml under default.model.
+    - Model list colours: names in bright-blue, structural labels grey —
+      consistent with the rest of the banner.
+    - Fixed _build_skill_sources calling _normalize_skill_spec in scalar
+      context, silently dropping the CLAUDE.md spec from the claude
+      profile when loaded from .raider.yml ("seeing CLAUDE.md, ignoring"
+      even with profiles: claude active).
+    - Fixed Term::ReadLine::Gnu detection: require Term::ReadLine::Gnu
+      fails with "invalid to load directly"; now detected via
+      Term::ReadLine->new + ->ReadLine =~ /Gnu/.
+    - Readline history now persists across Ctrl-C / SIGTERM via signal
+      handlers that call WriteHistory before exit.
+
+0.001     2026-04-20 17:44:05Z
+
+    - Initial release.
+    - CLI agent (App::Raider) wrapping Langertha::Raider with a default
+      viking persona ("Langertha"), caveman-style communication, and
+      effectively unlimited tool-calling iterations per raid.
+    - Tools: filesystem (list_files, read_file, write_file, edit_file),
+      bash (MCP::Server::Run::Bash), web_search and web_fetch
+      (Net::Async::WebSearch + Net::Async::HTTP).
+    - Engine auto-detection from available *_API_KEY env var with cheap
+      per-engine default models (claude-haiku-4-5, gpt-4o-mini, etc.).
+    - .raider.md for persona customization; hot-reload via /reload;
+      /prompt spawns a sub-agent prompt-builder that writes .raider.md.
+    - .raider.yml for engine options (temperature, response_size, ...)
+      with flat or default/<engine> layers; -o key=value CLI override.
+    - Skill / profile loading: --claude loads CLAUDE.md and
+      .claude/skills/*/SKILL.md; --openai/--codex loads AGENTS.md;
+      --skills DIR adds plain-markdown dirs. Choices persist to
+      .raider.yml with (saved) banner tag on first use.
+    - App::Raider::Skill generates self-describing how-to-use-raider
+      documentation from the live config, as plain markdown or as a
+      Claude Code SKILL.md with YAML frontmatter; usable via CLI
+      (--export-skill / --export-claude-skill) or REPL (/skill,
+      /skill-claude).
+    - REPL: Term::ReadLine::Gnu with persistent ~/.raider_history,
+      IO::Prompt::Tiny fallback; plain-ASCII output with blue/green
+      palette; slash commands /help /clear /metrics /stats /reload
+      /prompt /skill /skill-claude /quit.
+    - App::Raider::Plugin::Trace streams per-iteration tool calls,
+      args, results and cumulative token counts; meta-line after each
+      raid shows elapsed time, history size vs. context cap, and
+      cumulative tokens in / out / total.
+    - App::Raider::Plugin::Situation injects a compact single-line
+      situation block (local time, timezone, host, user) at the start
+      of each session.
+    - Auto-compression at 70% of a 40k-token context window to stay
+      under typical per-minute rate limits.
+    - Dockerfile with multi-stage build: runtime-root for root use,
+      runtime-user with RAIDER_UID/RAIDER_GID build args for host-uid
+      matching. README includes a shell-alias recipe that mounts $PWD
+      and forwards API-key env vars.

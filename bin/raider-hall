@@ -1,0 +1,14 @@
+#!/usr/bin/env perl
+# ABSTRACT: Raider Hall daemon CLI
+# PODNAME: raider-hall
+
+use strict;
+use warnings;
+
+our $VERSION = '0.503';
+
+use Langertha::Raider::Hall::CLI;
+
+Langertha::Raider::Hall::CLI->main(@ARGV);
+
+1;
