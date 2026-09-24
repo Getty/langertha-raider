@@ -30,7 +30,7 @@ sub build_perl_tools_server {
   my $lib_target_override = $args{lib_target};
 
   my $resolve_lib_target = sub {
-    return $lib_target_override if defined $lib_target_override;
+    return path($lib_target_override)->absolute($root)->stringify if defined $lib_target_override;
     return path($root)->child('.raider', 'lib')->stringify;
   };
 
@@ -47,6 +47,19 @@ sub build_perl_tools_server {
   };
 
   my $chdir_root = sub { chdir $root or die "chdir $root: $!\n" };
+
+  # IPC::Run leaves the child running when finish dies on a timeout:
+  # kill it (TERM, then KILL after the grace period) before rethrowing.
+  my $finish = sub {
+    my ($h) = @_;
+    unless (eval { $h->finish; 1 }) {
+      my $e = $@;
+      eval { $h->kill_kill(grace => 2) };
+      die $e;
+    }
+    my $fr = $h->full_result;
+    return defined($fr) ? ($fr >> 8) : -1;
+  };
 
   my $ensure_lib_init = sub {
     my ($target) = @_;
@@ -97,9 +110,7 @@ sub build_perl_tools_server {
         my $target = $resolve_lib_target->();
         local $ENV{PERL5LIB} = $perl5lib_for->($target);
         my $h = start \@cmd, \$stdin, \$out, \$err, init => $chdir_root, timeout($to_sec);
-        $h->finish;
-        my $fr = $h->full_result;
-        return defined($fr) ? ($fr >> 8) : -1;
+        return $finish->($h);
       };
 
       my $rc;
@@ -132,9 +143,7 @@ sub build_perl_tools_server {
         my $empty = '';
         my $ih = start ['cpanm', '--local-lib', $target, @missing],
           \$empty, \$i_out, \$i_err, timeout(300);
-        $ih->finish;
-        my $fr = $ih->full_result;
-        my $i_rc = defined($fr) ? ($fr >> 8) : -1;
+        my $i_rc = $finish->($ih);
 
         if ($i_rc == 0) {
           $auto_installed = \@missing;
@@ -184,9 +193,7 @@ sub build_perl_tools_server {
       my ($out, $err);
       local $ENV{PERL5LIB} = $perl5lib_for->($resolve_lib_target->());
       my $h = start [$^X, '-c', '-'], \$code, \$out, \$err, init => $chdir_root, timeout(30);
-      $h->finish;
-      my $fr = $h->full_result;
-      my $rc = defined($fr) ? ($fr >> 8) : -1;
+      my $rc = $finish->($h);
 
       my $valid = ($rc == 0) ? JSON::MaybeXS::true() : JSON::MaybeXS::false();
       my $syntax_error;
@@ -250,9 +257,7 @@ sub build_perl_tools_server {
       my ($out, $err);
       my $empty = '';
       my $h = start \@cmd, \$empty, \$out, \$err, timeout(300);
-      $h->finish;
-      my $fr = $h->full_result;
-      my $rc = defined($fr) ? ($fr >> 8) : -1;
+      my $rc = $finish->($h);
 
       $append_to_cpanfile->($target_dir, $module) if $rc == 0;
 

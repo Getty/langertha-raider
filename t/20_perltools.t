@@ -121,6 +121,21 @@ subtest perl_eval_timeout_reported => sub {
   is($d->{error}, 'timeout', 'timeout reported as timeout');
 };
 
+subtest perl_eval_timeout_kills_child => sub {
+  my $pidfile = path($dir)->child('eval-timeout.pid');
+  $pidfile->remove;
+  my $res = call_tool('perl_eval', {
+    code    => 'open my $f, ">", "eval-timeout.pid" or die; print $f $$; close $f; sleep 30',
+    timeout => 1,
+  });
+  my $d = decoded($res);
+  is($d->{error}, 'timeout', 'timeout reported');
+  ok(-f $pidfile, 'child wrote its pid') or return;
+  my $pid = $pidfile->slurp_utf8;
+  ok(!kill(0, $pid), 'child is gone after the timeout');
+  kill 'KILL', $pid;
+};
+
 subtest perl_eval_start_failure_not_reported_as_timeout => sub {
   my $res = call_tool('perl_eval', { code => 'print 1', timeout => 'not-a-number' });
   my $d = decoded($res);
@@ -167,6 +182,26 @@ subtest perl_cpanm_relative_target_inside_root => sub {
   });
   ok(!$res->{isError}, 'relative target accepted');
   ok(-f path($dir)->child('.raider', 'rel', 'cpanfile'), 'resolved against the root');
+};
+
+subtest relative_lib_target_resolves_against_root => sub {
+  my $rel_server = build_perl_tools_server(root => $dir, lib_target => '.raider/rel-conf');
+  my $call = sub {
+    my ($name, $args) = @_;
+    my ($tool) = grep { $_->name eq $name } @{ $rel_server->tools };
+    return $tool->code->($tool, $args);
+  };
+
+  my $pm = path($dir)->child('.raider', 'rel-conf', 'lib', 'perl5', 'Raider', 'RelConf.pm');
+  $pm->parent->mkpath;
+  $pm->spew_utf8("package Raider::RelConf; 1;\n");
+  my $d = decoded($call->('perl_eval', { code => 'use Raider::RelConf; print "ok"' }));
+  is($d->{stdout}, 'ok', 'PERL5LIB points into the root') or diag $d->{stderr};
+
+  my $c = decoded($call->('perl_cpanm', { module => 'Acme::RelConf' }));
+  is($c->{target}, path($dir)->child('.raider', 'rel-conf')->stringify, 'cpanm --local-lib is the root-relative path');
+  ok(-f path($dir)->child('.raider', 'rel-conf', 'cpanfile'), 'cpanm target resolved against the root');
+  ok(!-e path('.raider'), 'nothing created relative to the process cwd');
 };
 
 subtest perl_cpanm_description_names_real_default => sub {
