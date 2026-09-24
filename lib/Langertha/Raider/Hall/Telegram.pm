@@ -190,8 +190,8 @@ sub _handle_update {
     bot => $bot_name,
     chat_id => $chat_id,
     text => $text,
-    first_name => $msg->{chat}{first_name} // '',
-    username => $msg->{chat}{username} // '',
+    first_name => $msg->{from}{first_name} // '',
+    username => $msg->{from}{username} // '',
     update_id => $update->{update_id},
   });
 

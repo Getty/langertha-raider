@@ -130,6 +130,18 @@ subtest 'message without from rejects' => sub {
   is( scalar @spawns, 0, 'no raider spawned' );
 };
 
+subtest 'telegram.in names the sender, not the chat' => sub {
+  my $tg = telegram_with( allowlist => [42], allowed_chats => [-1001234] );
+  feed( $tg, {
+    chat => { id => -1001234, type => 'supergroup', title => 'Ops Crew' },
+    from => { id => 42, first_name => 'Astrid', username => 'astrid_ops' },
+    text => 'status?'
+  } );
+  is( types(), ['telegram.in'], 'accepted' );
+  is( $events[0]{first_name}, 'Astrid', 'first_name from message.from' );
+  is( $events[0]{username}, 'astrid_ops', 'username from message.from' );
+};
+
 subtest 'startup warns about an empty allowlist' => sub {
   my $tg = Langertha::Raider::Hall::Telegram->new( hall => $hall );
   @events = ();
