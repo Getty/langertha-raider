@@ -137,6 +137,10 @@ subtest 'configuration errors exit 3' => sub {
   my ( $exit, $out, $err ) = main_run('', '-r', $broken, '-e', 'openai', 'hi');
   is($exit, 3, 'broken .raider.yml');
   like($err, qr/\.raider\.yml/, 'names the file');
+  path($broken)->child('.raider.yml')->spew_utf8("packs:\n  git-guru: 1\n");
+  ( $exit, $out, $err ) = main_run('', '-r', $broken, '-e', 'openai', 'config', 'explain');
+  is($exit, 3, 'a mapping under a raider key');
+  like($err, qr/\.raider\.yml: packs: .*must not be a mapping/, 'names file and key');
   ( $exit, $out, $err ) = main_run('', '-r', $root, '-e', 'nope', 'hi');
   is($exit, 3, 'unknown engine');
   like($err, qr/Unknown engine: nope/, 'reported');

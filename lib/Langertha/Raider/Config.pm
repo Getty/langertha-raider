@@ -45,8 +45,10 @@ Every other top-level hash is the section of an engine that is not active.
 C<skills> is merged across the layers instead of replaced. C<engine> is read
 from C<top> and C<default> only, as it picks the engine section.
 
-A file that does not parse, or whose top level is not a mapping, is an
-error: readers croak and the writer refuses to overwrite it.
+A file that does not parse, whose top level is not a mapping, or that holds
+a mapping under one of raider's own keys other than C<skills> and C<detect>
+(see L</is_app_key>), is an error: readers croak and the writer refuses to
+overwrite it.
 
 =cut
 
@@ -89,7 +91,8 @@ sub _build_file { path($_[0]->root)->child('.raider.yml') }
 =attr data
 
 The parsed file as a hash; empty when the file is missing or empty. Croaks
-when the file does not parse or its top level is not a mapping.
+when the file does not parse, its top level is not a mapping, or a raider
+key other than C<skills> and C<detect> holds a mapping.
 
 =cut
 
@@ -108,6 +111,10 @@ sub _build_data {
     or croak 'Cannot parse '.$file.': '.( split /\n/, $@ )[0];
   return {} unless defined $data;
   croak 'Cannot use '.$file.': the top level must be a mapping' unless ref $data eq 'HASH';
+  for my $key (sort keys %$data) {
+    next unless $APP_KEY{$key} && !$self->_may_be_mapping($key) && ref $data->{$key} eq 'HASH';
+    croak 'Cannot use '.$file.': '.$key.': configures raider, not an engine section; must not be a mapping';
+  }
   return $data;
 }
 
@@ -119,9 +126,16 @@ True when F<.raider.yml> exists.
 
 sub file_exists { -f $_[0]->file ? 1 : 0 }
 
+# The raider keys whose value may be a mapping; any other top-level mapping
+# is an engine section.
+sub _may_be_mapping {
+  my ( $self, $key ) = @_;
+  return $key eq 'skills' || $key eq 'detect';
+}
+
 sub _is_section {
   my ( $self, $key ) = @_;
-  return $key ne 'skills' && $key ne 'detect' && ref $self->data->{$key} eq 'HASH';
+  return !$self->_may_be_mapping($key) && ref $self->data->{$key} eq 'HASH';
 }
 
 sub _layers {

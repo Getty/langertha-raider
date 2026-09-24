@@ -39,6 +39,18 @@ subtest 'unusable files croak' => sub {
   like(dies { config_with("- a\n- b\n")->data }, qr/top level must be a mapping/, 'list at top level');
 };
 
+subtest 'a mapping under a raider key is an error, not an engine section' => sub {
+  for my $key (qw( engine no_detect packs perl preferred_lib_target )) {
+    like(dies { config_with($key.":\n  x: 1\n")->data },
+      qr/Cannot use .*\.raider\.yml: \Q$key\E: configures raider, not an engine section; must not be a mapping/,
+      $key.': croaks naming the key');
+  }
+  my $ok = config_with("skills:\n  claude: 1\ndetect:\n  rust: false\nanthropic:\n  model: x\n");
+  ok(lives { $ok->data }, 'skills:, detect: and engine sections may be mappings');
+  is($ok->explain('openai')->{ignored}, [ { key => 'anthropic', reason => 'section of an inactive engine' } ],
+    'an inactive engine section is still just ignored');
+};
+
 subtest 'set_model keeps a flat file flat in meaning' => sub {
   my $config = config_for('flat.yml');
   $config->set_model('gpt-4o');
