@@ -21,8 +21,8 @@ releases. **Never** run `dzil release`, `docker push`, or `gh release`.
 2. **dist.ini** — once it exists, check it follows the `[@Author::GETTY]`
    pattern used by `langertha-knarr`/`langertha-skeid`. The old `raider` repo's
    `dist.ini` had a `run_after_release` chain publishing a GitHub release and a
-   Docker Hub image (`raudssus/raider`) — karr #6 tracks the image name as
-   undecided for this dist; do not assume it carried over unchanged.
+   Docker Hub image (`raudssus/raider`) — that image name is kept (decided
+   2026-09-24, karr #6).
 3. **`dzil build`** — runs clean: no missing files, no warnings.
 4. **Changes** — `{{$NEXT}}` section exists and covers the user-visible changes
    since the last tag.

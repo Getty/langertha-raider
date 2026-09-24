@@ -23,6 +23,13 @@ attach.
   capabilities that are implemented.
 - Remote agents: SSH is the transport, ACP the conversation; prompts go over stdin, never
   into a remote shell line built from model text.
+- **Remote CLI syntax:** `raider NAME@HOST <anything you'd type locally>` runs as raider
+  `NAME` on `HOST` (maintainer, 2026-09-24). Detected as the first argument matching
+  `NAME@HOST` and dispatched before option parsing, like the existing `hall` / `acp`
+  subcommands in `bin/raider`.
+- **`raider acp` is the stdio ACP server** an editor starts (maintainer, 2026-09-24). The
+  existing ACP client moves to `raider acp connect …` for debugging; the everyday client
+  role is `raider NAME@HOST`.
 
 ## Source
 
