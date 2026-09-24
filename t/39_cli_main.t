@@ -138,7 +138,7 @@ subtest 'configuration errors exit 3' => sub {
   is($exit, 3, 'broken .raider.yml');
   like($err, qr/\.raider\.yml/, 'names the file');
   path($broken)->child('.raider.yml')->spew_utf8("packs:\n  git-guru: 1\n");
-  ( $exit, $out, $err ) = main_run('', '-r', $broken, '-e', 'openai', 'config', 'explain');
+  ( $exit, $out, $err ) = main_run('', 'config', 'explain', '-r', $broken, '-e', 'openai');
   is($exit, 3, 'a mapping under a raider key');
   like($err, qr/\.raider\.yml: packs: .*must not be a mapping\n\z/, 'names file and key');
   unlike($err, qr/ line \d+/, 'no Perl source location');
@@ -185,6 +185,21 @@ subtest 'success exits 0, a failed run 1' => sub {
   like($out, qr/^answer to hi\n.*^bye\.$/ms, 'REPL ran');
   ( $exit, $out ) = main_run('', @base, 'config', 'explain');
   is($exit, 0, 'config explain');
+};
+
+subtest 'config explain after the options' => sub {
+  my ( $exit, $out, $err ) = main_run('', @base, 'config', 'explain');
+  is($exit, 0, 'exits 0');
+  like($out, qr/^file:   .*\.raider\.yml.*^engine: openai$/ms, 'the config report');
+  unlike($out, qr/answer to/, 'no prompt run');
+  ( $exit, $out, $err ) = main_run('', '-r', $root, '-e', 'openai', 'config', 'explain', '--no-color');
+  is($exit, 0, 'options on both sides');
+  like($out, qr/^engine: openai$/m, 'the config report');
+  ( $exit, $out ) = main_run('', @base, 'config', 'the', 'build');
+  is($exit, 0, 'a prompt starting with config');
+  like($out, qr/\Aanswer to config the build\n/, 'runs as a prompt');
+  ( $exit, $out ) = main_run('', @base, 'config', 'explain', 'the', 'build');
+  like($out, qr/\Aanswer to config explain the build\n/, 'more words: still a prompt');
 };
 
 subtest '--json keeps the trace off unless asked' => sub {

@@ -48,7 +48,10 @@ client. C<raider config explain [options]> takes the normal options and
 prints every effective setting with its source -- a command-line flag, a
 F<.raider.yml> layer, an environment variable or the built-in default --
 without writing F<.raider.yml> or contacting a model; C</config> prints the
-same inside the REPL.
+same inside the REPL. The options may also come first
+(C<raider -e openai config explain>); there only the exact words
+C<config explain> are the subcommand, any other prompt starting with
+C<config> is sent as a prompt.
 
 With C<--json>, F<raider> emits a single JSON object
 (C<{response, metrics, elapsed}>, or C<{error, elapsed}> when the run failed)

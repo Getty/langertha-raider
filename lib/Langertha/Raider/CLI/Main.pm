@@ -299,6 +299,14 @@ sub run {
 
   my ( $opt, @prompt ) = $self->parse_options(@argv) or return EXIT_USAGE;
 
+  # Behind options (raider -e openai config explain) only the exact words
+  # "config explain" are the subcommand; any other prompt starting with
+  # "config" stays a prompt.
+  if (!$config_cmd && @prompt == 2 && $prompt[0] eq 'config' && $prompt[1] eq 'explain') {
+    $config_cmd = 'explain';
+    @prompt = ();
+  }
+
   $ENV{ANSI_COLORS_DISABLED} = 1 if $opt->{no_color} || $opt->{json};
 
   if ($opt->{help}) {
