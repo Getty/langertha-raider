@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-24T23:38:22Z
+claimed_by: worker-followup
+class: standard
+completed: 2026-09-24T23:38:22Z
+created: 2026-09-24T23:29:28Z
+id: 47
+priority: low
+started: 2026-09-24T23:29:48Z
+status: done
+tags:
+- bug
+- config
+title: 'Config: Hash unter App-Keys (no_detect, packs, ...) wird still als Engine-Abschnitt
+  ignoriert'
+updated: 2026-09-24T23:38:22Z
+---
+
+Aus #44: Langertha::Raider::Config liest jeden Top-Level-Hash ausser skills/detect als inaktive Engine-Sektion. Fuer App-Keys klaren Fehler melden statt still ignorieren.
