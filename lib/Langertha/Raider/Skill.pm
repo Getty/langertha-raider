@@ -14,7 +14,7 @@ use Path::Tiny;
     my $md = $skill->markdown;
 
     # Claude Code SKILL.md with frontmatter, written to .claude/skills/...
-    $skill->write_claude_skill('.claude/skills/app-raider/SKILL.md');
+    $skill->write_claude_skill('.claude/skills/raider/SKILL.md');
 
 =head1 DESCRIPTION
 
@@ -32,7 +32,7 @@ Two output variants are supported:
 any README-ish place or feed it to a non-Claude agent.
 
 =item * L</claude_skill> — Claude Code SKILL.md with a proper YAML
-frontmatter block. Write to C<.claude/skills/app-raider/SKILL.md> (or
+frontmatter block. Write to C<.claude/skills/raider/SKILL.md> (or
 wherever your skill directory lives) with L</write_claude_skill>.
 
 =back
@@ -51,14 +51,14 @@ has app => (
 
 =attr name
 
-Skill name used in the Claude frontmatter. Defaults to C<app-raider>.
+Skill name used in the Claude frontmatter. Defaults to C<raider>.
 
 =cut
 
 has name => (
   is      => 'ro',
   isa     => 'Str',
-  default => 'app-raider',
+  default => 'raider',
 );
 
 =attr description
@@ -287,6 +287,22 @@ sub write_claude_skill {
   $p->parent->mkpath unless -d $p->parent;
   $p->spew_utf8($self->claude_skill);
   return $p;
+}
+
+=method legacy_claude_skill
+
+Returns the L<Path::Tiny> of a Claude skill exported by an older release
+under the former default name (C<.claude/skills/app-raider/SKILL.md> below
+the working root), or nothing when there is none. The C<--claude> profile
+would load it next to the current one, so the CLI points it out after an
+export.
+
+=cut
+
+sub legacy_claude_skill {
+  my ($self) = @_;
+  my $p = path($self->app->root)->child('.claude/skills/app-raider/SKILL.md');
+  return -f $p ? $p : ();
 }
 
 __PACKAGE__->meta->make_immutable;

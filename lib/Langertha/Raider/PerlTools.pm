@@ -100,7 +100,7 @@ sub build_perl_tools_server {
 
   # --- Tool: perl_eval ---
 
-  my $server = MCP::Server->new(name => 'app-raider-perl', version => '1.0');
+  my $server = MCP::Server->new(name => 'raider-perl', version => '1.0');
 
   $server->tool(
     name        => 'perl_eval',

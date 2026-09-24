@@ -87,7 +87,7 @@ sub build_web_tools_server {
     ));
   }
 
-  my $server = MCP::Server->new(name => 'app-raider-web', version => '1.0');
+  my $server = MCP::Server->new(name => 'raider-web', version => '1.0');
 
   $server->tool(
     name         => 'web_search',

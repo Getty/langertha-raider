@@ -73,7 +73,7 @@ sub build_hall_tools_server {
       ? { bot => $ENV{RAIDER_HALL_TELEGRAM_BOT}, chat_id => $ENV{RAIDER_HALL_TELEGRAM_CHAT_ID} }
       : undef );
 
-  my $server = MCP::Server->new(name => 'app-raider-hall', version => '1.0');
+  my $server = MCP::Server->new(name => 'raider-hall', version => '1.0');
 
   $server->tool(
     name         => 'telegram_reply',

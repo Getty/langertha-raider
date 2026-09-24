@@ -85,7 +85,7 @@ sub build_file_tools_server {
     return $p;
   };
 
-  my $server = MCP::Server->new(name => 'app-raider-files', version => '1.0');
+  my $server = MCP::Server->new(name => 'raider-files', version => '1.0');
 
   $server->tool(
     name         => 'list_files',

@@ -143,7 +143,7 @@ Options:
                            (default: ./RAIDER-SKILL.md) and exit.
       --export-claude-skill [PATH]
                            Write a Claude Code SKILL.md with frontmatter
-                           (default: .claude/skills/app-raider/SKILL.md)
+                           (default: .claude/skills/raider/SKILL.md)
                            and exit.
   -h, --help               Show this help
 
@@ -217,8 +217,12 @@ if (defined $opt{export_skill}) {
 }
 if (defined $opt{export_claude_skill}) {
   my $path = length $opt{export_claude_skill} ? $opt{export_claude_skill} : undef;
-  my $p = Langertha::Raider::Skill->new(app => $app)->write_claude_skill($path);
+  my $skill = Langertha::Raider::Skill->new(app => $app);
+  my $p = $skill->write_claude_skill($path);
   print STDERR "wrote $p\n";
+  if (my $old = $skill->legacy_claude_skill) {
+    print STDERR "note: $old is left over from an older raider, remove it\n";
+  }
   exit 0;
 }
 
@@ -449,8 +453,12 @@ sub handle_slash {
   }
   if ($cmd eq 'skill-claude') {
     my $path = length $arg ? $arg : undef;
-    my $p = Langertha::Raider::Skill->new(app => $app)->write_claude_skill($path);
+    my $skill = Langertha::Raider::Skill->new(app => $app);
+    my $p = $skill->write_claude_skill($path);
     print_meta("wrote $p");
+    if (my $old = $skill->legacy_claude_skill) {
+      print_meta("note: $old is left over from an older raider, remove it");
+    }
     return;
   }
   if ($cmd eq 'model') {
