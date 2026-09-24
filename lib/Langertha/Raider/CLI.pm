@@ -148,7 +148,10 @@ sub default_model_for_engine {
 
 =attr model
 
-Model identifier to pass to the engine. If unset, the engine picks its default.
+Model identifier to pass to the engine. Defaults to C<model> in
+L</engine_options>, then C<model:> in F<.raider.yml>, then the per-engine
+cheap default. An explicit C<model> always wins; this is the model the
+engine is built with.
 
 =cut
 
@@ -157,11 +160,16 @@ has model => (
   isa       => 'Str',
   lazy      => 1,
   predicate => 'has_explicit_model',
-  default   => sub {
-    my ($self) = @_;
-    return default_model_for_engine($self->engine_name) // '';
-  },
+  builder   => '_build_model',
 );
+
+sub _build_model {
+  my ($self) = @_;
+  return $self->engine_options->{model}
+    // $self->_engine_yml_options->{model}
+    // default_model_for_engine($self->engine_name)
+    // '';
+}
 
 sub has_model {
   my ($self) = @_;
@@ -184,7 +192,9 @@ sub api_key_env {
 
 =attr api_key
 
-API key for the engine. Defaults to an engine-appropriate environment variable.
+API key for the engine. Defaults to C<api_key> in L</engine_options>, then
+C<api_key:> in F<.raider.yml>, then an engine-appropriate environment
+variable. An explicit C<api_key> always wins.
 
 =cut
 
@@ -588,6 +598,8 @@ has _mcps   => (is => 'ro', lazy => 1, builder => '_build_mcps');
 
 sub _build_api_key {
   my ($self) = @_;
+  my $configured = $self->engine_options->{api_key} // $self->_engine_yml_options->{api_key};
+  return $configured if defined $configured;
   my $var = env_var_for_engine($self->engine_name);
   return '' unless $var;
   return $ENV{$var} // '';
@@ -669,15 +681,17 @@ sub _build_engine {
   my $class = $self->_engine_class;
   Module::Runtime::require_module($class);
 
+  # Engine-level overrides: .raider.yml then engine_options (CLI wins).
+  # model and api_key go last: their accessors already resolve flag over
+  # -o over .raider.yml, so an explicit -m / -k is never overwritten.
   my %args = (
+    %{$self->_engine_yml_options},
+    %{$self->engine_options},
     mcp_servers => $self->_mcps,
   );
+  delete @args{qw( model api_key )};
   $args{api_key} = $self->api_key if length $self->api_key;
   $args{model}   = $self->model   if $self->has_model;
-
-  # Engine-level overrides: .raider.yml then engine_options (CLI wins).
-  my $yml = $self->_engine_yml_options;
-  %args = (%args, %$yml, %{$self->engine_options});
 
   return $class->new(%args);
 }
