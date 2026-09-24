@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-24T22:01:03Z
+claimed_by: worker-engine
+class: standard
+completed: 2026-09-24T22:01:03Z
+created: 2026-09-24T15:30:37Z
+id: 17
+priority: medium
+started: 2026-09-24T21:51:24Z
+status: done
+tags:
+- bug
+- tools
+- perl
+- m0
+title: 'Perl-Tools: perl_check-Beschreibung falsch, PERL5LIB/cwd inkonsistent'
+updated: 2026-09-24T22:01:03Z
+---
+
+PerlTools.pm: perl_check (:176, perl -c -) wird als "without executing the code" beschrieben (:163) - falsch, BEGIN/use laufen (reproduziert per Markerdatei). perl_check bekommt keine Target-PERL5LIB, perl_eval schon. perl_eval (:88) laeuft im Prozess-cwd statt in root (reproduziert) und mit perl aus PATH statt $^X; jede Exception wird als "timeout" gemeldet. perl_cpanm: options.target erlaubt Pfade ausserhalb root (:211); Beschreibung nennt .raider/lib/standalone, Code nutzt .raider/lib (:34). Minimalfixes: Beschreibung korrigieren, PERL5LIB+cwd angleichen, Fehlermeldung ehrlich. Groessere Begrenzung -> ADR 0005 / Executor.
