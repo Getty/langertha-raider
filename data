@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-24T04:28:28Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-24T04:28:28Z
+created: 2026-09-24T03:43:26Z
+id: 11
+priority: low
+started: 2026-09-24T04:17:02Z
+status: done
+tags:
+- hall
+- moose
+title: Hall::Protocol lacks make_immutable
+updated: 2026-09-24T04:28:28Z
+---
+
+Langertha::Raider::Hall::Protocol (lib/Langertha/Raider/Hall/Protocol.pm, split out in k8) is a Moose class without __PACKAGE__->meta->make_immutable at the bottom; it was like that in the original multi-package Hall.pm and k8 was a pure move. House rule: every Moose class ends with make_immutable. One-line fix plus a check that nothing adds methods/attributes to it at runtime.
+
+Protocol.pm: added __PACKAGE__->meta->make_immutable (no runtime meta changes; setup_handlers only calls $hall->_register_cmd which stores into a hashref). Also fixed assembly-rename regression: bin/raider used $Langertha::Raider::AGENT_PROFILES (engine pkg) instead of $Langertha::Raider::CLI::AGENT_PROFILES -> --claude/--openai/--codex crashed. Regression test t/26_cli_profiles.t (fails on old code). Audit of every bare App::Raider site from ~/dev/raider (bin, lib POD, isa in Skill.pm, t/, README, Dockerfile, share): all others correctly mapped to Langertha::Raider::CLI; remaining bare Langertha::Raider uses are genuine engine refs. Install smoke (dzil build + cpanm -l scratch lib): raider/raider-hall --help rc=0, packs resolve from auto/share/dist/Langertha-Raider. Note: cpanm -L (contained) fails since Langertha 0.503 not on CPAN; -l works. prove -lr t: 20 files/277 tests PASS. Uncommitted.
