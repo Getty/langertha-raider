@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-09-24T02:24:05Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-24T15:35:27Z
+created: 2026-09-17T18:13:21Z
+id: 1
+priority: high
+started: 2026-09-24T02:15:43Z
+status: done
+tags:
+- bootstrap
+title: dist.ini/cpanfile/lib-Skelett anlegen (Author::GETTY Bundle, main_module Langertha::Raider)
+updated: 2026-09-24T15:35:27Z
+---
+
+2026-09-24 02:24 dist.ini ([@Author::GETTY], main_module lib/Langertha/Raider.pm, irc + run_after_release carried over, gather_exclude_match for .claude/CLAUDE.md/TODO.md/MIGRATION md), cpanfile (union, Getty pins Langertha 0.503, Net::Async::MCP 0.004, MCP::Run::Bash 0.106, Net::Async::WebSearch 0.003; no MooseX::NonMoose/Module::Pluggable - unused here), LICENSE via dzil genlicense, .gitignore merged. Files staged (not committed) so Git::GatherDir sees them. dzil build + dzil test clean. Version 0.502 everywhere - see k7.
