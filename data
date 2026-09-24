@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-24T21:24:16Z
+claimed_by: raider-worker-14
+class: standard
+completed: 2026-09-24T21:24:12Z
+created: 2026-09-24T15:30:06Z
+id: 14
+priority: high
+started: 2026-09-24T21:19:11Z
+status: done
+tags:
+- bug
+- hall
+- cli
+- m0
+title: 'Hall-CLI: Optionen vor Argumenten werden falsch geparst (start/spawn/attach/logs)'
+updated: 2026-09-24T21:24:16Z
+---
+
+Reproduziert: Hall/CLI.pm:186-189 - GetOptions konsumiert @ARGV, hall_dir(@args) sieht unveraendertes @args -> `hall start --daemon DIR` nimmt cwd. Gleiches Muster :332 (spawn NAME MISSION --attach haengt "--attach" an die Mission, reproduziert), :380 (attach), :419 (logs --follow ID -> id="--follow", nur gelesen). Fix: nach GetOptions mit den Restargumenten arbeiten. Regressionstest je Subcommand.
+
+Fixed in ad1d66f (auch kill). Regressionstest t/32_hall_cli_args.t.
