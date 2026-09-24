@@ -4,13 +4,14 @@ use Test2::V0;
 use File::Temp qw( tempdir );
 use Path::Tiny;
 use YAML::PP ();
+use lib 't/lib';
+use Test::Raider::Env qw( clear_engine_env );
 use Langertha::Raider::CLI;
 
 # explain_config: every effective setting with its source, command-line
 # flags included; `raider config explain` prints it without side effects.
 
-delete @ENV{qw( ANTHROPIC_API_KEY OPENAI_API_KEY DEEPSEEK_API_KEY
-  GROQ_API_KEY MISTRAL_API_KEY GEMINI_API_KEY )};
+clear_engine_env();
 
 my $YML = {
   temperature => 0.2,

@@ -4,6 +4,8 @@ use Test2::V0;
 use File::Temp qw( tempdir );
 use Path::Tiny;
 use YAML::PP ();
+use lib 't/lib';
+use Test::Raider::Env qw( clear_engine_env );
 use Langertha::Raider::CLI;
 use Langertha::Raider::Hall;
 
@@ -18,8 +20,7 @@ my $bin      = $repo->child('bin', 'raider');
 my $fixtures = $repo->child('t', 'fixtures', 'raider-yml');
 
 delete $ENV{RAIDER_HALL_SOCKET};
-delete @ENV{qw( ANTHROPIC_API_KEY OPENAI_API_KEY DEEPSEEK_API_KEY GROQ_API_KEY
-  MISTRAL_API_KEY GEMINI_API_KEY )};
+clear_engine_env();
 
 # A fresh root holding the named fixture as .raider.yml plus extra files.
 sub fixture_root {

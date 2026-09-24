@@ -9,13 +9,15 @@ use Encode qw( decode_utf8 );
 use File::Temp qw( tempdir );
 use JSON::MaybeXS ();
 use Path::Tiny;
+use lib 't/lib';
+use Test::Raider::Env qw( clear_engine_env );
 use Langertha::Raider::CLI::Main;
 use Langertha::Raider::CLI::Output;
 use Langertha::Raider::CLI::REPL;
 use Langertha::Raider::CLI::Runner;
 
-delete @ENV{qw( ANTHROPIC_API_KEY OPENAI_API_KEY DEEPSEEK_API_KEY
-  GROQ_API_KEY MISTRAL_API_KEY GEMINI_API_KEY ANSI_COLORS_DISABLED )};
+clear_engine_env();
+delete $ENV{ANSI_COLORS_DISABLED};
 
 # A raider CLI whose run answers without a model.
 package My::App {

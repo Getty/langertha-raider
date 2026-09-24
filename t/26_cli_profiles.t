@@ -3,11 +3,15 @@ use warnings;
 use Test::More;
 use File::Temp qw( tempdir );
 use Path::Tiny;
+use lib 't/lib';
+use Test::Raider::Env qw( clear_engine_env );
 
 # Regression: bin/raider must read the agent profile table from
 # $Langertha::Raider::CLI::AGENT_PROFILES (formerly $App::Raider::...).
 # Looking it up in the engine package crashed --claude/--openai/--codex with
 # "Can't use an undefined value as an ARRAY reference".
+
+clear_engine_env();
 
 my $repo = path(__FILE__)->absolute->parent->parent;
 my $bin  = $repo->child('bin', 'raider');

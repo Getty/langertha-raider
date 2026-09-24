@@ -3,6 +3,7 @@ use warnings;
 use Path::Tiny;
 use lib 't/lib';
 use Test::More;
+use Test::Raider::Env qw( clear_engine_env );
 use Langertha::Raider::Hall;
 use JSON::MaybeXS ();
 use IO::Async::Loop;
@@ -16,6 +17,12 @@ BEGIN {
   my $bin = $repo->child('bin', 'raider');
   $ENV{RAIDER_HALL_RAIDER_BIN} = $bin->stringify if -x $bin;
 }
+
+# 'spawn result structure' below has the hall exec the real bin/raider
+# (RAIDER_HALL_RAIDER_BIN above); it never reaches an engine because its
+# .raider-hall.yml names an unknown engine, but clear the env anyway so
+# that stays true if the fixture ever changes.
+clear_engine_env();
 
 subtest 'Hall new + config' => sub {
   my $tmp = tempdir(CLEANUP => 1);
