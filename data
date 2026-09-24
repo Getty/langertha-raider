@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T02:24:05Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-24T15:36:01Z
+created: 2026-09-17T18:13:22Z
+id: 2
+priority: high
+started: 2026-09-24T02:15:43Z
+status: done
+tags:
+- migration
+title: Langertha::Raider + Raider::Result + MCP::Client aus langertha-Core hierher
+  verschieben
+updated: 2026-09-24T15:36:01Z
+---
+
+2026-09-24 02:24 Result.pm folded into self-contained Langertha::Raider::Result (no Langertha::Result shipped); MCP/Client.pm -> Langertha::Raider::MCP (old name gone); Raid*.pm use Raider::Result; Raider.pm require MCP::Server/Raider::MCP hoisted to top-level use. RunContext/Role::Runnable come from core. Follow-up k9 (Raider::MCP redundant with Net::Async::MCP 0.004).
