@@ -34,7 +34,7 @@ BEGIN {
 
 use IO::Async::Loop;
 use Future::AsyncAwait;
-use Langertha::Raider::MCP;
+use Net::Async::MCP;
 use MCP::Server;
 use Langertha::Raider;
 
@@ -99,7 +99,7 @@ $server->tool(
 );
 
 my $loop = IO::Async::Loop->new;
-my $mcp = Langertha::Raider::MCP->new(server => $server);
+my $mcp = Net::Async::MCP->new(server => $server);
 $loop->add($mcp);
 
 async sub test_raider {

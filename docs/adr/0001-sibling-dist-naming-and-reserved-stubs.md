@@ -18,7 +18,8 @@ a sibling distribution following the `langertha-knarr` / `langertha-skeid` patte
 - `App::Raider` → `Langertha::Raider::CLI`; `App::Raider::X` → `Langertha::Raider::X`.
   Binaries `raider` and `raider-hall` keep their names.
 - Hall, Telegram, Cron and ACP stay **inside** this dist; no further split.
-- The MCP client ships only as `Langertha::Raider::MCP`, never in core.
+- The MCP client is plain `Net::Async::MCP` (0.004 or higher speaks the current protocol), a
+  dependency of this dist, never of core.
 - **Dependency direction is one-way:** Raider → Langertha, never back. `Langertha::RunContext`
   and `Langertha::Role::Runnable` stay in core (generic, dependency-free) and are used from
   here, never copied. The generic tool-calling foundation (`Role::Tools`, `Role::PluginHost`,

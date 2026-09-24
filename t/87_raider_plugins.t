@@ -324,6 +324,7 @@ subtest 'plugin self-tools are listed exactly once' => sub {
   my @names = grep { $_ eq 'my_custom_tool' } map { $_->{name} } @$tools;
   is(scalar @names, 1, 'plugin tool gathered once');
   ok($map->{my_custom_tool}, 'plugin tool routed through the inline MCP');
+  is(ref $raider->_inline_mcp, 'Net::Async::MCP', 'inline MCP is a plain Net::Async::MCP');
 };
 
 # --- Test: pre-instantiated plugin objects ---

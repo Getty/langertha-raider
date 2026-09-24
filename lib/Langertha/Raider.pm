@@ -9,7 +9,7 @@ use Module::Runtime qw( use_module );
 use Scalar::Util qw( blessed );
 use JSON::MaybeXS qw( JSON );
 use MCP::Server;
-use Langertha::Raider::MCP;
+use Net::Async::MCP;
 use Langertha::Raider::Result;
 use Langertha::RunContext;
 
@@ -19,7 +19,7 @@ with 'Langertha::Role::PluginHost', 'Langertha::Role::Runnable';
 
     use IO::Async::Loop;
     use Future::AsyncAwait;
-    use Langertha::Raider::MCP;
+    use Net::Async::MCP;
     use MCP::Server;
     use Langertha::Engine::Anthropic;
     use Langertha::Raider;
@@ -38,7 +38,7 @@ with 'Langertha::Role::PluginHost', 'Langertha::Role::Runnable';
     );
 
     my $loop = IO::Async::Loop->new;
-    my $mcp = Langertha::Raider::MCP->new(server => $server);
+    my $mcp = Net::Async::MCP->new(server => $server);
     $loop->add($mcp);
 
     async sub main {
@@ -1550,7 +1550,7 @@ async sub _initialize_inline_mcp_f {
     );
   }
 
-  my $mcp = Langertha::Raider::MCP->new(server => $server);
+  my $mcp = Net::Async::MCP->new(server => $server);
   $self->engine->_async_http->loop->add($mcp);
   await $mcp->initialize;
   $self->_inline_mcp($mcp);
