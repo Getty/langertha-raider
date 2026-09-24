@@ -10,6 +10,7 @@ use IO::Async::Listener;
 use IO::Async::Stream;
 use IO::Socket::IP;
 use JSON::MaybeXS;
+use Langertha::Raider::Hall::ACP::SubStream;
 
 =head1 DESCRIPTION
 
@@ -371,25 +372,5 @@ sub _notify {
 }
 
 __PACKAGE__->meta->make_immutable;
-
-1;
-
-# Tiny shim so the hall's subscriber loop can push JSON+\n into a
-# callback instead of an IO::Async::Stream handle.
-package Langertha::Raider::Hall::ACP::SubStream;
-our $VERSION = '0.503';
-
-sub new {
-  my ($class, %args) = @_;
-  bless { cb => $args{cb}, opened => 1 }, $class;
-}
-sub write {
-  my ($self, $line) = @_;
-  chomp(my $l = $line);
-  $self->{cb}->($l);
-  return 1;
-}
-sub handle { $_[0] }
-sub opened { $_[0]->{opened} }
 
 1;
