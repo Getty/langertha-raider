@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T23:29:10Z
+claimed_by: worker-detect
+class: standard
+completed: 2026-09-24T23:29:10Z
+created: 2026-09-24T23:09:21Z
+id: 43
+priority: medium
+started: 2026-09-24T23:09:47Z
+status: done
+tags:
+- packs
+- detection
+title: 'Pack-Detektion 1: Regel-Evaluator (ADR 0012)'
+updated: 2026-09-24T23:29:10Z
+---
+
+ADR 0012. Internes Modul, das eine detect-Regel (must/may/must_not; Bedingungen file/dir/contains/matches) gegen ein Workspace-Root auswertet. Grenzen: Globs relativ, kein .., keine Symlinks nach aussen, ** mit Tiefen-/Anzahl-Cap, Inhalt max. 64 KiB; Cap-Ueberschreitung = false + Meldung. Ergebnis inkl. Begruendung (welche Klausel griff). Nur Evaluator + Tests, keine Verdrahtung.
