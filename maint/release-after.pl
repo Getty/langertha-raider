@@ -6,7 +6,7 @@ use Getopt::Long qw( GetOptions );
 use Text::ParseWords qw( shellwords );
 
 my %opt = (
-  repo   => 'Getty/p5-app-raider',
+  repo   => 'Getty/langertha-raider',
   image  => 'raudssus/raider',
   target => 'runtime-root',
 );
