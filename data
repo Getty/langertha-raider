@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-24T02:24:04Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-24T19:32:47Z
+created: 2026-09-17T18:13:23Z
+id: 6
+priority: low
+started: 2026-09-24T19:32:47Z
+status: done
+tags:
+- decision
+- release
+title: Docker-Hub-Image-Namen fuer Release-Chain entscheiden (aktuell raudssus/raider)
+updated: 2026-09-24T19:32:47Z
+---
+
+2026-09-24 02:24 Hardcoded image refs to raudssus/raider: maint/release-after.pl (image default), lib/Langertha/Raider/Hall/CLI.pm lines ~589/652/655 (systemd --docker default image), README.md lines 73-74, 493, 506, 610, 622-623, 645, 693, 718-720.
+
+Entschieden (Maintainer 2026-09-24): Image bleibt raudssus/raider.
