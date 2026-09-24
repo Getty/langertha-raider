@@ -25,6 +25,9 @@ Revision history for Langertha-Raider
       and group chats must also be listed in the new allowed_chats.
       Rejections emit telegram.rejected; startup warns about empty
       allowlists and chat ids found in allowlist.
+    - Fix Telegram replies: a raider spawned for a Telegram message gets
+      its bot and chat id (RAIDER_HALL_TELEGRAM_BOT/_CHAT_ID), and
+      telegram_reply is bound to that chat, needing only text.
     - Fix Hall singleton queue replay, --pack propagation, Telegram
       future retention, and MCP tool result handling.
     - Add `--pack NAME` CLI parsing for one-shot pack activation.

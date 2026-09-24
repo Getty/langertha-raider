@@ -499,12 +499,13 @@ sub _find_raider_by_pid {
 
 sub _spawn_next_in_queue {
   my ($self, $slot, $base_name, $mission) = @_;
-  my $attach;
+  my ($attach, $telegram);
   if (ref $mission eq 'HASH') {
     $attach = $mission->{attach};
+    $telegram = $mission->{telegram};
     $mission = $mission->{mission};
   }
-  $self->_spawn_raider($slot, $base_name, $mission, $attach);
+  $self->_spawn_raider($slot, $base_name, $mission, $attach, $telegram);
 }
 
 sub spawn {
@@ -512,6 +513,7 @@ sub spawn {
   my $name = $args{name} // '';
   my $mission = $args{mission} // '';
   my $attach = $args{attach} // 0;
+  my $telegram = $args{telegram};
 
   my ($slot, $base_name) = $self->_parse_name($name);
 
@@ -520,6 +522,7 @@ sub spawn {
       push @{$self->singleton_queues->{$slot} //= []}, {
         mission => $mission,
         attach => $attach,
+        $telegram ? ( telegram => $telegram ) : (),
       };
       $self->_persist_queue($slot);
       $self->_emit('raider.queued', {
@@ -532,7 +535,7 @@ sub spawn {
     return { error => $err };
   }
 
-  return $self->_spawn_raider($slot // $name, $base_name // $name, $mission, $attach);
+  return $self->_spawn_raider($slot // $name, $base_name // $name, $mission, $attach, $telegram);
 }
 
 sub _parse_name {
@@ -544,7 +547,7 @@ sub _parse_name {
 }
 
 sub _spawn_raider {
-  my ($self, $slot, $base_name, $mission, $attach) = @_;
+  my ($self, $slot, $base_name, $mission, $attach, $telegram) = @_;
 
   my $raider_config = $self->config->{raiders}{$base_name} // {};
   my $engine = $raider_config->{engine} // 'anthropic';
@@ -571,6 +574,15 @@ sub _spawn_raider {
   my $extra_perl5lib = join ':', grep { defined && length } ($lib_path,
     ($self->config->{longhouse} ? $self->longhouse_lib_path->stringify : ()));
 
+  # The Telegram chat this raider answers; telegram_reply is bound to it.
+  # Never inherited from the hall's own env.
+  my %env = %ENV;
+  delete @env{qw( RAIDER_HALL_TELEGRAM_BOT RAIDER_HALL_TELEGRAM_CHAT_ID )};
+  if ($telegram) {
+    $env{RAIDER_HALL_TELEGRAM_BOT}     = $telegram->{bot};
+    $env{RAIDER_HALL_TELEGRAM_CHAT_ID} = $telegram->{chat_id};
+  }
+
   my $process = IO::Async::Process->new(
     command => \@cmd,
     setup => [
@@ -578,7 +590,7 @@ sub _spawn_raider {
       stdout => [ 'open', '>>', "$log_path" ],
       stderr => [ 'open', '>>', "$log_path" ],
       env => {
-        %ENV,
+        %env,
         RAIDER_HALL_MODE   => '1',
         RAIDER_HALL_ROOT   => $self->root->stringify,
         RAIDER_HALL_SLOT   => $slot,

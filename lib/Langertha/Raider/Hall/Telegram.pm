@@ -201,6 +201,7 @@ sub _handle_update {
     $self->hall->spawn(
       name => $target_raider,
       mission => $text,
+      telegram => { bot => $bot_name, chat_id => $chat_id },
     );
   }
 }
