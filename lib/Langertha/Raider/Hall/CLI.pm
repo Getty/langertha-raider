@@ -439,6 +439,8 @@ sub run_logs {
   my $socket = path($dir)->child('.raider-hall.socket');
   die "Hall not running (no socket found)\n" unless -e $socket;
 
+  return _follow_log($socket, $id) if $opt{follow};
+
   my $result = _send_command($socket, {
     type => 'command',
     payload => { cmd => 'logs', id => $id },
@@ -451,11 +453,39 @@ sub run_logs {
   return 0;
 }
 
+# Print the raider's log file and keep printing what is appended, until the
+# hall no longer knows the raider (it exited and was reaped). The CLI talks
+# to the hall over a local UNIX socket, so the log path is readable here.
+sub _follow_log {
+  my ( $socket, $id ) = @_;
+  my $attach = { type => 'command', payload => { cmd => 'attach', id => $id } };
+  my $result = _send_command($socket, $attach);
+  die "Hall: $result->{error}\n" if $result->{error};
+  my $log_path = $result->{log_path};
+
+  local $| = 1;
+  my $fh;
+  while (1) {
+    my $gone = _send_command($socket, $attach)->{error};
+    $fh //= path($log_path)->openr_raw if -f $log_path;
+    if ($fh) {
+      seek $fh, 0, 1;    # clear EOF so appended bytes are seen
+      while ( read $fh, my $buf, 65536 ) { print $buf }
+    }
+    last if $gone;
+    _follow_wait();
+  }
+  return 0;
+}
+
+sub _follow_wait { sleep 1 }
+
 sub print_logs_help {
   print <<"EOF";
 raider hall logs [DIR] ID [--follow]
 
-Fetch logs for a raider. --follow not yet implemented.
+Fetch logs for a raider. --follow keeps printing new output until the
+raider has exited.
 EOF
   exit 0;
 }

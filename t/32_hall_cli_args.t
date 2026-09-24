@@ -88,13 +88,55 @@ subtest 'attach: ID is the positional, not an option' => sub {
   }
 };
 
-subtest 'logs: --follow before or after ID' => sub {
+subtest 'logs: ID without --follow' => sub {
+  my $p = run_cmd( 'logs', 'r42' );
+  is( $p, { cmd => 'logs', id => 'r42' }, 'logs r42' );
+};
+
+# logs --follow streams the raider's log file until the hall no longer
+# knows the raider (k28). The hall is faked: attach reports the log path
+# while the raider "runs", every wait appends a line, then it is gone.
+sub run_follow {
+  my ( @argv ) = @_;
+  my $tmp = path( tempdir( CLEANUP => 1 ) );
+  $tmp->child('.raider-hall.socket')->touch;
+  my $log = $tmp->child('s1.log');
+  $log->spew_raw("line1\n");
+  chdir "$tmp" or die "chdir $tmp: $!";
+
+  my ( @sent, $waits );
+  no warnings 'redefine';
+  local *Langertha::Raider::Hall::CLI::_send_command = sub {
+    my ( $socket, $msg ) = @_;
+    push @sent, $msg->{payload};
+    return { error => 'raider not found' } if $waits && $waits >= 2;
+    return { id => 'r42', pid => 1, slot => 's1', log_path => "$log" };
+  };
+  local *Langertha::Raider::Hall::CLI::_follow_wait = sub {
+    $waits++;
+    $log->append_raw('line'.( $waits + 1 )."\n");
+  };
+  my $out = '';
+  {
+    local *STDOUT;
+    open STDOUT, '>', \$out or die $!;
+    Langertha::Raider::Hall::CLI->main(@argv);
+  }
+  chdir $orig_cwd or die "chdir $orig_cwd: $!";
+  return ( $out, \@sent );
+}
+
+subtest 'logs --follow streams until the raider is gone' => sub {
   for my $argv (
     [ 'logs', '--follow', 'r42' ],
     [ 'logs', 'r42', '--follow' ],
   ) {
-    my $p = run_cmd(@$argv);
-    is( $p, { cmd => 'logs', id => 'r42' }, join(' ', @$argv) );
+    my ( $out, $sent ) = run_follow(@$argv);
+    is( $out, "line1\nline2\nline3\n",
+      'whole log, appended lines included: '.join(' ', @$argv) );
+    is( [ map { $_->{id} } @$sent ], [ ('r42') x scalar @$sent ],
+      'every request asks for r42' );
+    is( $sent->[-1]{cmd}, 'attach', 'liveness polled via attach' );
   }
 };
 
