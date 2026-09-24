@@ -97,7 +97,8 @@ Revision history for Langertha-Raider
       or engine options; skills: merge across sections and with --claude
       / --openai / --skills, which all persist; engine: picks the engine;
       a file that does not parse, or a mapping under one of raider's own
-      keys (packs:, perl:, engine:, ...), stops raider instead of being
+      keys (packs:, perl:, engine:, ...) at the top, in default: or in an
+      engine section, stops raider with a one-line error instead of being
       ignored.
       Raider-only keys never reach the engine constructor.
     - Hall raiders without an engine: leave the choice to raider
