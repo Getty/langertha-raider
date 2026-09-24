@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-24T22:00:37Z
+claimed_by: worker-hall
+class: standard
+completed: 2026-09-24T22:00:37Z
+created: 2026-09-24T21:24:29Z
+id: 27
+priority: medium
+started: 2026-09-24T21:50:46Z
+status: done
+tags:
+- bug
+- hall
+- cli
+title: 'Hall-CLI: DIR-Argument wird nicht aus den Positionsargumenten entfernt'
+updated: 2026-09-24T22:00:37Z
+---
+
+Gefunden bei #14. hall_dir(@args) entfernt DIR nur aus seiner lokalen Kopie: `spawn . Bjorn raid` spawnt Raider "." mit Mission "Bjorn raid"; attach/logs/kill nehmen DIR als ID. Name/ID, die zufaellig ein existierendes Verzeichnis ist, wird als DIR interpretiert. Regressionstest je Subcommand.
