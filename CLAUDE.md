@@ -1,13 +1,17 @@
 # Langertha::Raider — CLAUDE.md
 
-## Status: pre-migration bootstrap
+## Status: assembled, pre-redesign
 
-This distribution does not contain code yet. It is the target for extracting
-`Langertha::Raider` (the autonomous-agent engine, currently living in `langertha`
-core) and the `App::Raider` CLI/Hall/ACP app (currently the standalone `raider`
-repo) into one sibling distribution — the same pattern as `langertha-knarr` and
-`langertha-skeid` (sibling dist, `requires 'Langertha'`, never the other way
-round). Full decision record and migration plan: `TODO.md`.
+The extraction is done: this dist ships the `Langertha::Raider` engine (from `langertha`
+core) plus the former `App::Raider` CLI/Hall/ACP app as `Langertha::Raider::*`
+(`App::Raider` → `Langertha::Raider::CLI`; the six old `App::Raider*` names ship as
+reserved stubs). Sibling-dist pattern like `langertha-knarr` / `langertha-skeid`
+(`requires 'Langertha'`, never the other way round). Repo: github.com/Getty/langertha-raider.
+
+The code works but is structurally messy; a redesign is pending. **Current state, vision
+and open questions: `STATE-AND-VISION.md`** — read it before any non-trivial change.
+Keep changes minimal until the redesign plan exists. History: `TODO.md`,
+`MIGRATION-FROM-LANGERTHA.md`.
 
 ## Delegation
 

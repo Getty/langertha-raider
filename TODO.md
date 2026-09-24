@@ -1,5 +1,8 @@
 # TODO — langertha-raider bootstrap
 
+> **Historisch (Stand 2026-09-17).** Die Extraktion ist erledigt (2026-09-24,
+> Commits b3ae744 ff.). Aktueller Stand, Vision und offene Fragen: `STATE-AND-VISION.md`.
+
 Entscheidung vom 2026-09-17: das Agenten-Framework aus `langertha`-Core rausziehen
 und mit der bisher eigenständigen `raider`-App zu einer Sibling-Distribution
 `langertha-raider` verschmelzen — gleiches Muster wie `langertha-knarr` /

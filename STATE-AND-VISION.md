@@ -117,10 +117,30 @@ Umsetzung müssen die Primärquellen erneut geprüft werden.
 - Direkte Token-Weiterverwendung gegen `api.anthropic.com` ist verboten und wird
   serverseitig geblockt.
 
-**Konsequenz für das Design (Vorschlag, nicht entschieden)**
-- Abo-Zugänge werden als eigene „Subprozess-Engines“ gebaut: ein Codex-Backend über
-  `codex app-server` (stdio) und ein Claude-Backend über `claude -p` bzw. das Agent SDK.
-  Die offiziellen Binaries besitzen dabei die Anmeldung.
+**Entschieden (Maintainer, 2026-09-24): Der Subprozess-Weg ist ok.**
+- Abo-Zugänge werden über die offiziellen Binaries angebunden: Codex über
+  `codex app-server` (stdio), Claude über `claude -p` bzw. das Agent SDK. Die Binaries
+  besitzen dabei die Anmeldung.
+
+**Idee: `--use-codex` / `--use-claude` als „Extra-KI“**
+- Die Flags hängen eine zusätzliche KI als **Tool** an, nicht als Haupt-Engine. Raider
+  kann ihr Anfragen stellen, etwa „frag Codex“ oder „lass Claude das reviewen“.
+- Vorbild ist dieses Setup hier: Claude Code hat Codex als MCP-Server und fragt ihn bei
+  Bedarf.
+- Umsetzungs-Idee: Der jeweilige Subprozess wird als MCP-Tool oder Self-Tool eingehängt
+  (`ask_codex`, `ask_claude`). Die Haupt-Engine bleibt, was per `--engine` bzw. Provider
+  gewählt ist.
+- **Namenskonflikt:** `--codex` bzw. `--openai` und `--claude` existieren heute schon und
+  bedeuten „lade `AGENTS.md` bzw. `CLAUDE.md`“. Das muss der Planer mit auflösen,
+  zusammen mit dem Wunsch, diese Dateien künftig automatisch zu laden (§1.3).
+- Offen:
+  - Sieht die Extra-KI den Kontext der Haupt-Session oder nur die Anfrage? Das berührt
+    die Kontext-Disziplin.
+  - Welches Arbeitsverzeichnis und welche Rechte bekommt sie (Sandbox, Approvals über
+    app-server)?
+  - Soll sie auch Haupt-Engine sein können?
+
+**Weitere Designfragen**
 - Direkte Backend-OAuth-Wege höchstens opt-in und klar als „inoffiziell“ markiert.
 - Offene Frage für den Planer: Wo lebt so ein Subprozess-Engine-Typ? Als Engine in Core
   (`Langertha::Engine::CodexAppServer`?), obwohl er keine HTTP-Engine ist, oder in

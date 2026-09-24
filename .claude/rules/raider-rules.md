@@ -87,16 +87,16 @@ For anything heading toward release: stop and ask.
 
 ## Raider-specific hazards
 
-- **This repo starts empty.** Do not invent architecture beyond what `TODO.md` records as
-  decided — flag gaps as karr tickets or questions instead of guessing.
+- **Redesign pending.** Do not invent architecture beyond what `STATE-AND-VISION.md` records
+  as decided — flag gaps as karr tickets or questions instead of guessing. Until a redesign
+  plan exists, keep code changes minimal (fixes, not improvements).
 - **Dependency direction is one-way** (Raider → Langertha core, never back) — see
   `raider-worker`'s agent body for the exact modules. Don't move core tool-calling
   foundation (`Role::Tools`, `Plugin.pm`, `Chat.pm`, …) into this repo; it's shared, not
   Raider-specific.
-- **The `Langertha::Raider` naming collision is unresolved** — bare `Langertha::Raider` is
-  both the engine class and the natural dist main_module; the old `App::Raider.pm` CLI
-  entry point cannot reuse that name. Confirm the resolution in `TODO.md` before renaming
-  `App::Raider::*`.
+- **Naming is resolved:** `Langertha::Raider` = engine + main_module, the CLI is
+  `Langertha::Raider::CLI`. Old `App::Raider*` names are reserved stubs only — never put
+  code back there.
 
 ## Perl specifics — reference, don't restate
 

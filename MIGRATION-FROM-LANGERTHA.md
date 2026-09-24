@@ -1,5 +1,9 @@
 # Migration manifest — raw copy from langertha core
 
+> **Done (2026-09-24).** Assembled in b3ae744 ff.; final version is **0.503** (not 0.502 as
+> planned below). `MooseX::NonMoose` / `Module::Pluggable` turned out unused and were not
+> added. Current state: `STATE-AND-VISION.md`.
+
 These files were copied **raw** (no renames, no dist assembly) out of the
 `langertha` distribution (commit bca4d0b, 2026-09-20) as the first half of the
 Raider extraction. The langertha side (removal / stubs + integrity + requirements
