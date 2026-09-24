@@ -504,6 +504,20 @@ sub _build_config {
   return Langertha::Raider::Config->new(root => $self->root);
 }
 
+# Which settings were passed to the constructor (the command-line flags), for
+# explain_config. Lazy attributes cannot tell that apart once built.
+has _explicit => (
+  is       => 'ro',
+  isa      => 'HashRef',
+  init_arg => undef,
+  default  => sub { {} },
+);
+
+sub BUILD {
+  my ($self, $args) = @_;
+  $self->_explicit->{$_} = 1 for grep { exists $args->{$_} } qw( engine model api_key perl );
+}
+
 # Well-known per-tool files + source dirs. Used both for loading (when the
 # matching profile flag is set) and for the "ignored but present" notice.
 our %AGENT_PROFILES = (
@@ -879,6 +893,115 @@ sub reload_mission {
   $raider->meta->find_attribute_by_name('mission')->set_value($raider, $new);
   return $new;
 }
+
+=method explain_config
+
+    my $report = $app->explain_config;
+
+Where each effective setting came from, command-line flags included. The
+shape of L<Langertha::Raider::Config/explain>, with C<source> (and
+C<shadowed>) naming a flag (C<-e>, C<-m>, C<-k>, C<-o>, C<--pack>,
+C<--perl>, C<--claude/--openai/--skills>), a F<.raider.yml> layer
+(C<.raider.yml>, C<.raider.yml default:>, C<.raider.yml openai:>), an
+environment variable (C<env OPENAI_API_KEY>) or C<default>. API key values
+are never included. Builds no engine.
+
+=cut
+
+sub explain_config {
+  my ($self) = @_;
+  my $engine   = $self->engine_name;
+  my $report   = $self->config->explain($engine);
+  my $explicit = $self->_explicit;
+  my $opts     = $self->engine_options;
+
+  # .raider.yml values as candidates: [ source, value, shadowed ]
+  my ( %yml, @yml_skills );
+  for my $v (@{ $report->{values} }) {
+    my $candidate = [
+      $self->_yml_source($v->{source}),
+      $v->{value},
+      [ map { $self->_yml_source($_) } @{ $v->{shadowed} } ],
+    ];
+    if ($v->{merged}) {
+      push @yml_skills, { %$v, source => $candidate->[0], shadowed => [] };
+      next;
+    }
+    $yml{ $v->{key} } = { applies_to => $v->{applies_to}, candidate => $candidate };
+  }
+  my %from_yml = map { $_ => $yml{$_}{candidate} } keys %yml;
+
+  my $env_var = env_var_for_engine($engine);
+  my $env_key = defined $env_var && length($ENV{$env_var} // '') ? $env_var : undef;
+  my $default_model = default_model_for_engine($engine);
+  my $yml_key = $from_yml{api_key};
+
+  my @values = (
+    $self->_explain_entry(engine => 'raider', [
+      $explicit->{engine} ? [ '-e', $engine ] : undef,
+      $from_yml{engine},
+    ], [ $env_key ? 'env '.$env_key : 'default', $engine ]),
+    $self->_explain_entry(model => 'engine', [
+      $explicit->{model} ? [ '-m', $self->model ] : undef,
+      defined $opts->{model} ? [ '-o', $opts->{model} ] : undef,
+      $from_yml{model},
+    ], defined $default_model ? [ 'default', $default_model ] : undef),
+    $self->_explain_entry(api_key => 'engine', [
+      $explicit->{api_key} ? [ '-k', '(set)' ] : undef,
+      defined $opts->{api_key} ? [ '-o', '(set)' ] : undef,
+      $yml_key ? [ $yml_key->[0], '(set)', $yml_key->[2] ] : undef,
+    ], $env_key ? [ 'env '.$env_key, '(set)' ] : undef),
+  );
+
+  my %flag = (
+    ( $self->has_pack_names ? ( packs => [ '--pack', $self->pack_names ] ) : () ),
+    ( $explicit->{perl} && $self->perl ? ( perl => [ '--perl', 1 ] ) : () ),
+  );
+  my %key = map { $_ => 1 } keys %$opts, keys %yml, keys %flag;
+  delete @key{qw( engine model api_key )};
+  for my $key (sort keys %key) {
+    my $applies_to = $yml{$key} ? $yml{$key}{applies_to} : $flag{$key} ? 'raider' : 'engine';
+    push @values, $self->_explain_entry($key, $applies_to, [
+      $flag{$key} // ( exists $opts->{$key} ? [ '-o', $opts->{$key} ] : undef ),
+      $from_yml{$key},
+    ]);
+  }
+
+  push @values, @yml_skills;
+  push @values, {
+    key        => 'skills',
+    value      => $self->cli_skill_sources,
+    source     => '--claude/--openai/--skills',
+    shadowed   => [],
+    merged     => 1,
+    applies_to => 'raider',
+  } if $self->has_cli_skill_sources;
+
+  return { %$report, values => \@values };
+}
+
+sub _yml_source {
+  my ($self, $layer) = @_;
+  return $layer eq 'top' ? '.raider.yml' : '.raider.yml '.$layer.':';
+}
+
+# One explain entry from candidates [ source, value, shadowed ], highest
+# priority first; the fallback counts only when no candidate is set.
+sub _explain_entry {
+  my ($self, $key, $applies_to, $candidates, $fallback) = @_;
+  my @have = grep { defined } @$candidates;
+  @have = ($fallback) if !@have && $fallback;
+  return unless @have;
+  my ($win, @rest) = @have;
+  return {
+    key        => $key,
+    value      => $win->[1],
+    source     => $win->[0],
+    shadowed   => [ @{ $win->[2] // [] }, map { ( $_->[0], @{ $_->[2] // [] } ) } @rest ],
+    applies_to => $applies_to,
+  };
+}
+
 
 __PACKAGE__->meta->make_immutable;
 
