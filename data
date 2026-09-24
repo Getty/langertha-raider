@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-24T03:44:21Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-24T03:44:21Z
+created: 2026-09-24T02:23:51Z
+id: 8
+priority: medium
+started: 2026-09-24T03:39:57Z
+status: done
+tags:
+- release
+- cleanup
+title: Split multi-package files (Hall.pm, Packs.pm, Hall/ACP.pm) before release
+updated: 2026-09-24T03:44:21Z
+---
+
+Hall.pm holds 6 packages, Packs.pm 3, Hall/ACP.pm 2. RewriteVersion/BumpVersionAfterRelease only rewrite the first $VERSION per file, so the inner packages stay frozen; dzil build warns "8 provide map entries did not map to .pm files". Inherited unchanged from App-Raider.
+
+2026-09-24 03:43 Split done, uncommitted (new files git-added). New: Hall/{Raider,Cron,Telegram,MCP,Protocol}.pm, Hall/ACP/SubStream.pm, Packs/{Pack,Collection}.pm. Parents use their parts (Hall->5, Packs->2, ACP->SubStream); parts don't use Hall (isa strings only), so no cycle. Imports added where parent file scope had covered them: Telegram use Net::Async::HTTP; Protocol use JSON::MaybeXS; Collection use JSON::MaybeXS (); SubStream use strict/warnings. Code diff vs HEAD = additions only. t/00_load.t extended (fresh-interpreter parent-loads-parts check, shown to fail if a use is dropped). prove -lr t PASS 268, dzil test PASS 299, dzil build no provides warning, both --help OK. Protocol missing make_immutable filed separately.
