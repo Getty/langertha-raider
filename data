@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T23:38:26Z
+claimed_by: worker-followup
+class: standard
+completed: 2026-09-24T23:38:26Z
+created: 2026-09-24T23:29:32Z
+id: 48
+priority: low
+started: 2026-09-24T23:29:52Z
+status: done
+tags:
+- docs
+- perl-tools
+title: 'README: Perl-Tools auch per Pack-Detektion aktiv; explain zeigt Perl-Grant'
+updated: 2026-09-24T23:38:26Z
+---
+
+Aus #45: README-Tooltabelle und Abschnitt Perl-native tools nennen nur --perl. Ausserdem: raider config explain zeigt nicht, ob Perl-Tools ueber den Pack freigegeben wurden (Code, kleiner Zusatz).
