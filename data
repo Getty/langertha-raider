@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-24T22:02:05Z
+claimed_by: worker-cli
+class: standard
+completed: 2026-09-24T22:02:05Z
+created: 2026-09-24T15:30:49Z
+id: 19
+priority: low
+started: 2026-09-24T21:51:12Z
+status: done
+tags:
+- bug
+- cli
+- m0
+title: /reload und /pack verwerfen per -M uebergebene Mission
+updated: 2026-09-24T22:02:05Z
+---
+
+Aus Code belegt, nicht ausgefuehrt: reload baut immer _build_mission und verliert -M. Ausserdem schreibt reload_mission (CLI.pm:860) am ro-Moose-Accessor vorbei in den Hash. Erst reproduzieren (Test), dann fixen.
