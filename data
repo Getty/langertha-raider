@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-24T19:49:20Z
+claimed_by: raider-worker-12
+class: standard
+completed: 2026-09-24T19:49:20Z
+created: 2026-09-24T15:29:47Z
+id: 12
+priority: critical
+started: 2026-09-24T19:45:53Z
+status: done
+tags:
+- security
+- hall
+- telegram
+- m0
+title: Telegram-Allowlist fail-closed + Absenderpruefung
+updated: 2026-09-24T19:49:20Z
+---
+
+Sicherheitsluecke (Code-Abgleich 2026-09-24): lib/Langertha/Raider/Hall/Telegram.pm:131 laesst bei leerer/fehlender Allowlist ALLE durch (fail-open) und prueft chat_id statt Absender; in Gruppen reicht Mitgliedschaft. Gespawnte Raider haben bash.
+
+Entschieden (Maintainer): leere Allowlist = niemand; geprueft wird from.id (Absender), chat_id zusaetzlich. Verhaltensaenderung -> Changes-Eintrag.
+Abnahme: Regressionstests fuer leere Liste, fremder Absender in erlaubter Gruppe, erlaubter Absender. Kein Live-Telegram.
