@@ -55,6 +55,11 @@ C<.raider-hall.yml> in the hall root:
     acp: { port: 38421, host: 127.0.0.1 }
     mcp: { enable: 1 }
 
+C<engine> on a raider entry is optional. Without it the hall passes no
+C<--engine> and the spawned raider decides itself: the engine from its
+F<.raider.yml> first, then autodetection from the API keys in the
+environment.
+
 =head1 SEE ALSO
 
 L<Langertha::Raider::CLI>, L<Langertha::Raider::Hall::ACP>, L<Langertha::Raider::HallTools>,
