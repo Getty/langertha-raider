@@ -22,7 +22,8 @@ Builds a self-describing how-to-use-raider document from a running
 L<Langertha::Raider::CLI> instance. The generated text reflects the actual live
 configuration: selected engine and model, which web-search providers are
 currently enabled based on environment variables, which persona layer is
-active (default Langertha vs. a custom C<.raider.md>), and so on.
+active (default Langertha, a custom C<.raider.md>, or a C<-M> mission),
+and so on.
 
 Two output variants are supported:
 
@@ -90,8 +91,10 @@ Returns the plain markdown document (no frontmatter).
 sub markdown {
   my ($self) = @_;
   my $app = $self->app;
-  my $persona_file = path($app->root)->child('.raider.md');
-  my $persona = -f $persona_file ? "custom (loaded from $persona_file)" : 'Langertha (default viking persona)';
+  my $source  = $app->mission_source;
+  my $persona = $source eq '-M'         ? 'from -M (.raider.md not used)'
+              : $source eq '.raider.md' ? 'custom (loaded from '.path($app->root)->child('.raider.md').')'
+              :                           'Langertha (default viking persona)';
   my $config  = $app->config;
   my $yml_loaded = $config->file_exists && $config->data ? 'yes ('.$config->file.')' : 'no';
   my $model   = $app->has_model ? $app->model : '(engine default)';

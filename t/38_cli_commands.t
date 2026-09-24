@@ -197,4 +197,21 @@ subtest 'every slash command is in the generated skill' => sub {
   like($md, qr{^\| `/$_\b}m, "/$_ in the slash command table") for sort @cmds;
 };
 
+subtest 'generated skill names where the persona comes from' => sub {
+  my $persona = sub { $_[0] =~ /^- Persona: (.*)$/m ? $1 : undef };
+
+  my $app = app();
+  is($persona->(Langertha::Raider::Skill->new(app => $app)->markdown),
+    'Langertha (default viking persona)', 'default');
+  my $file = path($app->root)->child('.raider.md');
+  $file->spew_utf8("Custom persona.\n");
+  is($persona->(Langertha::Raider::Skill->new(app => $app)->markdown),
+    'custom (loaded from '.$file.')', '.raider.md');
+
+  my $flag = app(mission => 'The -M mission.');
+  path($flag->root)->child('.raider.md')->spew_utf8("Custom persona.\n");
+  is($persona->(Langertha::Raider::Skill->new(app => $flag)->markdown),
+    'from -M (.raider.md not used)', '-M wins over .raider.md');
+};
+
 done_testing;
