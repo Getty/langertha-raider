@@ -12,6 +12,7 @@ use YAML::PP ();
 use Langertha::Raider::CLI;
 use Langertha::Raider::CLI::Commands;
 use Langertha::Raider::CLI::Output;
+use Langertha::Raider::Skill;
 
 delete @ENV{qw( ANTHROPIC_API_KEY OPENAI_API_KEY DEEPSEEK_API_KEY
   GROQ_API_KEY MISTRAL_API_KEY GEMINI_API_KEY )};
@@ -186,6 +187,14 @@ subtest '/prompt' => sub {
   $dcmds->dispatch('/prompt');
   like($dread->(), qr/prompt-builder finished\. mission reloaded \(\d+ chars\)\.\n\z/, 'done reloads');
   like($app->raider->mission, qr/Custom persona/, 'mission has .raider.md');
+};
+
+subtest 'every slash command is in the generated skill' => sub {
+  my $md = Langertha::Raider::Skill->new(app => app())->markdown;
+  my @cmds = map { s/^cmd_//r =~ tr/_/-/r } grep { /^cmd_/ }
+    Langertha::Raider::CLI::Commands->meta->get_method_list;
+  ok(scalar @cmds >= 12, 'commands found');
+  like($md, qr{^\| `/$_\b}m, "/$_ in the slash command table") for sort @cmds;
 };
 
 done_testing;

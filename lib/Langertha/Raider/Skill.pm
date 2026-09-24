@@ -172,6 +172,13 @@ that edits `.raider.md` for you).
 | `/prompt`                | Launch the prompt-builder (edits `.raider.md`)       |
 | `/skill [PATH]`          | Export plain-markdown how-to-use doc                 |
 | `/skill-claude [PATH]`   | Export Claude Code SKILL.md with YAML frontmatter    |
+| `/config`                | Show each setting and where it came from             |
+| `/model [NAME]`          | Save NAME as model to `.raider.yml` (next start)     |
+| `/model list [FILTER]`   | List the engine's models                             |
+| `/packs`                 | List the packs and which are active                  |
+| `/pack on NAME`          | Enable a pack, reloads the mission                   |
+| `/pack off NAME`         | Disable a pack, reloads the mission                  |
+| `/pack NAME`             | Toggle a pack                                        |
 | `/quit` `/exit` `:q`     | Leave                                                |
 
 ## Loading project skills
