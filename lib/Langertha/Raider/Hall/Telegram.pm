@@ -7,6 +7,20 @@ our $VERSION = '0.503';
 Long-polls every Telegram bot configured for a L<Langertha::Raider::Hall>,
 routes incoming messages to raiders and sends replies.
 
+Access is fail-closed and checked per message:
+
+  telegram:
+    bots:
+      ops:
+        token: '...'
+        allowlist:     [1234567890]      # Telegram user ids (message.from.id)
+        allowed_chats: [-1001234567890]  # optional: group chats to answer in
+
+A message is accepted only when its sender (C<from.id>) is in C<allowlist>
+B<and> its chat is either the private chat with that sender or listed in
+C<allowed_chats>. An empty or missing C<allowlist> accepts nobody. Rejected
+messages emit a C<telegram.rejected> event and are neither stored nor routed.
+
 =cut
 
 use Moose;
@@ -55,7 +69,9 @@ sub setup_bots {
 sub _start_bot {
   my ($self, $name, $bot_conf) = @_;
   my $token = $bot_conf->{token} // return;
+  $self->_check_bot_config($name, $bot_conf);
   my $allowlist = $bot_conf->{allowlist} // [];
+  my $allowed_chats = $bot_conf->{allowed_chats} // [];
   my $routing = $bot_conf->{routing} // {};
 
   my $ua = Net::Async::HTTP->new(
@@ -67,6 +83,7 @@ sub _start_bot {
   $self->_workers->{$name} = {
     token => $token,
     allowlist => $allowlist,
+    allowed_chats => $allowed_chats,
     routing => $routing,
     ua => $ua,
     offset => 0,
@@ -74,6 +91,34 @@ sub _start_bot {
   };
 
   $self->_poll($name);
+}
+
+sub _check_bot_config {
+  my ($self, $name, $bot_conf) = @_;
+  my @allowlist = @{ $bot_conf->{allowlist} // [] };
+  my @problems;
+  push @problems, 'empty allowlist, every message will be rejected'
+    unless @allowlist;
+  # Telegram group/channel ids are negative, user ids positive.
+  push @problems, 'allowlist entry '.$_.' is a chat id, not a user id;'
+    .' list it under allowed_chats and put the members\' user ids in allowlist'
+    for grep { /^-/ } @allowlist;
+  for my $problem (@problems) {
+    warn 'Telegram bot '.$name.': '.$problem."\n";
+    $self->hall->_emit('telegram.config_warning', { bot => $name, warning => $problem });
+  }
+}
+
+sub _reject_reason {
+  my ($self, $worker, $msg) = @_;
+  my $from_id = $msg->{from}{id} // return 'no_sender';
+  my $chat_id = $msg->{chat}{id};
+  return 'sender_not_allowed'
+    unless grep { $_ eq $from_id } @{ $worker->{allowlist} // [] };
+  return if $chat_id eq $from_id;
+  return 'chat_not_allowed'
+    unless grep { $_ eq $chat_id } @{ $worker->{allowed_chats} // [] };
+  return;
 }
 
 sub _poll {
@@ -127,8 +172,14 @@ sub _handle_update {
   my $chat_id = $msg->{chat}{id} // return;
   my $text = $msg->{text} // '';
 
-  my $allowlist = $worker->{allowlist};
-  if (@$allowlist && !grep { $_ eq $chat_id } @$allowlist) {
+  if (my $reason = $self->_reject_reason($worker, $msg)) {
+    $self->hall->_emit('telegram.rejected', {
+      bot => $bot_name,
+      chat_id => $chat_id,
+      from_id => $msg->{from}{id},
+      reason => $reason,
+      update_id => $update->{update_id},
+    });
     return;
   }
 

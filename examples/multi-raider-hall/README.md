@@ -94,8 +94,11 @@ config on the fly.
 ## Turning on Telegram
 
 Uncomment the `telegram:` block in `.raider-hall.yml`, drop in your
-bot token + allowlist, and restart the hall. Incoming messages emit
-`telegram.in` events on the hall bus. The raider spawned per
+bot token + allowlist, and restart the hall. `allowlist` lists the
+Telegram user ids allowed to talk to the bot — empty means nobody;
+group chats additionally need their chat id in `allowed_chats`.
+Incoming messages emit `telegram.in` events on the hall bus, rejected
+ones `telegram.rejected`. The raider spawned per
 `routing:` mapping gets the message as its mission and can call the
 `telegram_reply` MCP tool to answer back (wired automatically when the
 child is spawned under a hall — `RAIDER_HALL_SOCKET` is the trigger).

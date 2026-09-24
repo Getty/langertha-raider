@@ -52,12 +52,16 @@ mcp:
 # Uncomment + drop in your bot token to turn on Telegram routing.
 # Each bot has its own allowlist + routing map. Raiders get the
 # incoming text as their mission and call `telegram_reply` to answer.
+# `allowlist` holds Telegram *user* ids (the sender); an empty or
+# missing allowlist lets nobody in. Private chats with an allowlisted
+# user always work; group chats must also be listed in `allowed_chats`.
 #
 # telegram:
 #   bots:
 #     ops:
 #       token: '123456:ABC-DEF-…'
-#       allowlist: [1234567890]
+#       allowlist: [1234567890]            # user ids allowed to talk
+#       allowed_chats: [-1001234567890]    # optional: groups to answer in
 #       routing:
 #         1234567890: bjorn            # this chat_id reaches Björn
 #         '*':        lagertha          # everyone else → Lagertha

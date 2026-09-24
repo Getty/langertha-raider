@@ -20,6 +20,11 @@ Revision history for Langertha-Raider
       write operations, with regression tests.
     - Fix WebTools sync wrappers to await IO::Async futures through the
       loop, with injectable HTTP/search test doubles.
+    - Hall Telegram access is fail-closed: an empty or missing allowlist
+      rejects every message, allowlist holds sender user ids (from.id),
+      and group chats must also be listed in the new allowed_chats.
+      Rejections emit telegram.rejected; startup warns about empty
+      allowlists and chat ids found in allowlist.
     - Fix Hall singleton queue replay, --pack propagation, Telegram
       future retention, and MCP tool result handling.
     - Add `--pack NAME` CLI parsing for one-shot pack activation.
