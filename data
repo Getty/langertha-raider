@@ -1,0 +1,19 @@
+---
+class: standard
+completed: 2026-09-24T22:27:38Z
+created: 2026-09-24T15:31:15Z
+depends_on:
+- 20
+id: 21
+priority: medium
+started: 2026-09-24T22:03:05Z
+status: done
+tags:
+- cli
+- refactor
+- m1
+title: 'bin/raider ausduennen: REPL/Slash-Commands/Renderer/JSON in testbare Klassen'
+updated: 2026-09-24T22:27:38Z
+---
+
+Handoff RDR-04, haengt am Config-Resolver-Ticket. bin/raider (865 Zeilen) enthaelt die eigentliche App und ist ungetestet. Ziel: Binary = Argumente, Instanziierung, Exit-Code. Bestehende Aufrufe/Flags/--json-Format kompatibel; --json nicht still auf Stream umstellen. Exit-Codes unterscheiden. Tests fuer REPL-Slash-Commands und --json.
