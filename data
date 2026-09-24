@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-24T23:44:01Z
+claimed_by: worker-followup
+class: standard
+completed: 2026-09-24T23:44:01Z
+created: 2026-09-24T23:38:31Z
+id: 49
+priority: low
+started: 2026-09-24T23:38:43Z
+status: done
+tags:
+- bug
+- config
+title: 'Config: Mapping unter Raider-Keys in default:/Engine-Abschnitten nicht erkannt;
+  Fehlermeldung mit ''at Config.pm line N'
+updated: 2026-09-24T23:44:01Z
+---
+
+Aus #47: Pruefung greift nur auf Top-Level; default: { packs: {...} } rutscht durch. Config-Fehlermeldungen (auch Parse-Fehler) enden mit Perl-Zeilenangabe - fuer Nutzer ohne Nutzen, sauber formatieren.
