@@ -296,6 +296,36 @@ subtest 'plugin self-tools are registered' => sub {
   is($tools->[0]{name}, 'my_custom_tool', 'tool name correct');
 };
 
+{
+  package MockLoopHTTP;
+  use Moose;
+  use IO::Async::Loop;
+  has loop => (is => 'ro', default => sub { IO::Async::Loop->new });
+  __PACKAGE__->meta->make_immutable;
+}
+
+{
+  package MockLoopEngine;
+  use Moose;
+  extends 'MockEngine';
+  has _http => (is => 'ro', default => sub { MockLoopHTTP->new });
+  sub _async_http { $_[0]->_http }
+  __PACKAGE__->meta->make_immutable;
+}
+
+subtest 'plugin self-tools are listed exactly once' => sub {
+  my $raider = Langertha::Raider->new(
+    engine  => MockLoopEngine->new,
+    plugins => ['TestPlugin::WithTool'],
+  );
+
+  $raider->_initialize_inline_mcp_f->get;
+  my ( $tools, $map ) = $raider->_gather_tools_f->get;
+  my @names = grep { $_ eq 'my_custom_tool' } map { $_->{name} } @$tools;
+  is(scalar @names, 1, 'plugin tool gathered once');
+  ok($map->{my_custom_tool}, 'plugin tool routed through the inline MCP');
+};
+
 # --- Test: pre-instantiated plugin objects ---
 
 subtest 'pre-instantiated plugin objects' => sub {

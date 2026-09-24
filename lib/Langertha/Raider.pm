@@ -1524,12 +1524,6 @@ async sub _gather_tools_f {
     push @all_tools, @{$self->_self_tool_definitions};
   }
 
-  # Plugin self-tools
-  for my $plugin (@{$self->_plugin_instances}) {
-    my $tools = $plugin->self_tools;
-    push @all_tools, @$tools if $tools && @$tools;
-  }
-
   return ( \@all_tools, \%tool_server_map );
 }
 
