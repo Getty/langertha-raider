@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-24T22:00:54Z
+claimed_by: worker-hall
+class: standard
+completed: 2026-09-24T22:00:54Z
+created: 2026-09-24T15:30:44Z
+id: 18
+priority: medium
+started: 2026-09-24T21:51:03Z
+status: done
+tags:
+- docs
+- hall
+- m0
+title: 'Hall-MCP: Doku behauptet nicht existierendes Feature'
+updated: 2026-09-24T22:00:54Z
+---
+
+Hall.pm:296-298 _setup_mcp_socket ist leer; Hall::MCP nur in t/30_hall.t:117 instanziiert. plugins/claude-code/SKILL.md:33 verweist auf nicht existierendes Binary raider-hall-mcp; README.md:408 und examples/multi-raider-hall behaupten das Feature. Doku zuruecknehmen bzw. als nicht implementiert markieren; Feature-Entscheidung spaeter.
