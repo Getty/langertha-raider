@@ -47,14 +47,16 @@ sub cwd {
 
 # DIR is only ever the first positional and is removed from @$args when
 # taken. Where it is the sole positional (start, stop, status, ps, install)
-# any existing directory counts. Where $need more positionals (NAME, ID)
+# any existing directory counts, and anything else is an error. Where $need more positionals (NAME, ID)
 # must follow, it counts only if they remain and it looks like a hall, so a
 # NAME or ID that happens to be a directory is not swallowed.
 sub hall_dir {
   my ( $args, $need ) = @_;
   $need //= 0;
   my $d = $args->[0];
-  return cwd unless defined $d && $d !~ /^-/ && -d $d;
+  return cwd unless defined $d && $d !~ /^-/;
+  die "Not a directory: $d\n" if !$need && !-d $d;
+  return cwd unless -d $d;
   return cwd if $need && ( @$args <= $need || !is_hall_dir($d) );
   shift @$args;
   return path($d)->absolute->stringify;

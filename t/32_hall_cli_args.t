@@ -214,6 +214,29 @@ subtest 'DIR is consumed before the positionals that follow it' => sub {
   like( $out, qr/^WorkingDirectory=\Q$hall\E$/m, 'install: unit runs in DIR' );
 };
 
+subtest 'DIR that is not a directory is an error, not cwd' => sub {
+  my $hall    = new_hall();
+  my $missing = $hall->child('no-such-hall')->stringify;
+  my $file    = $hall->child('a-file');
+  $file->touch;
+  $hall->child('.raider-hall.pid')->spew('not-a-pid');
+  no warnings 'redefine';
+  local *Langertha::Raider::Hall::new = sub { die "Hall->new reached\n" };
+
+  for my $bad ( $missing, "$file" ) {
+    for my $argv (
+      [ 'start', $bad ], [ 'start', '--daemon', $bad ],
+      [ 'stop', $bad ], [ 'status', $bad ], [ 'ps', $bad ],
+      [ 'install', $bad, '--stdout' ],
+    ) {
+      my ( $p, $s, $err, $out ) = run_in( "$hall", @$argv );
+      like( $err, qr/^Not a directory: \Q$bad\E$/, 'dies: '.join(' ', @$argv) );
+      is( $s, undef, 'nothing sent to the cwd hall: '.join(' ', @$argv) );
+      is( $out, '', 'no output: '.join(' ', @$argv) );
+    }
+  }
+};
+
 subtest 'a NAME or ID that happens to be a directory is not DIR' => sub {
   my $hall = new_hall();
   $hall->child('Bjorn')->mkpath;          # plain directory, not a hall
