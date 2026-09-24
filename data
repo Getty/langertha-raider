@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T22:01:07Z
+claimed_by: worker-engine
+class: standard
+completed: 2026-09-24T22:01:07Z
+created: 2026-09-24T02:23:51Z
+id: 9
+priority: low
+started: 2026-09-24T21:51:29Z
+status: done
+tags:
+- mcp
+- cleanup
+title: Drop Langertha::Raider::MCP once Net::Async::MCP >= 0.004 is the floor
+updated: 2026-09-24T22:01:07Z
+---
+
+Raider::MCP is a workaround subclass for Net::Async::MCP 0.003 (no server/discover handshake). Net::Async::MCP 0.004 (on CPAN, now the cpanfile floor) speaks Rev-2026-07-28 natively and the CLI already uses plain Net::Async::MCP. Its POD says to remove it and revert call sites (Raider.pm _initialize_inline_mcp_f, t/82) once upstream is current. Decide whether to keep it as public API or remove before first release.
