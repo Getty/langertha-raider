@@ -550,7 +550,8 @@ sub _spawn_raider {
   my ($self, $slot, $base_name, $mission, $attach, $telegram) = @_;
 
   my $raider_config = $self->config->{raiders}{$base_name} // {};
-  my $engine = $raider_config->{engine} // 'anthropic';
+  # No engine configured: leave it to raider (.raider.yml, then key autodetection).
+  my $engine = $raider_config->{engine};
   my $model = $raider_config->{model};
   my $packs = $raider_config->{packs} // [];
   my $mcp = $raider_config->{mcp} // [];

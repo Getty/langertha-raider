@@ -33,8 +33,15 @@ Revision history for Langertha-Raider
     - Fix Hall singleton queue replay, --pack propagation, Telegram
       future retention, and MCP tool result handling.
     - Add `--pack NAME` CLI parsing for one-shot pack activation.
-    - Filter Raider-only .raider.yml keys before constructing Langertha
-      engines.
+    - .raider.yml has one reader and writer, Langertha::Raider::Config
+      (internal). Top-level keys apply next to default: and engine
+      sections, so /model or a skills: hash no longer drops packs, perl
+      or engine options; skills: merge across sections and with --claude
+      / --openai / --skills, which all persist; engine: picks the engine;
+      a file that does not parse stops raider instead of being ignored.
+      Raider-only keys never reach the engine constructor.
+    - Hall raiders without an engine: leave the choice to raider
+      (.raider.yml, then API-key autodetection) instead of anthropic.
     - Fix PerlTools local::lib cpanm invocation and record only
       successful installs.
     - Add .codex to .gitignore and .dockerignore as a Codex runtime

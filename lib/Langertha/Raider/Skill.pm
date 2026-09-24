@@ -92,8 +92,8 @@ sub markdown {
   my $app = $self->app;
   my $persona_file = path($app->root)->child('.raider.md');
   my $persona = -f $persona_file ? "custom (loaded from $persona_file)" : 'Langertha (default viking persona)';
-  my $yml     = path($app->root)->child('.raider.yml');
-  my $yml_loaded = -f $yml ? "yes ($yml)" : 'no';
+  my $config  = $app->config;
+  my $yml_loaded = $config->file_exists && $config->data ? 'yes ('.$config->file.')' : 'no';
   my $model   = $app->has_model ? $app->model : '(engine default)';
   my $env     = $app->api_key_env // '(none)';
   my $web     = _active_web_providers();

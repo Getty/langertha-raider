@@ -10,13 +10,13 @@ use Net::Async::MCP;
 use MCP::Run::Bash;
 use Module::Runtime ();
 use Path::Tiny;
-use YAML::PP ();
 use Langertha::Raider::HallTools qw( build_hall_tools_server );
 
 use Langertha::Raider::FileTools qw( build_file_tools_server );
 use Langertha::Raider::WebTools  qw( build_web_tools_server );
 use Langertha::Raider::PerlTools qw( build_perl_tools_server );
 use Langertha::Raider::Packs     qw( build_packs );
+use Langertha::Raider::Config;
 use Langertha::Raider;
 
 =head1 SYNOPSIS
@@ -81,26 +81,32 @@ L<raider>.
 =attr engine_name
 
 Langertha engine class shortcut (e.g. C<'anthropic'>, C<'openai'>,
-C<'deepseek'>, C<'groq'>, C<'mistral'>, C<'gemini'>, C<'ollama'>). Defaults to
-C<'anthropic'>.
+C<'deepseek'>, C<'groq'>, C<'mistral'>, C<'gemini'>, C<'ollama'>), passed as
+C<engine>. Defaults to C<engine:> in F<.raider.yml>, then to the first
+C<*_API_KEY> environment variable found, then to C<'anthropic'>.
 
 =cut
 
 has engine_name => (
-  is      => 'ro',
-  isa     => 'Str',
-  lazy    => 1,
-  default => sub {
-    return 'anthropic' if $ENV{ANTHROPIC_API_KEY};
-    return 'openai'    if $ENV{OPENAI_API_KEY};
-    return 'deepseek'  if $ENV{DEEPSEEK_API_KEY};
-    return 'groq'      if $ENV{GROQ_API_KEY};
-    return 'mistral'   if $ENV{MISTRAL_API_KEY};
-    return 'gemini'    if $ENV{GEMINI_API_KEY};
-    return 'anthropic';
-  },
+  is       => 'ro',
+  isa      => 'Str',
+  lazy     => 1,
+  builder  => '_build_engine_name',
   init_arg => 'engine',
 );
+
+sub _build_engine_name {
+  my ($self) = @_;
+  my $yml = $self->config->engine;
+  return $yml if defined $yml;
+  return 'anthropic' if $ENV{ANTHROPIC_API_KEY};
+  return 'openai'    if $ENV{OPENAI_API_KEY};
+  return 'deepseek'  if $ENV{DEEPSEEK_API_KEY};
+  return 'groq'      if $ENV{GROQ_API_KEY};
+  return 'mistral'   if $ENV{MISTRAL_API_KEY};
+  return 'gemini'    if $ENV{GEMINI_API_KEY};
+  return 'anthropic';
+}
 
 =attr default_model_for_engine
 
@@ -434,8 +440,9 @@ is a hashref:
     { type => 'claude', path => '.claude/skills' }  # Claude Code SKILL.md tree
     { type => 'dir',    path => 'my-skills', glob => '*.md' }
 
-Settable via L</skill_sources>, via the C<skills> key in F<.raider.yml>, or
-via the CLI flags C<--claude> / C<--skills PATH>.
+Defaults to the C<skills> entries of F<.raider.yml> (see
+L<Langertha::Raider::Config>) followed by L</cli_skill_sources>. Passing
+C<skill_sources> explicitly replaces both.
 
 =cut
 
@@ -446,20 +453,35 @@ has skill_sources => (
   builder => '_build_skill_sources',
 );
 
-sub _normalize_skill_spec {
-  my ($spec) = @_;
-  if (!ref $spec) {
-    return (
-      { type => 'file',   path => 'CLAUDE.md' },
-      { type => 'claude', path => '.claude/skills' },
-    ) if $spec eq 'claude';
-    return { type => 'file', path => 'AGENTS.md' } if $spec eq 'openai'
-                                                   || $spec eq 'agents'
-                                                   || $spec eq 'codex';
-    return { type => 'dir',  path => $spec };
-  }
-  return $spec if ref $spec eq 'HASH';
-  return;
+=attr cli_skill_sources
+
+ArrayRef of skill-source specs from the command line (C<--claude>,
+C<--openai>, C<--skills DIR>). They are added to the F<.raider.yml> skills,
+duplicates dropped.
+
+=cut
+
+has cli_skill_sources => (
+  is        => 'ro',
+  isa       => 'ArrayRef[HashRef]',
+  predicate => 'has_cli_skill_sources',
+);
+
+=attr config
+
+The L<Langertha::Raider::Config> for F<.raider.yml> in L</root>.
+
+=cut
+
+has config => (
+  is         => 'ro',
+  isa        => 'Langertha::Raider::Config',
+  lazy_build => 1,
+);
+
+sub _build_config {
+  my ($self) = @_;
+  return Langertha::Raider::Config->new(root => $self->root);
 }
 
 # Well-known per-tool files + source dirs. Used both for loading (when the
@@ -476,18 +498,10 @@ our %AGENT_PROFILES = (
 
 sub _build_skill_sources {
   my ($self) = @_;
-  # Pull from .raider.yml if the user didn't set sources explicitly.
-  my $file = path($self->root)->child('.raider.yml');
-  return [] unless -f $file;
-  my $yml = eval { YAML::PP->new->load_string($file->slurp_utf8) };
-  return [] unless ref $yml eq 'HASH' && defined $yml->{skills};
-  my $raw = $yml->{skills};
-  my @list = ref $raw eq 'ARRAY' ? @$raw : ($raw);
-  my @specs;
-  for my $item (@list) {
-    push @specs, _normalize_skill_spec($item);
-  }
-  return \@specs;
+  return [ $self->config->skill_specs(
+    $self->engine_name,
+    $self->has_cli_skill_sources ? @{$self->cli_skill_sources} : (),
+  ) ];
 }
 
 sub _load_skill_texts {
@@ -553,31 +567,12 @@ has engine_options => (
 
 sub _load_yml_options {
   my ($self) = @_;
-  my $file = path($self->root)->child('.raider.yml');
-  return {} unless -f $file;
-  my $yml = eval { YAML::PP->new->load_string($file->slurp_utf8) };
-  return {} unless ref $yml eq 'HASH';
-  # Shape: either flat or under engine-name / 'default' keys.
-  my %opts;
-  if (ref $yml->{default} eq 'HASH') { %opts = (%opts, %{$yml->{default}}) }
-  my $name = $self->engine_name;
-  if (ref $yml->{$name} eq 'HASH')   { %opts = (%opts, %{$yml->{$name}}) }
-  # If no per-engine/default keys, treat whole file as flat options.
-  if (!%opts && !grep { ref $yml->{$_} eq 'HASH' } keys %$yml) {
-    %opts = %$yml;
-  }
-  return \%opts;
+  return $self->config->options($self->engine_name);
 }
-
-my %APP_YML_KEYS = map { $_ => 1 } qw(
-  skills packs perl preferred_lib_target
-);
 
 sub _engine_yml_options {
   my ($self) = @_;
-  my %opts = %{$self->_load_yml_options};
-  delete @opts{keys %APP_YML_KEYS};
-  return \%opts;
+  return $self->config->engine_options($self->engine_name);
 }
 
 has loop => (

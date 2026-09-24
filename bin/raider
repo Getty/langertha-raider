@@ -10,12 +10,12 @@ our $VERSION = '0.503';
 use utf8;
 use Getopt::Long qw( GetOptions :config no_ignore_case bundling );
 use JSON::MaybeXS ();
-use YAML::PP ();
 use Term::ANSIColor qw( colored color );
 use Term::ReadLine;                   # Core; upgrades to Gnu if installed
 use IO::Prompt::Tiny qw( prompt );    # Fallback when Gnu is not available
 use Path::Tiny;
 use Langertha::Raider::CLI;
+use Langertha::Raider::Config;
 use Langertha::Raider::ACP::CLI;
 use Langertha::Raider::Hall::CLI;
 use Langertha::Raider::Skill;
@@ -153,8 +153,17 @@ $args{pack_names}     = $opt{packs}          if @{ $opt{packs} // [] };
 $args{max_iterations} = $opt{max_iterations} if defined $opt{max_iterations};
 $args{engine_options} = \%engine_opts        if %engine_opts;
 
+# The one reader/writer of .raider.yml. Parsed up front so a broken file
+# stops raider here, with its path in the message.
+my $config = Langertha::Raider::Config->new(
+  root => $opt{root} // Path::Tiny->cwd->stringify,
+);
+$config->data;
+$args{config} = $config;
+
 my @skill_specs;
 my @cli_profiles;
+my @persist_skills;
 if ($opt{profile_claude}) {
   push @skill_specs, @{ $Langertha::Raider::CLI::AGENT_PROFILES{claude} };
   push @cli_profiles, 'claude';
@@ -163,17 +172,20 @@ if ($opt{profile_openai}) {
   push @skill_specs, @{ $Langertha::Raider::CLI::AGENT_PROFILES{openai} };
   push @cli_profiles, 'openai';
 }
-push @skill_specs, { type => 'dir', path => $_ } for @{ $opt{skill_dirs} // [] };
-
-# Persist profile flags to .raider.yml so the user doesn't need to retype
-# --claude / --openai every invocation. Track which ones were freshly
-# persisted this run for the banner "(saved)" hint.
-my %saved_now;
-if (@cli_profiles) {
-  my $root = $opt{root} // Path::Tiny::path('.')->absolute->stringify;
-  %saved_now = persist_profiles($root, \@cli_profiles);
+push @persist_skills, @cli_profiles;
+for my $dir (@{ $opt{skill_dirs} // [] }) {
+  my $spec = { type => 'dir', path => $dir };
+  push @skill_specs, $spec;
+  # A directory named like a profile keyword is saved as a spec, so it is
+  # not read back as that profile.
+  push @persist_skills, ($dir =~ /\A(?:claude|openai|codex|agents)\z/ ? $spec : $dir);
 }
-$args{skill_sources} = \@skill_specs if @skill_specs;
+
+# Persist --claude / --openai / --skills to .raider.yml so the user doesn't
+# need to retype them every invocation. Track which profiles were freshly
+# persisted this run for the banner "(saved)" hint.
+my %saved_now = map { $_ => 1 } grep { !ref } $config->add_skills(@persist_skills);
+$args{cli_skill_sources} = \@skill_specs if @skill_specs;
 
 my $app = Langertha::Raider::CLI->new(%args);
 
@@ -271,40 +283,6 @@ sub render_inline_code {
   return $text;
 }
 
-sub persist_profiles {
-  my ($root, $profiles) = @_;
-  my $file = Path::Tiny::path($root)->child('.raider.yml');
-
-  my $yml = {};
-  if (-f $file) {
-    my $loaded = eval { YAML::PP->new->load_string($file->slurp_utf8) };
-    $yml = $loaded if ref $loaded eq 'HASH';
-  }
-
-  my @existing;
-  if (defined $yml->{skills}) {
-    @existing = ref $yml->{skills} eq 'ARRAY' ? @{$yml->{skills}} : ($yml->{skills});
-  }
-  my %have = map { (!ref $_ ? $_ : '') => 1 } @existing;
-
-  my %saved_now;
-  my $changed = 0;
-  for my $p (@$profiles) {
-    next if $have{$p};
-    push @existing, $p;
-    $have{$p} = 1;
-    $saved_now{$p} = 1;
-    $changed = 1;
-  }
-
-  if ($changed) {
-    $yml->{skills} = \@existing;
-    my $dumped = YAML::PP->new->dump_string($yml);
-    $file->spew_utf8($dumped);
-  }
-  return %saved_now;
-}
-
 sub collapse_model_list {
   my ($list, $current) = @_;
   my %all    = map { $_ => 1 } @$list;
@@ -347,19 +325,6 @@ sub collapse_model_list {
   }
 
   return sort { $a->{id} cmp $b->{id} } @rows;
-}
-
-sub persist_model {
-  my ($root, $model) = @_;
-  my $file = Path::Tiny::path($root)->child('.raider.yml');
-  my $yml = {};
-  if (-f $file) {
-    my $loaded = eval { YAML::PP->new->load_string($file->slurp_utf8) };
-    $yml = $loaded if ref $loaded eq 'HASH';
-  }
-  $yml->{default} = {} unless ref $yml->{default} eq 'HASH';
-  $yml->{default}{model} = $model;
-  $file->spew_utf8(YAML::PP->new->dump_string($yml));
 }
 
 sub print_agent { print c(agent => render_inline_code($_[0])), "\n" }
@@ -479,7 +444,11 @@ sub handle_slash {
       }
       return;
     }
-    persist_model($app->root, $arg);
+    unless (eval { $app->config->set_model($arg); 1 }) {
+      my $err = $@; chomp $err;
+      print_err($err);
+      return;
+    }
     print c(meta => "model saved: "), c(title => $arg), c(meta => " (takes effect on next start)"), "\n";
     return;
   }
@@ -742,29 +711,8 @@ if ($opt{interactive}) {
 
   # Collect active profile names: CLI flags + any persisted in .raider.yml.
   my %seen_prof;
-  my @active_profiles;
-  for my $p (@cli_profiles) {
-    next if $seen_prof{$p}++;
-    push @active_profiles, $p;
-  }
-  {
-    my $ymlfile = Path::Tiny::path($app->root)->child('.raider.yml');
-    if (-f $ymlfile) {
-      my $ydata = eval { YAML::PP->new->load_string($ymlfile->slurp_utf8) };
-      if (ref $ydata eq 'HASH' && defined $ydata->{skills}) {
-        my @list = ref $ydata->{skills} eq 'ARRAY'
-          ? @{$ydata->{skills}}
-          : ($ydata->{skills});
-        for my $it (@list) {
-          next if ref $it;
-          next unless $it eq 'claude' || $it eq 'openai' || $it eq 'codex' || $it eq 'agents';
-          my $norm = ($it eq 'codex' || $it eq 'agents') ? 'openai' : $it;
-          next if $seen_prof{$norm}++;
-          push @active_profiles, $norm;
-        }
-      }
-    }
-  }
+  my @active_profiles = grep { !$seen_prof{$_}++ }
+    @cli_profiles, $app->config->profiles($app->engine_name);
 
   banner($app, $impl, \@active_profiles, \%saved_now);
 
