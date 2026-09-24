@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T22:00:50Z
+claimed_by: worker-hall
+class: standard
+completed: 2026-09-24T22:00:50Z
+created: 2026-09-24T21:37:21Z
+id: 30
+priority: low
+started: 2026-09-24T21:50:59Z
+status: done
+tags:
+- docs
+- hall
+title: 'Hall-POD: engine: in .raider-hall.yml ist optional'
+updated: 2026-09-24T22:00:50Z
+---
+
+Folge zu #20: Hall laesst --engine weg, wenn nicht konfiguriert (raider autodetektiert). CONFIG FILE-Abschnitt in Hall.pm sagt das nicht.
