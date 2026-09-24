@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-24T22:08:01Z
+claimed_by: worker-misc
+class: standard
+completed: 2026-09-24T22:08:01Z
+created: 2026-09-24T22:02:30Z
+id: 37
+priority: low
+started: 2026-09-24T22:03:01Z
+status: done
+tags:
+- bug
+- hall
+- cli
+title: 'Hall-CLI: start/stop/status/ps/install fallen bei Nicht-Verzeichnis-Arg still
+  auf cwd zurueck'
+updated: 2026-09-24T22:08:01Z
+---
+
+Aus #27: ein Positionsargument, das kein Verzeichnis ist, wird ignoriert und cwd genommen. Fehler melden statt still. Nebenbei: podchecker meldet fehlendes =encoding in Hall.pm (Gedankenstrich).
