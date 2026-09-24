@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-24T22:07:57Z
+claimed_by: worker-misc
+class: standard
+completed: 2026-09-24T22:07:57Z
+created: 2026-09-24T22:02:26Z
+id: 36
+priority: medium
+started: 2026-09-24T22:02:57Z
+status: done
+tags:
+- bug
+- perl-tools
+title: 'PerlTools: perl_eval-Timeout laesst Kindprozess weiterlaufen; relative lib-target
+  root vs cwd'
+updated: 2026-09-24T22:07:57Z
+---
+
+Aus #17: (1) Bei Timeout killt IPC::Run den Kindprozess nicht, kill_kill fehlt. (2) Relatives preferred_lib_target: PERL5LIB wird gegen root aufgeloest, cpanm --local-lib gegen Prozess-cwd -> Abweichung wenn --root != cwd. Beides reproduzieren + fixen. Symlink-Escape beim target-Check gehoert zu ADR 0005/Executor.
