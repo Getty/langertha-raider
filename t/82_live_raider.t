@@ -10,6 +10,8 @@ use File::Temp qw( tempdir );
 use File::Spec;
 
 BEGIN {
+  plan skip_all => 'live test: set TEST_LIVE=1 (plus a TEST_LANGERTHA_*_API_KEY) to run'
+    unless $ENV{TEST_LIVE};
   my @available;
   push @available, 'anthropic' if $ENV{TEST_LANGERTHA_ANTHROPIC_API_KEY};
   push @available, 'openai'    if $ENV{TEST_LANGERTHA_OPENAI_API_KEY};
@@ -18,7 +20,7 @@ BEGIN {
   push @available, 'tsystems'  if $ENV{TEST_LANGERTHA_TSYSTEMS_API_KEY};
   push @available, 'scaleway'  if $ENV{TEST_LANGERTHA_SCALEWAY_API_KEY};
   unless (@available) {
-    plan skip_all => 'No TEST_LANGERTHA_*_API_KEY env vars set (need anthropic, openai, deepseek, minimax, tsystems, or scaleway)';
+    plan skip_all => 'live test: TEST_LIVE=1 also needs a TEST_LANGERTHA_*_API_KEY (anthropic, openai, deepseek, minimax, tsystems, or scaleway)';
   }
   eval {
     require IO::Async::Loop;

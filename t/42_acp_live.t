@@ -8,11 +8,13 @@ use YAML::PP;
 use POSIX qw( WNOHANG );
 
 # End-to-end LIVE test: spins a real hall with ACP, sends a real
-# session/prompt, expects a real LLM answer to come back. Skipped
-# unless OPENAI_API_KEY is set — CI keeps it off by default, local
-# runs can opt in.
+# session/prompt, expects a real (paid) LLM answer to come back.
+# Opt-in only: needs TEST_LIVE=1 and OPENAI_API_KEY. A key that merely
+# happens to be in the environment is not enough.
 
-plan skip_all => 'OPENAI_API_KEY not set (live test disabled)'
+plan skip_all => 'live test: set TEST_LIVE=1 (plus OPENAI_API_KEY) to run'
+  unless $ENV{TEST_LIVE};
+plan skip_all => 'live test: TEST_LIVE=1 also needs OPENAI_API_KEY'
   unless $ENV{OPENAI_API_KEY};
 
 # Pick a free port.
