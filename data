@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-24T02:24:06Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-24T15:36:52Z
+created: 2026-09-17T18:13:22Z
+id: 4
+priority: medium
+started: 2026-09-24T02:15:44Z
+status: done
+tags:
+- migration
+- tests
+title: Zugehoerige Tests aus langertha (t/7*_raider*, t/8*_raider*, t/96_raid_orchestration,
+  t/91_plugin_config) migrieren, Scope pro Datei pruefen
+updated: 2026-09-24T15:36:52Z
+---
+
+2026-09-24 02:24 All 8 core tests migrated as-is (scope OK: 91_plugin_config tests Raider plugin config; core keeps de-Raidered variant). 85_raider_result: dropped now-redundant base-class assertion + duplicate use. 60_docker_release: snapshot assertions replaced with --cpanfile check; README assertion skips in the built dist (README.md not shipped - failed dzil test before). prove -lr t: 258 tests pass, 82_live skipped w/o TEST_LANGERTHA_*; ran it separately with OpenAI key: 12/12 pass. 42_acp_live runs live whenever OPENAI_API_KEY is set.
