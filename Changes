@@ -11,6 +11,11 @@ Revision history for Langertha-Raider
       App::Raider::* module is renamed to Langertha::Raider::*, with the CLI
       entry point App::Raider becoming Langertha::Raider::CLI; the raider and
       raider-hall executables keep their names. Requires Langertha 0.503.
+    - The six App::Raider packages previously indexed on CPAN (App::Raider,
+      App::Raider::FileTools, App::Raider::Plugin::Situation,
+      App::Raider::Plugin::Trace, App::Raider::Skill, App::Raider::WebTools)
+      ship as empty reserved-namespace stubs pointing to their
+      Langertha::Raider replacements.
     - Fix filesystem confinement to reject symlink escapes for read and
       write operations, with regression tests.
     - Fix WebTools sync wrappers to await IO::Async futures through the
