@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-09-24T22:43:21Z
+claimed_by: test-writer
+class: standard
+completed: 2026-09-24T22:43:21Z
+created: 2026-09-24T22:28:07Z
+id: 42
+priority: medium
+started: 2026-09-24T22:43:21Z
+status: done
+tags:
+- tests
+title: 'Testluecken schliessen: Situation, Trace, HallTools, ACP::CLI, Hall::CLI'
+updated: 2026-09-24T22:43:21Z
+---
+
+Aus #22 (Chaos-Inventar) ausgekoppelt: Plugin::Situation, Plugin::Trace, HallTools, ACP::CLI, Hall::CLI ohne bzw. mit duenner Abdeckung. Tests ohne Live-Keys/Server. Telegram/Cron e2e separat.
