@@ -346,6 +346,25 @@ my $result = await $raider->raid_f('What files are in lib/?');
 docker run --rm -it -v "$PWD:/work" -e ANTHROPIC_API_KEY raudssus/raider
 ```
 
+### Build locally
+
+The Dockerfile installs from the Dist::Zilla-built distribution directory,
+not from a tarball in the build context. Build the dist directory first and
+use that as the Docker context:
+
+```bash
+dzil build
+VERSION=$(perl -Ilib -MLangertha::Raider::CLI -E 'say $Langertha::Raider::CLI::VERSION')
+docker build \
+  --build-arg RAIDER_VERSION=$VERSION \
+  --target runtime-user \
+  --build-arg RAIDER_UID=$(id -u) \
+  --build-arg RAIDER_GID=$(id -g) \
+  -t raider:local Langertha-Raider-$VERSION
+```
+
+Use `--target runtime-root` for a root image.
+
 ## License
 
 This is free software; you can redistribute it and/or modify it under the same terms as the
