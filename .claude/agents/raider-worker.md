@@ -30,9 +30,9 @@ tickets rather than expanding scope mid-change.
 
 ## Repo invariants — written down nowhere else
 
-- **This repo starts empty.** The migration plan, what moves where, and the open
-  naming decision are in `TODO.md` at the repo root — read it before doing
-  anything else here, it is the only spec that exists right now.
+- **Where the spec lives.** Vision and vocabulary: `CONTEXT.md`. Decisions:
+  `docs/adr/` — anything not there is not decided. The task itself: the karr
+  ticket. Read all three before changing behavior.
 - **Dependency direction is one-way.** `Langertha::Raider` requires pieces of
   `langertha` core (`Langertha::Raider::Result`, `Langertha::RunContext`, roles
   `PluginHost`/`Runnable`); core does not hard-depend back — the only two
@@ -41,11 +41,9 @@ tickets rather than expanding scope mid-change.
   `Role::Tools`/`Role::PluginHost`/`Role::SystemPrompt`/`Role::Runnable`/
   `Plugin.pm`/`Plugin::Langfuse`/`Role::Langfuse`/`Chat.pm`/`Result.pm` out of
   core — they're generic tool-calling foundation, not Raider-specific.
-- **Namespace collision to resolve before renaming `App::Raider::*`.** Bare
-  `Langertha::Raider` is the engine class and this dist's `main_module` — it
-  cannot also be the renamed CLI entry point (`App::Raider.pm`). See `TODO.md`
-  for the proposed resolution (`Langertha::Raider::CLI`); confirm before doing
-  the mechanical rename of the other 12 `App::Raider::*` files.
+- **Naming is settled (ADR 0001).** `Langertha::Raider` is the engine and
+  `main_module`, the CLI is `Langertha::Raider::CLI`; `App::Raider*` names are
+  reserved CPAN stubs only — never put code back there.
 - **Moose only.** Unlike `langertha-knarr` (Moose/Moo split), everything here is
   Moose — the source `App::Raider::*` code has no Moo.
 

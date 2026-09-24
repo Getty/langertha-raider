@@ -17,9 +17,9 @@ via `briefing.skills` — this file is for the orchestrating agent.
 4. **Goal-driven execution** — Define success criteria, loop until verified.
 5. **Surface conflicts, don't average them** — Contradicting patterns: pick one (more
    recent / more tested), explain why, flag the other for cleanup. Don't blend.
-6. **Read before you write** — Before new code, read `TODO.md` (the migration plan is the
-   only spec that exists right now) and the nearest analogous module in `langertha-knarr`
-   or `langertha-skeid`.
+6. **Read before you write** — Before new code, read `CONTEXT.md`, the relevant ADRs in
+   `docs/adr/`, the karr ticket, and the nearest analogous module in `langertha-knarr` or
+   `langertha-skeid`.
 7. **Tests verify intent, not just behavior** — Reproduce a bug before fixing it; leave a
    regression test behind. A test that can't fail when the logic changes is wrong.
 8. **Checkpoint after every significant step** — Summarize: done / verified / left.
@@ -71,8 +71,8 @@ host before.
 ## Public issues (GitHub) — never act without instruction
 
 **karr** is the internal agent board, churned freely. The public tracker for this project
-— whether that stays `github.com/Getty/raider` or becomes `github.com/Getty/langertha-raider`
-is not decided yet, see `TODO.md` — is written under the maintainer's name. **Never act on
+(`github.com/Getty/langertha-raider`; the old `Getty/raider` is archived) is written under
+the maintainer's name. **Never act on
 a public issue or PR on your own initiative — not even to read it.** No listing, viewing,
 commenting, editing, closing, or creating unless the user explicitly says to handle a
 specific item, and every write is confirmed first.
@@ -87,9 +87,9 @@ For anything heading toward release: stop and ask.
 
 ## Raider-specific hazards
 
-- **Redesign pending.** Do not invent architecture beyond what `STATE-AND-VISION.md` records
-  as decided — flag gaps as karr tickets or questions instead of guessing. Until a redesign
-  plan exists, keep code changes minimal (fixes, not improvements).
+- **Decided means an ADR.** Do not invent architecture beyond what `docs/adr/` records —
+  flag gaps as karr tickets or questions instead of guessing. Work in the small slices the
+  tickets describe; no big-bang rewrite.
 - **Dependency direction is one-way** (Raider → Langertha core, never back) — see
   `raider-worker`'s agent body for the exact modules. Don't move core tool-calling
   foundation (`Role::Tools`, `Plugin.pm`, `Chat.pm`, …) into this repo; it's shared, not

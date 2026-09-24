@@ -25,9 +25,8 @@ engine/MCP transport the way the source repos already do — check the tests
 being migrated from `langertha`'s `t/7*_raider*.t`/`t/8*_raider*.t` and from
 `raider`'s `t/` for the existing fake/mock patterns before inventing a new one.
 
-This repo starts empty — `TODO.md` at the repo root has the migration plan
-(what moves from `langertha` core and from the old `raider` repo, and in what
-shape). Read it before writing new tests so numbering and layout land
-consistently with what's about to be migrated in.
+Live tests (real API keys) only run behind an explicit opt-in env flag, never
+merely because a key happens to be set (karr #13). Read the ticket, the relevant
+ADRs in `docs/adr/` and the existing `t/` numbering before adding a file.
 
 Apply the conventions above silently.
