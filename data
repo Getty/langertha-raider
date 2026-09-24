@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-24T21:24:25Z
+claimed_by: raider-worker-16
+class: standard
+completed: 2026-09-24T21:24:21Z
+created: 2026-09-24T15:30:24Z
+id: 16
+priority: high
+started: 2026-09-24T21:19:15Z
+status: done
+tags:
+- bug
+- hall
+- telegram
+- m0
+title: Telegram-Antworten nicht adressierbar (bot/chat_id erreichen den Raider nie)
+updated: 2026-09-24T21:24:25Z
+---
+
+Telegram.pm:150-153 uebergibt als Mission nur $text; bot/chat_id erreichen den Raider weder per Mission noch Env (Hall.pm:580-587). telegram_reply verlangt beide (HallTools.pm:76). Antwort praktisch unmoeglich. Minimaler Fix jetzt; die eigentliche Loesung (Ergebnis wird vom Adapter an die gebundene Session zugestellt, ohne Pflicht-Toolaufruf) kommt mit dem Hall/Session-Umbau (ADR 0002/0003).
+
+Minimaler Fix in 6ea1872: Env RAIDER_HALL_TELEGRAM_BOT/_CHAT_ID beim Spawn (auch via Singleton-Queue, nie aus Hall-Env geerbt); telegram_reply an diesen Chat gebunden. Eigentliche Loesung weiter mit Hall/Session-Umbau (ADR 0002/0003).
