@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-24T22:27:30Z
+claimed_by: worker-cli2
+class: standard
+completed: 2026-09-24T22:27:30Z
+created: 2026-09-24T22:02:22Z
+id: 35
+priority: medium
+started: 2026-09-24T22:02:48Z
+status: done
+tags:
+- bug
+- config
+- cli
+title: -o mit Raider-eigenen Keys (perl, packs, ...) geht an den Engine-Konstruktor
+updated: 2026-09-24T22:27:30Z
+---
+
+Aus #29: -o perl=1 / -o packs=... landen im Engine-Konstruktor statt bei Raider. Entweder -o auf Engine-Keys beschraenken (Fehler/Warnung) oder Raider-Keys wie in .raider.yml abzweigen (Langertha::Raider::Config %APP_KEY). Regressionstest.
