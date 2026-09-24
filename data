@@ -1,0 +1,41 @@
+---
+claimed_at: 2026-09-24T21:37:12Z
+claimed_by: raider-worker-20
+class: standard
+completed: 2026-09-24T21:37:08Z
+created: 2026-09-24T15:31:09Z
+id: 20
+priority: high
+started: 2026-09-24T21:24:40Z
+status: done
+tags:
+- config
+- refactor
+- m1
+title: Zentraler Legacy-Config-Resolver fuer .raider.yml (mit Herkunftsdiagnose)
+updated: 2026-09-24T21:37:12Z
+---
+
+Erster Architektur-Schnitt (Handoff RDR-03, §16). Heute 5 Parse-Stellen + 1 Existenzcheck mit abweichender Semantik:
+1 CLI.pm:477-490 _build_skill_sources (nur Top-Level skills:)
+2 CLI.pm:554-570 _load_yml_options (default:+<engine>: gemergt; Flach-Modus nur wenn beide fehlen UND kein Top-Level-Wert Hash ist) -> Konsumenten _build_packs :383, _build_mcps :623, _engine_yml_options :576
+3 bin/raider:274-305 persist_profiles (liest+schreibt, haengt an Top-Level skills:)
+4 bin/raider:352-363 persist_model (schreibt default: {model:})
+5 bin/raider:751-766 (Banner)
++ Skill.pm:95 nur -f (meldet loaded auch bei unparsbarer Datei)
++ Hall.pm:550 Engine-Default anthropic statt CLI-Autodetection
+
+Reproduzierte Defekte, die der Resolver beheben muss:
+- /model (bin/raider:482) kippt den Flach-Modus: packs/perl/temperature still weg
+- skills: als Hash deaktiviert Flach-Modus -> perl: true wirkungslos
+- skills: unter default: ignoriert Leser 1
+- --claude/--openai/--skills ersetzen yml-Skills statt zu mergen (bin/raider:175); --skills DIR nicht persistiert, --claude schon
+- YAML-Fehler still per eval -> {}
+- engine: nicht per yml setzbar (CLI.pm:89-104), flaches engine: geht an den Engine-Konstruktor
+
+Vorgaben: Aussenvertrag erhalten (keine Verhaltensaenderung ausser den Defekten); golden Fixtures zuerst (Flach-Datei + /model, skills als Hash, CLI+yml-Skills, Hall ohne engine, kaputtes YAML); ein Writer; config explain-artige Herkunftsausgabe. Nicht in diesem Schnitt: Home-Hierarchie, Sessions, Trust, Provider-Wahl-Aenderung (Handoff §5.3 API-Key-Autowahl bleibt vorerst).
+OFFEN vor Start: Modulname/Namespace + public vs. intern mit Maintainer klaeren.
+
+Maintainer-Entscheidung 2026-09-24: Modul Langertha::Raider::Config, intern (POD als intern markiert, keine API-Zusage). OFFEN-Punkt damit erledigt.
+
+Umgesetzt in 501532f: Langertha::Raider::Config (intern). Alle Ticket-Defekte mit Golden-Tests t/27, t/28. Auslegung: Top-Level-Keys gelten auch neben default:/Engine-Abschnitten (unvermeidbar, da /model-Datei sonst nicht von Hand-Datei unterscheidbar).
