@@ -51,8 +51,11 @@ Revision history for Langertha-Raider
       effective setting with its source (flag, .raider.yml layer,
       environment, default).
     - perl_eval, perl_check and perl_cpanm kill the child process when it
-      times out; a relative preferred_lib_target resolves against the
-      working root for PERL5LIB and cpanm alike.
+      times out, and every timeout (including the retry after an
+      auto-install and cpanm itself) comes back as a result instead of an
+      exception; new install_timeout option. A relative
+      preferred_lib_target resolves against the working root for PERL5LIB
+      and cpanm alike.
     - raider hall start/stop/status/ps/install fail with "Not a
       directory" when DIR is not a directory instead of using the current
       directory.
