@@ -73,6 +73,10 @@ loaded progressively. **Persona**: tone and working style. **Pack**: a named bun
 skills, persona defaults and *requested* capabilities (called "packs" in code, "persona" in
 Hall/README today).
 
+**Detection rule**: declarative `must` / `may` / `must_not` conditions on files and their
+content that activate a pack when the workspace matches (ADR 0012). Activates, never grants.
+_Avoid_: profile (taken, see above).
+
 **Hall**: the optional daemon — process/job supervision, queue, Telegram, cron.
 
 **ACP**: here always the *Agent Client Protocol* (Zed, editors). Knarr's ACP is BeeAI's
