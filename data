@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-24T23:29:15Z
+claimed_by: worker-detect
+class: standard
+completed: 2026-09-24T23:29:15Z
+created: 2026-09-24T23:09:25Z
+id: 44
+priority: medium
+started: 2026-09-24T23:09:51Z
+status: done
+tags:
+- packs
+- detection
+- cli
+- config
+title: 'Pack-Detektion 2: Verdrahtung in CLI, Config und explain (ADR 0012)'
+updated: 2026-09-24T23:29:15Z
+---
+
+ADR 0012, nach Detektion 1. Regelquellen: Pack-Standardregel (Pack-Attribut) + detect:/no_detect: aus .raider.yml via Langertha::Raider::Config (Home/Projekt-.raider/ aus ADR 0011 existiert noch nicht). Rangfolge: --pack/--no-pack/--no-detect > packs:/no_detect:/detect:false > detektiert. Exklusive Gruppen: explizit schlaegt detektiert. Auswertung beim Start und /reload. raider config explain + /packs zeigen Quelle flag/config/detected und Klausel. Trust-Gating (ADR 0004) kommt mit der Workspace-Trust-Umsetzung; im Ticket vermerken.
