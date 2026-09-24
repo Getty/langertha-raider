@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T23:49:51Z
+claimed_by: worker-followup
+class: standard
+completed: 2026-09-24T23:49:51Z
+created: 2026-09-24T23:44:10Z
+id: 51
+priority: low
+started: 2026-09-24T23:44:26Z
+status: done
+tags:
+- bug
+- config
+title: 'YAML-Parse-Fehler: nur erste Zeile der YAML::PP-Meldung (z.B. ''Line : 2'')'
+updated: 2026-09-24T23:49:51Z
+---
+
+Aus #49: bei ausfuehrlichen YAML::PP-Reports bleibt nur die erste Zeile; Spalte und expected/got gehen verloren. Meldung sinnvoll zusammenfassen (Zeile, Spalte, Kurzgrund).
