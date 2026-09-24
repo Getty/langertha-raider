@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T23:49:47Z
+claimed_by: worker-followup
+class: standard
+completed: 2026-09-24T23:49:47Z
+created: 2026-09-24T23:44:05Z
+id: 50
+priority: medium
+started: 2026-09-24T23:44:21Z
+status: done
+tags:
+- bug
+- cli
+title: raider OPTIONEN config explain schickt 'config explain' als Prompt an die Engine
+updated: 2026-09-24T23:49:47Z
+---
+
+Aus #49 (dabei ging versehentlich ein echter API-Call raus): Subcommand config wird nur als erstes Argument erkannt; mit Optionen davor wird es zum Prompt. Subcommand-Erkennung nach Optionen oder klare Fehlermeldung. Ausserdem: Test aus 3e80248 in t/39_cli_main.t setzt config explain hinter die Optionen und besteht nur, weil der Config-Fehler vorher greift - korrigieren.
