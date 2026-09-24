@@ -165,7 +165,7 @@ tool list, the prompt and the permission check all come from that one set.
 | `list_files`, `read_file`, `write_file`, `edit_file` | inside the workspace; edits check the file hash first and fail on a conflict instead of overwriting |
 | `bash`                                               | a real shell — treated as arbitrary code execution                                                  |
 | `web_search`, `web_fetch`                            | DuckDuckGo by default, more providers when keys are present                                         |
-| `perl_eval`, `perl_check`, `perl_cpanm`              | with `--perl`; see below                                                                            |
+| `perl_eval`, `perl_check`, `perl_cpanm`              | in a Perl workspace, or with `--perl`; see below                                                    |
 
 **Home services in projects.** Your home config decides what gets mounted into which project
 raiders — e.g. the Telegram bot runs once in the Hall and every project raider can send you
@@ -196,7 +196,10 @@ the run and tells you.
 
 ### Perl-native tools
 
-`--perl` unlocks `perl_eval`, `perl_check` and `perl_cpanm` with a private `local::lib`
+In a Perl workspace (`cpanfile`, `dist.ini`, `Makefile.PL` or `lib/**/*.pm`) the bundled
+`perl` pack is detected and asks for `perl_eval`, `perl_check` and `perl_cpanm`; elsewhere
+`--perl` or `perl: true` turns them on, and `perl: false` keeps them off everywhere.
+`raider config explain` shows whether they are on and why. They get a private `local::lib`
 under `.raider/lib/`. Missing modules can be installed automatically — within a policy you
 set up beforehand (allowed sources, target, network). Note that `perl -c` runs `BEGIN` and
 `use`, so `perl_check` is code execution too and goes through the same limits as

@@ -160,6 +160,10 @@ sub config_report {
       $self->emit('    ', $self->c(warn => 'note: '.$_), "\n") for @{ $p->{detection}{notes} // [] };
     }
   }
+  if (my $perl = $report->{perl_tools}) {
+    $self->emit($self->c(meta => 'perl tools: '), $perl->{enabled} ? 'on' : 'off',
+      '  ', $self->c(meta => '('.$perl->{reason}.')'), "\n");
+  }
   return;
 }
 

@@ -377,12 +377,33 @@ local denial.
 
 =cut
 
-sub perl_tools_enabled {
+sub perl_tools_enabled { $_[0]->perl_tools_grant->{enabled} }
+
+=method perl_tools_grant
+
+    my $grant = $app->perl_tools_grant;
+    # { enabled => 1, reason => 'pack perl (detected)' }
+
+L</perl_tools_enabled> with the reason: C<--perl>, C<perl: true> or
+C<perl: false> with where it was set (C<.raider.yml> or C<-o>), the active
+packs requesting the tools with their activation source, or
+C<not requested>.
+
+=cut
+
+sub perl_tools_grant {
   my ($self) = @_;
-  return 1 if $self->perl;
+  return { enabled => 1, reason => '--perl' } if $self->perl;
   my $yml = $self->_load_yml_options->{perl};
-  return $yml ? 1 : 0 if defined $yml;
-  return ( grep { $_ eq 'perl' } @{$self->packs->requested_tools} ) ? 1 : 0;
+  if (defined $yml) {
+    my $where = exists $self->_cli_app_options->{perl} ? '-o' : '.raider.yml';
+    return { enabled => $yml ? 1 : 0, reason => 'perl: '.( $yml ? 'true' : 'false' ).' ('.$where.')' };
+  }
+  my $packs = $self->packs;
+  my @by = map { 'pack '.$_.' ('.$packs->sources->{$_}{source}.')' }
+    grep { grep { $_ eq 'perl' } @{ $packs->packs_by_name->{$_}->tools } }
+    @{ $packs->enabled_pack_names };
+  return @by ? { enabled => 1, reason => join(', ', @by) } : { enabled => 0, reason => 'not requested' };
 }
 
 =attr preferred_lib_target
@@ -1142,7 +1163,8 @@ C<detection> says whether pack detection runs (C<on>, or C<off> with what
 switched it off) and C<packs> is the
 L<Langertha::Raider::Packs::Collection/activation_report>: each pack with
 its source (C<flag>, C<config>, C<default>, C<detected>, C<manual>) and,
-for detection rules, the clause that matched or failed.
+for detection rules, the clause that matched or failed. C<perl_tools> is
+L</perl_tools_grant>: whether the Perl tools are mounted, and why.
 
 =cut
 
@@ -1230,9 +1252,10 @@ sub explain_config {
   my ( $detecting, $why ) = $self->detection_state;
   return {
     %$report,
-    values    => \@values,
-    detection => $detecting ? 'on' : 'off ('.$why.')',
-    packs     => $self->packs->activation_report,
+    values     => \@values,
+    detection  => $detecting ? 'on' : 'off ('.$why.')',
+    packs      => $self->packs->activation_report,
+    perl_tools => $self->perl_tools_grant,
   };
 }
 

@@ -5,6 +5,7 @@ use File::Temp qw( tempdir );
 use Path::Tiny;
 use YAML::PP ();
 use Langertha::Raider::CLI;
+use Langertha::Raider::CLI::Output;
 use Langertha::Raider::Packs;
 
 # The bundled perl pack (ADR 0012): detected in a Perl workspace, it requests
@@ -109,6 +110,31 @@ subtest '--pack perl requests the tools as well' => sub {
   ok(perl_tools_on($app), 'PerlTools on');
   is($app->packs->requested_tools, ['perl'], 'collected from the active packs');
   is(app(workspace())->packs->requested_tools, [], 'nothing requested otherwise');
+};
+
+subtest 'explain says whether the Perl tools are on, and why' => sub {
+  my %case = (
+    'detected pack' => [ [ workspace('cpanfile' => '') ],                          1, 'pack perl (detected)' ],
+    '--pack perl'   => [ [ workspace(), pack_names => ['perl'] ],                  1, 'pack perl (flag)' ],
+    '--perl'        => [ [ workspace(), perl => 1 ],                               1, '--perl' ],
+    'perl: true'    => [ [ workspace('.raider.yml' => { perl => 1 }) ],            1, 'perl: true (.raider.yml)' ],
+    'perl: false'   => [ [ workspace('cpanfile' => '', '.raider.yml' => { perl => 0 }) ], 0, 'perl: false (.raider.yml)' ],
+    '-o perl=0'     => [ [ workspace('cpanfile' => ''), engine_options => { perl => 0 } ], 0, 'perl: false (-o)' ],
+    'nothing'       => [ [ workspace() ],                                          0, 'not requested' ],
+  );
+  for my $what (sort keys %case) {
+    my ( $args, $enabled, $reason ) = @{ $case{$what} };
+    my $app = app(@$args);
+    is($app->explain_config->{perl_tools}, { enabled => $enabled, reason => $reason }, $what);
+    is($app->perl_tools_enabled, $enabled, $what.': matches perl_tools_enabled');
+  }
+
+  my $buf = '';
+  open my $fh, '>', \$buf or die $!;
+  Langertha::Raider::CLI::Output->new(out => $fh, color => 0)
+    ->config_report(app(workspace('dist.ini' => ''))->explain_config);
+  close $fh;
+  like($buf, qr/^perl tools: on  \(pack perl \(detected\)\)$/m, 'printed by config explain');
 };
 
 done_testing;
