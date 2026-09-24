@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T22:02:09Z
+claimed_by: worker-cli
+class: standard
+completed: 2026-09-24T22:02:09Z
+created: 2026-09-24T21:37:17Z
+id: 29
+priority: low
+started: 2026-09-24T21:51:16Z
+status: done
+tags:
+- config
+- cli
+title: Oberflaeche fuer Config-Herkunftsdiagnose (raider config explain / /config)
+updated: 2026-09-24T22:02:09Z
+---
+
+Folge zu #20. Langertha::Raider::Config->explain existiert nur als API. Oberflaeche fehlt; explain deckt ausserdem nur Datei-Ebenen ab, nicht -o/-m/--engine. Form (Subcommand vs. REPL) vorher entscheiden bzw. ADR 0011 pruefen.
