@@ -85,7 +85,9 @@ Revision history for Langertha-Raider
       tools are on without --perl; perl: false keeps them off.
     - raider config explain and /packs show each pack's source (flag,
       config, default, detected) and the rule clause that matched;
-      /reload detects packs again.
+      /reload detects packs again. config explain also says whether the
+      Perl tools are on and why (--perl, perl:, or the pack that asks for
+      them). A pack directory without a SKILL.md loads.
     - Fix Hall singleton queue replay, --pack propagation, Telegram
       future retention, and MCP tool result handling.
     - Add `--pack NAME` CLI parsing for one-shot pack activation.
@@ -94,7 +96,9 @@ Revision history for Langertha-Raider
       sections, so /model or a skills: hash no longer drops packs, perl
       or engine options; skills: merge across sections and with --claude
       / --openai / --skills, which all persist; engine: picks the engine;
-      a file that does not parse stops raider instead of being ignored.
+      a file that does not parse, or a mapping under one of raider's own
+      keys (packs:, perl:, engine:, ...), stops raider instead of being
+      ignored.
       Raider-only keys never reach the engine constructor.
     - Hall raiders without an engine: leave the choice to raider
       (.raider.yml, then API-key autodetection) instead of anthropic.
