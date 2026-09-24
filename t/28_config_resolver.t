@@ -51,6 +51,25 @@ subtest 'a mapping under a raider key is an error, not an engine section' => sub
     'an inactive engine section is still just ignored');
 };
 
+subtest 'a mapping under a raider key inside a section is an error too' => sub {
+  for my $section (qw( default openai anthropic )) {
+    for my $key (qw( engine no_detect packs perl preferred_lib_target )) {
+      like(dies { config_with($section.":\n  ".$key.":\n    x: 1\n")->data },
+        qr/Cannot use .*\.raider\.yml: \Q$section.$key\E: configures raider; must not be a mapping/,
+        $section.'.'.$key.': croaks naming section and key');
+    }
+  }
+  my $ok = config_with("default:\n  skills:\n    claude: 1\n  detect:\n    rust: false\n"
+    ."openai:\n  detect:\n    go: false\n  response_format:\n    type: json_object\n");
+  ok(lives { $ok->data }, 'skills:, detect: and engine options may be mappings inside a section');
+};
+
+subtest 'a parse error carries no YAML::PP location' => sub {
+  my $err = dies { config_with("a: [\n")->data };
+  like($err, qr/Cannot parse .*\.raider\.yml: \S/, 'names the file');
+  unlike($err, qr/YAML.PP/, 'no YAML::PP source location');
+};
+
 subtest 'set_model keeps a flat file flat in meaning' => sub {
   my $config = config_for('flat.yml');
   $config->set_model('gpt-4o');

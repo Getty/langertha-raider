@@ -140,7 +140,22 @@ subtest 'configuration errors exit 3' => sub {
   path($broken)->child('.raider.yml')->spew_utf8("packs:\n  git-guru: 1\n");
   ( $exit, $out, $err ) = main_run('', '-r', $broken, '-e', 'openai', 'config', 'explain');
   is($exit, 3, 'a mapping under a raider key');
-  like($err, qr/\.raider\.yml: packs: .*must not be a mapping/, 'names file and key');
+  like($err, qr/\.raider\.yml: packs: .*must not be a mapping\n\z/, 'names file and key');
+  unlike($err, qr/ line \d+/, 'no Perl source location');
+  path($broken)->child('.raider.yml')->spew_utf8("default:\n  packs:\n    git-guru: 1\n");
+  ( $exit, $out, $err ) = main_run('', 'config', 'explain', '-r', $broken, '-e', 'openai');
+  is($exit, 3, 'a mapping under a raider key in default:');
+  is($err, 'Cannot use '.path($broken)->child('.raider.yml')
+    .": default.packs: configures raider; must not be a mapping\n", 'one clean line');
+  path($broken)->child('.raider.yml')->spew_utf8("a: [\n");
+  ( $exit, $out, $err ) = main_run('', 'config', 'explain', '-r', $broken, '-e', 'openai');
+  is($exit, 3, 'a parse error');
+  like($err, qr/\ACannot parse .*\.raider\.yml: [^\n]+\n\z/, 'one line naming the file');
+  unlike($err, qr/ line \d+/, 'no Perl source location');
+  path($broken)->child('.raider.yml')->spew_utf8("detect: [ perl ]\n");
+  ( $exit, $out, $err ) = main_run('', 'config', 'explain', '-r', $broken, '-e', 'openai');
+  is($exit, 3, 'an invalid detect setting');
+  is($err, "Invalid detect setting detect: must be a map of pack name to rule, or false\n", 'one clean line');
   ( $exit, $out, $err ) = main_run('', '-r', $root, '-e', 'nope', 'hi');
   is($exit, 3, 'unknown engine');
   like($err, qr/Unknown engine: nope/, 'reported');

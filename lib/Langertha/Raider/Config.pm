@@ -47,7 +47,8 @@ from C<top> and C<default> only, as it picks the engine section.
 
 A file that does not parse, whose top level is not a mapping, or that holds
 a mapping under one of raider's own keys other than C<skills> and C<detect>
-(see L</is_app_key>), is an error: readers croak and the writer refuses to
+(see L</is_app_key>) -- at top level or in any section, active or not -- is
+an error: readers croak and the writer refuses to
 overwrite it.
 
 =cut
@@ -92,7 +93,8 @@ sub _build_file { path($_[0]->root)->child('.raider.yml') }
 
 The parsed file as a hash; empty when the file is missing or empty. Croaks
 when the file does not parse, its top level is not a mapping, or a raider
-key other than C<skills> and C<detect> holds a mapping.
+key other than C<skills> and C<detect> holds a mapping, at top level or in
+a section.
 
 =cut
 
@@ -108,12 +110,20 @@ sub _build_data {
   return {} unless -f $file;
   my $data;
   eval { $data = YAML::PP->new->load_string($file->slurp_utf8); 1 }
-    or croak 'Cannot parse '.$file.': '.( split /\n/, $@ )[0];
+    or croak 'Cannot parse '.$file.': '.( ( split /\n/, $@ )[0] =~ s/ at (?:(?! at ).)+ line \d+\.\z//r );
   return {} unless defined $data;
   croak 'Cannot use '.$file.': the top level must be a mapping' unless ref $data eq 'HASH';
   for my $key (sort keys %$data) {
     next unless $APP_KEY{$key} && !$self->_may_be_mapping($key) && ref $data->{$key} eq 'HASH';
     croak 'Cannot use '.$file.': '.$key.': configures raider, not an engine section; must not be a mapping';
+  }
+  # Every section, the inactive ones too: the file is valid or not whichever
+  # engine runs.
+  for my $section (sort grep { ref $data->{$_} eq 'HASH' && !$APP_KEY{$_} } keys %$data) {
+    for my $key (sort keys %{ $data->{$section} }) {
+      next unless $APP_KEY{$key} && !$self->_may_be_mapping($key) && ref $data->{$section}{$key} eq 'HASH';
+      croak 'Cannot use '.$file.': '.$section.'.'.$key.': configures raider; must not be a mapping';
+    }
   }
   return $data;
 }

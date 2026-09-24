@@ -105,6 +105,15 @@ sub _warn {
   return;
 }
 
+# A configuration error as the user reads it: one line, without the Perl
+# source location croak appended (also the Moose accessor form).
+sub _config_error {
+  my ( $self, $error ) = @_;
+  $error =~ s/ at (?:reader \S+ \(defined at .+ line \d+\)|(?:(?! at ).)+) line \d+\.\n\z/\n/s;
+  $self->_warn($error =~ /\n\z/ ? $error : $error."\n");
+  return;
+}
+
 =method usage
 
 The C<--help> text.
@@ -303,7 +312,7 @@ sub run {
   # stops raider here, with its path in the message.
   my $config = $self->config_class->new(root => $opt->{root} // Path::Tiny->cwd->stringify);
   unless (eval { $config->data; 1 }) {
-    $self->_warn($@ =~ /\n\z/ ? $@ : $@."\n");
+    $self->_config_error($@);
     return EXIT_CONFIG;
   }
   $args{config} = $config;
@@ -336,7 +345,7 @@ sub run {
   # Unknown engine or an invalid detection rule: stop before anything runs.
   my $app = $self->app_class->new(%args);
   unless (eval { $app->_engine_class; $app->packs; 1 }) {
-    $self->_warn($@);
+    $self->_config_error($@);
     return EXIT_CONFIG;
   }
 
