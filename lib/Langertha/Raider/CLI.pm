@@ -208,19 +208,29 @@ has api_key => (
 =attr mission
 
 System prompt / mission statement for the Raider. Defaults to a generic
-assistant persona.
+assistant persona plus F<.raider.md>, skills and packs. A C<mission> passed to
+the constructor (C<-M>) replaces all of that, also across L</reload_mission>.
 
 =cut
 
 has mission => (
-  is      => 'ro',
-  isa     => 'Str',
-  lazy    => 1,
-  builder => '_build_mission',
+  is       => 'ro',
+  isa      => 'Str',
+  lazy     => 1,
+  init_arg => undef,
+  builder  => '_build_mission',
+);
+
+has _explicit_mission => (
+  is        => 'ro',
+  isa       => 'Str',
+  init_arg  => 'mission',
+  predicate => '_has_explicit_mission',
 );
 
 sub _build_mission {
   my ($self) = @_;
+  return $self->_explicit_mission if $self->_has_explicit_mission;
   my $root = $self->root;
   my $base = <<"EOM";
 You are Langertha, viking shield-maiden. Autonomous CLI agent on user's
@@ -856,17 +866,17 @@ sub token_stats {
 =method reload_mission
 
 Rebuilds the mission (e.g. after C<.raider.md> has been edited) and swaps it
-into the underlying L<Langertha::Raider>.
+into the underlying L<Langertha::Raider>. An explicit L</mission> is kept.
 
 =cut
 
 sub reload_mission {
   my ($self) = @_;
   my $new = $self->_build_mission;
-  # Raider's `mission` is declared 'ro' — write directly into the object
-  # hash so we can hot-swap after editing .raider.md without dropping
-  # history or metrics.
-  $self->_raider->{mission} = $new;
+  # Raider's `mission` is 'ro' and has no writer; set it through its
+  # attribute (type-checked) to hot-swap without dropping history or metrics.
+  my $raider = $self->_raider;
+  $raider->meta->find_attribute_by_name('mission')->set_value($raider, $new);
   return $new;
 }
 
