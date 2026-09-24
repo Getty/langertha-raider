@@ -47,9 +47,9 @@ Revision history for Langertha-Raider
     - Explicit -m and -k beat model:/api_key: from .raider.yml, and the
       banner shows the model the engine is actually built with.
     - /reload and /pack keep a mission given with -M.
-    - New raider config explain [options] and REPL /config: every
-      effective setting with its source (flag, .raider.yml layer,
-      environment, default).
+    - New raider config explain [options] (the options may also come
+      first) and REPL /config: every effective setting with its source
+      (flag, .raider.yml layer, environment, default).
     - perl_eval, perl_check and perl_cpanm kill the child process when it
       times out, and every timeout (including the retry after an
       auto-install and cpanm itself) comes back as a result instead of an
@@ -98,8 +98,8 @@ Revision history for Langertha-Raider
       / --openai / --skills, which all persist; engine: picks the engine;
       a file that does not parse, or a mapping under one of raider's own
       keys (packs:, perl:, engine:, ...) at the top, in default: or in an
-      engine section, stops raider with a one-line error instead of being
-      ignored.
+      engine section, stops raider with a one-line error (line, column and
+      reason for a parse error) instead of being ignored.
       Raider-only keys never reach the engine constructor.
     - Hall raiders without an engine: leave the choice to raider
       (.raider.yml, then API-key autodetection) instead of anthropic.
