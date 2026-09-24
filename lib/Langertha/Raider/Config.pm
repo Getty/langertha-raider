@@ -104,13 +104,29 @@ has data => (
   lazy_build => 1,
 );
 
+# A YAML::PP error as one line. Its detailed report ("Line : 2",
+# "Column : 3", "Expected : ..." or "Message : ...") is summed up as
+# "line 2, column 3: expected EOL, got COLON"; a short error keeps its
+# first line. Either way without YAML::PP's source location.
+sub _parse_error {
+  my ( $self, $error ) = @_;
+  my %f = $error =~ /^(Line|Column|Message|Expected|Got)\s*: (.*)$/mg;
+  if (defined $f{Line}) {
+    my $reason = defined $f{Message} ? $f{Message}
+      : defined $f{Expected} ? 'expected '.$f{Expected}.', got '.( $f{Got} // '?' )
+      : 'syntax error';
+    return 'line '.$f{Line}.( defined $f{Column} ? ', column '.$f{Column} : '' ).': '.$reason;
+  }
+  return ( split /\n/, $error )[0] =~ s/ at (?:(?! at ).)+ line \d+\.\z//r;
+}
+
 sub _build_data {
   my ( $self ) = @_;
   my $file = $self->file;
   return {} unless -f $file;
   my $data;
   eval { $data = YAML::PP->new->load_string($file->slurp_utf8); 1 }
-    or croak 'Cannot parse '.$file.': '.( ( split /\n/, $@ )[0] =~ s/ at (?:(?! at ).)+ line \d+\.\z//r );
+    or croak 'Cannot parse '.$file.': '.$self->_parse_error($@);
   return {} unless defined $data;
   croak 'Cannot use '.$file.': the top level must be a mapping' unless ref $data eq 'HASH';
   for my $key (sort keys %$data) {

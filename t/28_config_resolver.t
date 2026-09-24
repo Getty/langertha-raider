@@ -70,6 +70,18 @@ subtest 'a parse error carries no YAML::PP location' => sub {
   unlike($err, qr/YAML.PP/, 'no YAML::PP source location');
 };
 
+subtest 'a detailed parse error is summed up on one line' => sub {
+  my $err = dies { config_with("a: b\n c: d\n")->data };
+  like($err, qr/Cannot parse .*\.raider\.yml: line 2, column 3: expected EOL, got COLON at /,
+    'line, column, expected and got');
+  $err = dies { config_with("key: \"unterminated\n")->data };
+  like($err, qr/Cannot parse .*\.raider\.yml: line 1, column 1: Missing closing quote <"> at EOF at /,
+    'line, column and message');
+  unlike($err, qr/YAML.PP|\n./, 'one line, no YAML::PP source location');
+  $err = dies { config_with("a: 1\na: 2\n")->data };
+  like($err, qr/Cannot parse .*\.raider\.yml: Duplicate key 'a' at /, 'a one-line error stays as it is');
+};
+
 subtest 'set_model keeps a flat file flat in meaning' => sub {
   my $config = config_for('flat.yml');
   $config->set_model('gpt-4o');

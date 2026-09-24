@@ -152,6 +152,11 @@ subtest 'configuration errors exit 3' => sub {
   is($exit, 3, 'a parse error');
   like($err, qr/\ACannot parse .*\.raider\.yml: [^\n]+\n\z/, 'one line naming the file');
   unlike($err, qr/ line \d+/, 'no Perl source location');
+  path($broken)->child('.raider.yml')->spew_utf8("key: \"unterminated\n");
+  ( $exit, $out, $err ) = main_run('', 'config', 'explain', '-r', $broken, '-e', 'openai');
+  is($exit, 3, 'a detailed parse error');
+  is($err, 'Cannot parse '.path($broken)->child('.raider.yml')
+    .": line 1, column 1: Missing closing quote <\"> at EOF\n", 'summed up on one clean line');
   path($broken)->child('.raider.yml')->spew_utf8("detect: [ perl ]\n");
   ( $exit, $out, $err ) = main_run('', 'config', 'explain', '-r', $broken, '-e', 'openai');
   is($exit, 3, 'an invalid detect setting');
