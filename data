@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T19:49:24Z
+claimed_by: raider-worker-13
+class: standard
+completed: 2026-09-24T19:49:24Z
+created: 2026-09-24T15:30:00Z
+id: 13
+priority: high
+started: 2026-09-24T19:45:57Z
+status: done
+tags:
+- tests
+- m0
+title: Live-Tests nur mit explizitem Opt-in (TEST_LIVE)
+updated: 2026-09-24T19:49:24Z
+---
+
+t/42_acp_live.t macht einen echten bezahlten OpenAI-Call, sobald OPENAI_API_KEY gesetzt ist (passiert beim Code-Abgleich 2026-09-24). Entschieden: Live-Tests (t/42, t/82, ggf. weitere) laufen nur mit TEST_LIVE=1 (Name final bei Umsetzung, ggf. RELEASE_TESTING beachten). Skip-Meldung nennt das Flag.
