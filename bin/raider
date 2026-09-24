@@ -9,12 +9,12 @@ our $VERSION = '0.503';
 
 use utf8;
 use Getopt::Long qw( GetOptions :config no_ignore_case bundling );
-use JSON::MaybeXS ();
-use Term::ANSIColor qw( colored color );
+use Term::ANSIColor qw( color );
 use Term::ReadLine;                   # Core; upgrades to Gnu if installed
 use IO::Prompt::Tiny qw( prompt );    # Fallback when Gnu is not available
 use Path::Tiny;
 use Langertha::Raider::CLI;
+use Langertha::Raider::CLI::Output;
 use Langertha::Raider::Config;
 use Langertha::Raider::ACP::CLI;
 use Langertha::Raider::Hall::CLI;
@@ -48,20 +48,11 @@ if (@ARGV && $ARGV[0] eq 'config') {
   die "Usage: raider config explain [options]\n" unless $config_cmd eq 'explain';
 }
 
-# --- Palette: blue tones + yellow accents -------------------------------
+# --- Output: palette, lines, config report, --json ----------------------
 
-my %C = (
-  brand  => 'bold bright_blue',
-  title  => 'bold blue',
-  prompt => 'bold cyan',
-  agent  => 'bright_green',
-  meta   => 'bright_black',
-  accent => 'yellow',
-  warn   => 'yellow',
-  err    => 'red',
-);
+my $out = Langertha::Raider::CLI::Output->new;
 
-sub c { my ($k, @t) = @_; -t STDOUT ? colored([$C{$k}], join('', @t)) : join('', @t) }
+sub c { $out->c(@_) }
 
 # --- Options ------------------------------------------------------------
 
@@ -294,18 +285,6 @@ sub banner {
         c(accent => "/quit"), c(meta => " to leave"), "\n\n";
 }
 
-sub render_inline_code {
-  my ($text) = @_;
-  return $text unless -t STDOUT && !$ENV{ANSI_COLORS_DISABLED};
-  # Wrap `...` spans with a subtly-darker background. Triple backticks stay
-  # untouched so fenced code blocks keep their own flow.
-  my $code_on  = color('on_grey3');
-  my $agent_on = color($C{agent});
-  my $reset    = color('reset');
-  $text =~ s{(?<!`)`([^`\n]+?)`(?!`)}{$code_on$1$reset$agent_on}g;
-  return $text;
-}
-
 sub collapse_model_list {
   my ($list, $current) = @_;
   my %all    = map { $_ => 1 } @$list;
@@ -350,28 +329,10 @@ sub collapse_model_list {
   return sort { $a->{id} cmp $b->{id} } @rows;
 }
 
-sub print_config_report {
-  my ($report) = @_;
-  my $json = JSON::MaybeXS->new(canonical => 1, allow_nonref => 1);
-  print c(meta => "file:   "), c(title => $report->{file}),
-        c(meta => $report->{exists} ? '' : ' (not present)'), "\n";
-  print c(meta => "engine: "), c(title => $report->{engine}), "\n";
-  for my $v (@{ $report->{values} }) {
-    my $value = ref $v->{value} ? $json->encode($v->{value}) : $v->{value} // '';
-    my $from  = 'from '.$v->{source};
-    $from .= ', overrides '.join(', ', @{ $v->{shadowed} }) if @{ $v->{shadowed} // [] };
-    $from .= ', merged' if $v->{merged};
-    printf "  %s %s  %s\n", c(title => sprintf('%-22s', $v->{key})), $value,
-      c(meta => '('.$from.'; '.$v->{applies_to}.')');
-  }
-  for my $ign (@{ $report->{ignored} }) {
-    print "  ", c(warn => "ignored $ign->{key}: $ign->{reason}"), "\n";
-  }
-}
-
-sub print_agent { print c(agent => render_inline_code($_[0])), "\n" }
-sub print_meta  { print c(meta  => $_[0]), "\n" }
-sub print_err   { print c(err   => "error: "), c(warn => $_[0]), "\n" }
+sub print_config_report { $out->config_report(@_) }
+sub print_agent { $out->say_agent(@_) }
+sub print_meta  { $out->say_meta(@_) }
+sub print_err   { $out->say_error(@_) }
 
 sub handle_slash {
   my ($app, $line) = @_;
@@ -662,8 +623,7 @@ sub run_one {
   unless ($ok) {
     my $err = $@; chomp $err;
     if ($o{json}) {
-      print JSON::MaybeXS->new(utf8 => 1, pretty => 1, canonical => 1)
-        ->encode({ error => $err, elapsed => $elapsed });
+      $out->json_error($err, $elapsed);
     }
     else {
       print_err($err);
@@ -674,11 +634,7 @@ sub run_one {
   my $m = $app->raider->metrics;
 
   if ($o{json}) {
-    print JSON::MaybeXS->new(utf8 => 1, pretty => 1, canonical => 1)->encode({
-      response => "$result",
-      metrics  => $m,
-      elapsed  => $elapsed,
-    });
+    $out->json_result($result, $m, $elapsed);
     return;
   }
 
