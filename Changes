@@ -73,8 +73,9 @@ Revision history for Langertha-Raider
       raider.done events report exit_code 1 for failed runs.
     - --json encodes UTF-8 once and keeps the live trace off unless
       --trace is given; raider -i reads piped input to its end.
-    - /reload and the banner name a -M mission; the generated skill lists
-      /config, /model, /packs and /pack.
+    - /reload, the banner and the generated raider skill name a -M
+      mission as the persona; the generated skill lists /config, /model,
+      /packs and /pack.
     - Fix Hall singleton queue replay, --pack propagation, Telegram
       future retention, and MCP tool result handling.
     - Add `--pack NAME` CLI parsing for one-shot pack activation.
