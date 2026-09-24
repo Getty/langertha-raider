@@ -1,6 +1,6 @@
 # ADR 0012 — Packs activate by declarative workspace detection
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-09-25
 - Tags: packs, config, context, detection
 
