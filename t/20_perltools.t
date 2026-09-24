@@ -6,11 +6,18 @@ use warnings;
 use Test2::Bundle::More;
 use File::Temp qw( tempdir );
 use Path::Tiny;
+use IPC::Run ();
 use JSON::MaybeXS ();
 
 use Langertha::Raider::PerlTools qw( build_perl_tools_server );
 
 my $dir = tempdir(CLEANUP => 1);
+
+# Run from a scratch cwd that is not the root, so cwd and relative-path
+# checks mean something and a regression cannot write into the checkout.
+my $scratch = path(tempdir(CLEANUP => 1))->child('cwd');
+$scratch->mkpath;
+chdir $scratch or die "chdir $scratch: $!";
 
 my $fakebin = path($dir)->child('fakebin');
 $fakebin->mkpath;
@@ -91,6 +98,80 @@ subtest perl_check_invalid => sub {
   my $d = decoded($res);
   is($d->{valid}, JSON::MaybeXS::false, 'invalid syntax');
   ok(defined $d->{syntax_error}, 'syntax_error populated');
+};
+
+subtest perl_eval_runs_in_root_with_current_perl => sub {
+  my $fake_perl = $fakebin->child('perl');
+  $fake_perl->spew_utf8("#!/bin/sh\necho fake-perl\n");
+  chmod 0755, $fake_perl;
+  IPC::Run::clearcache();
+  my $res = call_tool('perl_eval', {
+    code => 'use Cwd qw( getcwd ); print getcwd(), "\n", $^X, "\n"',
+  });
+  my $d = decoded($res);
+  my ( $cwd, $perl ) = split /\n/, $d->{stdout};
+  is(path($cwd)->realpath->stringify, path($dir)->realpath->stringify, 'cwd is the root');
+  is($perl, $^X, 'runs the perl that runs raider');
+  $fake_perl->remove;
+};
+
+subtest perl_eval_timeout_reported => sub {
+  my $res = call_tool('perl_eval', { code => 'sleep 10', timeout => 1 });
+  my $d = decoded($res);
+  is($d->{error}, 'timeout', 'timeout reported as timeout');
+};
+
+subtest perl_eval_start_failure_not_reported_as_timeout => sub {
+  my $res = call_tool('perl_eval', { code => 'print 1', timeout => 'not-a-number' });
+  my $d = decoded($res);
+  ok(defined $d->{error}, 'error reported');
+  isnt($d->{error}, 'timeout', 'non-timeout failure is not called a timeout');
+};
+
+subtest perl_check_description_is_honest => sub {
+  my ($tool) = grep { $_->name eq 'perl_check' } @{ $server->tools };
+  unlike($tool->description, qr/without executing/i, 'does not claim nothing runs');
+  like($tool->description, qr/BEGIN/, 'warns that BEGIN and use run');
+};
+
+subtest perl_check_uses_target_lib_and_root => sub {
+  my $pm = path($dir)->child('.raider', 'lib', 'lib', 'perl5', 'Raider', 'CheckOnly.pm');
+  $pm->parent->mkpath;
+  $pm->spew_utf8("package Raider::CheckOnly; 1;\n");
+  path($dir)->child('marker-root.txt')->spew_utf8("1\n");
+  my $res = call_tool('perl_check', {
+    code => 'use Raider::CheckOnly; BEGIN { -f "marker-root.txt" or die "not in root" }',
+  });
+  my $d = decoded($res);
+  is($d->{valid}, JSON::MaybeXS::true, 'module from target lib and root cwd are visible')
+    or diag $d->{syntax_error};
+};
+
+subtest perl_cpanm_rejects_target_outside_root => sub {
+  my $outside = tempdir(CLEANUP => 1);
+  my $dotdot = path($dir)->stringify.'/../'.path($outside)->basename;
+  for my $target ($outside, $dotdot, '../escape') {
+    my $res = call_tool('perl_cpanm', {
+      module  => 'Acme::Outside',
+      options => { target => $target },
+    });
+    ok($res->{isError}, 'target '.$target.' rejected');
+  }
+  ok(!-e path($outside)->child('cpanfile'), 'nothing written outside root');
+};
+
+subtest perl_cpanm_relative_target_inside_root => sub {
+  my $res = call_tool('perl_cpanm', {
+    module  => 'Acme::Relative',
+    options => { target => '.raider/rel' },
+  });
+  ok(!$res->{isError}, 'relative target accepted');
+  ok(-f path($dir)->child('.raider', 'rel', 'cpanfile'), 'resolved against the root');
+};
+
+subtest perl_cpanm_description_names_real_default => sub {
+  my ($tool) = grep { $_->name eq 'perl_cpanm' } @{ $server->tools };
+  unlike($tool->description, qr{\.raider/lib/standalone}, 'no stale standalone path');
 };
 
 subtest perl_cpanm_init_lib => sub {

@@ -40,6 +40,14 @@ sub build_perl_tools_server {
     return join ':', grep { defined && length } ($base, $ENV{PERL5LIB});
   };
 
+  my $in_root = sub {
+    my ($p) = @_;
+    return 0 if grep { $_ eq '..' } split m{/}, $p;
+    return $root->subsumes(path($p)->absolute($root));
+  };
+
+  my $chdir_root = sub { chdir $root or die "chdir $root: $!\n" };
+
   my $ensure_lib_init = sub {
     my ($target) = @_;
     my $dir = path($target);
@@ -66,7 +74,7 @@ sub build_perl_tools_server {
 
   $server->tool(
     name        => 'perl_eval',
-    description => 'Evaluate a snippet of Perl code and return stdout, stderr, exit code, and return value. No persistent session — each call starts fresh. On missing-module error: auto-installs once and retries.',
+    description => 'Evaluate a snippet of Perl code and return stdout, stderr, exit code, and return value. Runs in the working root with the private lib on PERL5LIB. No persistent session — each call starts fresh. On missing-module error: auto-installs once and retries.',
     input_schema => {
       type       => 'object',
       properties => {
@@ -82,19 +90,19 @@ sub build_perl_tools_server {
       my $stdin  = $in->{stdin}  // '';
       my $to_sec = $in->{timeout} // 60;
 
-      my ($out, $err, $auto_installed);
+      my ($out, $err, $auto_installed, $failure);
 
       my $do_run = sub {
-        my @cmd = ('perl', '-e', $code);
+        my @cmd = ($^X, '-e', $code);
         my $target = $resolve_lib_target->();
         local $ENV{PERL5LIB} = $perl5lib_for->($target);
-        my $h = start \@cmd, \$stdin, \$out, \$err, timeout($to_sec);
+        my $h = start \@cmd, \$stdin, \$out, \$err, init => $chdir_root, timeout($to_sec);
         $h->finish;
         my $fr = $h->full_result;
         return defined($fr) ? ($fr >> 8) : -1;
       };
 
-      my ($rc, $timed_out);
+      my $rc;
       my $ok = eval {
         $rc = $do_run->();
         1;
@@ -102,7 +110,8 @@ sub build_perl_tools_server {
 
       unless ($ok) {
         $rc = -1;
-        $timed_out = 1;
+        $failure = $@ =~ /^IPC::Run: timeout on timer/ ? 'timeout' : $@;
+        chomp $failure;
         $err //= '';
         chomp $err;
       }
@@ -116,7 +125,7 @@ sub build_perl_tools_server {
         push @missing, $mod;
       }
 
-      if (@missing && !$auto_installed && !$timed_out) {
+      if (@missing && !$auto_installed && !$failure) {
         my ($i_out, $i_err);
         my $target = $resolve_lib_target->();
         $ensure_lib_init->($target);
@@ -150,7 +159,7 @@ sub build_perl_tools_server {
         exit_code    => $rc // 0,
       );
       $result{auto_installed} = $auto_installed if $auto_installed;
-      $result{error} = 'timeout' if $timed_out;
+      $result{error} = $failure if $failure;
 
       return $tool->structured_result(\%result);
     },
@@ -160,7 +169,7 @@ sub build_perl_tools_server {
 
   $server->tool(
     name        => 'perl_check',
-    description => 'Check Perl syntax without executing the code. Runs "perl -c".',
+    description => 'Compile-check Perl code with "perl -c" in the working root, with the private lib on PERL5LIB. Not a sandbox: BEGIN blocks and use statements DO run during compilation.',
     input_schema => {
       type       => 'object',
       properties => {
@@ -173,7 +182,8 @@ sub build_perl_tools_server {
       my $code = $in->{code} // '';
 
       my ($out, $err);
-      my $h = start ['perl', '-c', '-'], \$code, \$out, \$err, timeout(30);
+      local $ENV{PERL5LIB} = $perl5lib_for->($resolve_lib_target->());
+      my $h = start [$^X, '-c', '-'], \$code, \$out, \$err, init => $chdir_root, timeout(30);
       $h->finish;
       my $fr = $h->full_result;
       my $rc = defined($fr) ? ($fr >> 8) : -1;
@@ -196,7 +206,7 @@ sub build_perl_tools_server {
 
   $server->tool(
     name        => 'perl_cpanm',
-    description => 'Install a CPAN module into a private local::lib. Target auto-detected: explicit arg > preferred_lib_target from config > .raider/lib/standalone. Creates the target directory (with cpanfile + perl-version marker) on first install.',
+    description => 'Install a CPAN module into a private local::lib. Target: options.target (must lie inside the working root) > configured lib target > .raider/lib in the working root. Creates the target directory (with cpanfile + perl-version marker) on first install.',
     input_schema => {
       type       => 'object',
       properties => {
@@ -208,7 +218,7 @@ sub build_perl_tools_server {
             test   => { type => 'boolean', description => 'Run tests before install (default: false)' },
             force  => { type => 'boolean', description => 'Force install (ignore errors)' },
             from   => { type => 'string',  description => 'CPAN mirror URL or path' },
-            target => { type => 'string',  description => 'Override lib target directory' },
+            target => { type => 'string',  description => 'Override lib target directory (inside the working root; relative paths resolve against it)' },
           },
         },
       },
@@ -220,8 +230,13 @@ sub build_perl_tools_server {
       my $opts   = $in->{options} // {};
       my $explicit_target = $opts->{target} // undef;
 
+      if (defined $explicit_target) {
+        return $tool->text_result('perl_cpanm: target '.$explicit_target.' is outside the working root '.$root, 1)
+          unless $in_root->($explicit_target);
+      }
+
       my $target_dir = defined $explicit_target
-        ? $explicit_target
+        ? path($explicit_target)->absolute($root)->stringify
         : $resolve_lib_target->();
 
       $ensure_lib_init->($target_dir);
@@ -262,20 +277,26 @@ sub build_perl_tools_server {
 
 =head2 perl_eval
 
-Evaluate Perl code. Returns stdout, stderr, exit_code, return_value, and
-(optionally) auto_installed.
+Evaluate Perl code with the running perl (C<$^X>) in the working root,
+with the private lib on C<PERL5LIB>. Returns stdout, stderr, exit_code,
+return_value, and (optionally) auto_installed. C<error> is C<timeout> when
+the time limit hit, otherwise the message of whatever else failed.
 
 On "Can't locate X/Y.pm" in stderr, auto-installs the module once then
 retries the eval. If retry still fails, returns the error.
 
 =head2 perl_check
 
-Syntax-check Perl code via C<perl -c>. Returns C<valid> (bool) and
+Compile-check Perl code via C<perl -c> in the working root, with the
+private lib on C<PERL5LIB>. This is not a sandbox: C<BEGIN> blocks and
+C<use> statements run during compilation. Returns C<valid> (bool) and
 C<syntax_error> (string or null).
 
 =head2 perl_cpanm
 
-Install a CPAN module into a private local::lib. Creates the target
+Install a CPAN module into a private local::lib. An explicit
+C<options.target> must lie inside the working root (relative paths resolve
+against it); anything else is rejected. Creates the target
 directory (with cpanfile + perl-version marker) on first install. The
 cpanfile is updated idempotently (no duplicate entries).
 
