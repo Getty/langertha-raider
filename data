@@ -1,0 +1,17 @@
+---
+class: standard
+completed: 2026-09-24T19:49:08Z
+created: 2026-09-24T19:47:58Z
+id: 25
+priority: medium
+started: 2026-09-24T19:49:08Z
+status: done
+tags:
+- tests
+title: t/60_docker_release.t test 10 fails after README rewrite
+updated: 2026-09-24T19:49:08Z
+---
+
+Since a9e1666 (README rewritten as redesign target state), t/60_docker_release.t test 10 "README documents the Dist::Zilla distribution directory build" fails: README no longer matches /Dockerfile installs from the Dist::Zilla-built distribution directory/. Decide: restore that README passage or relax/move the assertion. Found while verifying k13; unrelated to the live-test gating.
+
+Behoben in README-Commit (Docker-Build-Abschnitt wiederhergestellt).
