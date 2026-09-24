@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-24T22:02:01Z
+claimed_by: worker-cli
+class: standard
+completed: 2026-09-24T22:02:01Z
+created: 2026-09-24T21:37:27Z
+id: 31
+priority: medium
+started: 2026-09-24T21:51:08Z
+status: done
+tags:
+- bug
+- config
+- cli
+title: 'Flag -m wird von model: aus .raider.yml ueberschrieben'
+updated: 2026-09-24T22:02:01Z
+---
+
+Gefunden bei #20. Beim Engine-Bau ueberschreiben yml-Optionen das explizite -m; Banner zeigt trotzdem das -m-Modell. CLI-Flag muss gewinnen. Regressionstest ueber Langertha::Raider::Config/CLI.
