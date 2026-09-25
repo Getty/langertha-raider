@@ -191,19 +191,33 @@ subtest 'events: fields, seq, framing in every encoding' => sub {
 subtest 'Events plugin: tool.call and tool.result' => sub {
   my @got;
   my $plugin = Langertha::Raider->new(engine => SeqEngine->new, plugins => [ '+Langertha::Raider::Plugin::Events' =>
-    { on_event => sub { push @got, [ @_ ] }, max_content_length => 5 } ])->_plugin_instances->[0];
+    { on_event => sub { push @got, [ @_ ] } } ])->_plugin_instances->[0];
   my @tc = $plugin->plugin_before_tool_call('bash', { command => 'ls' })->get;
   is(\@tc, [ 'bash', { command => 'ls' } ], 'the call passes through');
   my $result = { content => [ { type => 'text', text => 'abc' }, { type => 'text', text => 'defg' } ] };
   ref_is($plugin->plugin_after_tool_call('bash', {}, $result)->get, $result, 'the result passes through');
+  $plugin->plugin_before_tool_call('t', undef)->get;
   $plugin->plugin_after_tool_call('t', {}, { content => [ { type => 'text', text => 'no' } ], isError => 1 })->get;
+  $plugin->plugin_before_raid([])->get;
+  $plugin->plugin_before_tool_call('t', {})->get;
   $plugin->plugin_after_tool_call('t', {}, 'plain')->get;
   is(\@got, [
-    [ 'tool.call', name => 'bash', arguments => { command => 'ls' } ],
-    [ 'tool.result', name => 'bash', ok => T(), size => 7, content => 'abcde', truncated => T() ],
-    [ 'tool.result', name => 't', ok => F(), size => 2, content => 'no', truncated => F() ],
-    [ 'tool.result', name => 't', ok => T(), size => 5, content => 'plain', truncated => F() ],
-  ], 'events with outcome, size and cut content');
+    [ 'tool.call', call => 'c1', name => 'bash', arguments => { command => 'ls' }, status => 'dispatched' ],
+    [ 'tool.result', call => 'c1', name => 'bash', status => 'succeeded', ok => T(), size => 7, content => 'abcdefg' ],
+    [ 'tool.call', call => 'c2', name => 't', arguments => {}, status => 'dispatched' ],
+    [ 'tool.result', call => 'c2', name => 't', status => 'failed', ok => F(), size => 2, content => 'no' ],
+    [ 'tool.call', call => 'c1', name => 't', arguments => {}, status => 'dispatched' ],
+    [ 'tool.result', call => 'c1', name => 't', status => 'succeeded', ok => T(), size => 5, content => 'plain' ],
+  ], 'events with call ids counted per raid, outcome and the whole text');
+
+  my ( $fh, $read ) = buffer();
+  my $machine = Langertha::Raider::CLI::Machine->new(format => 'json', stream => 1, out => $fh,
+    max_content_length => 5);
+  $machine->event('tool.result', call => 'c1', content => 'abcdefg', size => 7);
+  $machine->event('tool.result', call => 'c2', content => 'abc', size => 3);
+  my @events = read_stream(json => $read->());
+  like($events[0], { content => 'abcde', truncated => T(), size => 7 }, 'the stream cuts the content');
+  like($events[1], { content => 'abc', truncated => F() }, 'and flags whether it did');
 };
 
 subtest 'a real raid as a stream' => sub {

@@ -96,6 +96,31 @@ has customize_prompt => (
   default => 0,
 );
 
+=attr session_store
+
+The L<Langertha::Raider::SessionStore> a new session is created in, with
+the first prompt. Without one (C<--no-session>) nothing is recorded.
+
+=attr session
+
+The L<Langertha::Raider::Session> the prompts are recorded in, once there
+is one.
+
+=cut
+
+has session_store => (
+  is        => 'ro',
+  isa       => 'Langertha::Raider::SessionStore',
+  predicate => 'has_session_store',
+);
+
+has session => (
+  is        => 'ro',
+  isa       => 'Langertha::Raider::Session',
+  writer    => '_set_session',
+  predicate => 'has_session',
+);
+
 has commands => (
   is      => 'ro',
   lazy    => 1,
@@ -175,6 +200,9 @@ sub banner {
   $line->('model:    ', $model);
   $line->('api key:  ', $env_display);
   $line->('root:     ', $app->root);
+  $line->('session:  ', $self->has_session ? $self->session->id.' ('.$self->session->path.')'
+                      : $self->has_session_store ? 'new, saved from the first prompt on'
+                      : 'off');
   $line->('readline: ', $rl_impl);
   $out->emit($out->c(meta => 'type '), $out->c(accent => '/help'), $out->c(meta => ' for commands, '),
     $out->c(accent => '/quit'), $out->c(meta => ' to leave'), "\n\n");
@@ -207,9 +235,11 @@ sub run {
   # running: a bash command sits in a process group of its own and would
   # outlive raider.
   my $leave = sub {
+    my ( $signal ) = @_;
     local $SIG{INT}  = 'IGNORE';
     local $SIG{TERM} = 'IGNORE';
     $self->runner->terminate_children;
+    $self->runner->abandon($signal);
     $call->('save');
     $out->emit($out->c(meta => "\nbye."), "\n");
     exit 0;
@@ -217,7 +247,7 @@ sub run {
   my $last_sigint = 0;
   local $SIG{INT} = sub {
     my $now = time;
-    $leave->() if $last_sigint && $now - $last_sigint <= 2;
+    $leave->('INT') if $last_sigint && $now - $last_sigint <= 2;
     $last_sigint = $now;
     $out->emit($out->c(meta => "\n(press Ctrl-C again within 2s to quit)"), "\n");
     $call->('redisplay');
@@ -226,7 +256,7 @@ sub run {
 
   $self->banner($rl->{impl});
   $self->commands->cmd_prompt if $self->customize_prompt;
-  $self->runner->run_prompt(join ' ', @first) if @first;
+  $self->run_prompt(join ' ', @first) if @first;
 
   while (defined(my $line = $rl->{read}->())) {
     $line =~ s/^\s+|\s+$//g;
@@ -241,11 +271,42 @@ sub run {
       $self->commands->dispatch($line);
       next;
     }
-    $self->runner->run_prompt($line);
+    $self->run_prompt($line);
   }
 
   $call->('save');
   return;
+}
+
+=method run_prompt
+
+    $repl->run_prompt($text);
+
+Runs one prompt through the runner, recorded in L</session>. The first
+prompt with a L</session_store> starts the session and names it.
+
+=cut
+
+sub run_prompt {
+  my ( $self, $text ) = @_;
+  return $self->runner->run_prompt($text, session => scalar $self->_session_for_run);
+}
+
+sub _session_for_run {
+  my ( $self ) = @_;
+  return $self->session if $self->has_session;
+  return unless $self->has_session_store;
+  my $out = $self->output;
+  my $session = eval { $self->session_store->create };
+  unless ($session) {
+    my $error = $@;
+    $error =~ s/ at \S+ line \d+\.?\n\z//;
+    $out->say_error('session not saved: '.$error);
+    return;
+  }
+  $self->_set_session($session);
+  $out->say_meta('session '.$session->id.' ('.$session->path.')');
+  return $session;
 }
 
 # Line reader on a terminal: { read, impl, add, save, redisplay }.

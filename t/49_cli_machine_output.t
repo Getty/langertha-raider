@@ -120,12 +120,14 @@ subtest 'the three document flags' => sub {
     my ( $exit, $out, $err ) = main_run(@base, '--'.$format, 'hi');
     is($exit, 0, '--'.$format.': exits 0');
     is(decode_as($format, $out),
-      { version => 1, status => 'completed', response => 'Grüße ✓ hi', metrics => T(), elapsed => E() },
+      { version => 1, status => 'completed', response => 'Grüße ✓ hi', metrics => T(), elapsed => E(),
+        session => { id => T(), path => T() } },
       '--'.$format.': the completed document, alone on stdout');
     is($err, '', '--'.$format.': nothing on stderr');
     ( $exit, $out ) = main_run(@base, '--'.$format, 'fail');
     is($exit, 1, '--'.$format.': a failed run exits 1');
-    is(decode_as($format, $out), { version => 1, status => 'failed', error => 'kaputt: ä', elapsed => E() },
+    is(decode_as($format, $out), { version => 1, status => 'failed', error => 'kaputt: ä', elapsed => E(),
+      session => { id => T(), path => T() } },
       '--'.$format.': the failed document');
     ( $exit, $out ) = main_run(@base, '--'.$format.'=1', 'hi');
     is($exit, 0, '--'.$format.'=1 is version 1');
@@ -190,7 +192,8 @@ my $q = sub { join ' ', map { "'$_'" } @_ };
 subtest 'bin/raider --msgpack writes binary stdout' => sub {
   my $out = `@{[ $q->(@cmd, @base, '--msgpack', '-o', 'url=http://127.0.0.1:1', 'hi') ]} 2>/dev/null </dev/null`;
   is($? >> 8, 1, 'unreachable engine: run failed');
-  is(decode_as(msgpack => $out), { version => 1, status => 'failed', error => T(), elapsed => E() },
+  is(decode_as(msgpack => $out), { version => 1, status => 'failed', error => T(), elapsed => E(),
+    session => { id => T(), path => T() } },
     'stdout is one MessagePack document');
 };
 

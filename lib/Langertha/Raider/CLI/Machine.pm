@@ -99,6 +99,20 @@ has clock => (
   default => sub { \&Time::HiRes::time },
 );
 
+=attr max_content_length
+
+How many characters of a C<tool.result>'s text an event carries in
+C<content>; a longer text is cut and the event flagged C<truncated>.
+Defaults to C<1000>.
+
+=cut
+
+has max_content_length => (
+  is      => 'ro',
+  isa     => 'Int',
+  default => 1000,
+);
+
 has _seq => (
   traits  => ['Counter'],
   is      => 'ro',
@@ -136,13 +150,21 @@ sub document {
     $machine->event('tool.call', name => 'bash', arguments => { command => 'ls' });
 
 Writes one event -- the payload plus C<version>, C<type>, C<seq> and C<time>
--- when L</stream> is on; does nothing otherwise.
+-- when L</stream> is on; does nothing otherwise. The C<content> of a
+C<tool.result> is cut to L</max_content_length> characters, with
+C<truncated> telling whether it was.
 
 =cut
 
 sub event {
   my ( $self, $type, %payload ) = @_;
   return unless $self->stream;
+  if ($type eq 'tool.result') {
+    my $content = $payload{content} // '';
+    my $max = $self->max_content_length;
+    $payload{content}   = substr($content, 0, $max);
+    $payload{truncated} = length $content > $max ? JSON::MaybeXS->true : JSON::MaybeXS->false;
+  }
   $self->write({
     %payload,
     version => $self->version,

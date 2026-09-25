@@ -76,9 +76,15 @@ subtest '--json: SIGTERM writes the interrupted document' => sub {
   my ( $status, $stdout, $stderr ) = interrupted_run(TERM => '--json');
   died_of($status, 'TERM', '--json');
   my $doc = eval { JSON::MaybeXS->new(utf8 => 1)->decode($stdout) };
-  is($doc, { version => 1, status => 'interrupted', signal => 'TERM', elapsed => E() },
+  is($doc, { version => 1, status => 'interrupted', signal => 'TERM', elapsed => E(),
+    session => { id => T(), path => T() } },
     'one document, status interrupted') or diag 'stdout: '.$stdout."\nstderr: ".$stderr;
   unlike($stderr, qr/ at \S+ line \d+/, 'no Perl error on stderr') or diag $stderr;
+  my @journal = map { JSON::MaybeXS->new(utf8 => 1)->decode($_) }
+    path($doc->{session}{path})->lines_raw({ chomp => 1 });
+  is([ map { $_->{type} } @journal ], [qw( session.created run.started message run.finished )],
+    'the session journal ends the run');
+  like($journal[-1], { run => 'r1', status => 'interrupted', signal => 'TERM' }, 'as interrupted');
 };
 
 subtest '--stream-json: SIGINT ends with run.state and run.finished' => sub {

@@ -395,8 +395,8 @@ has trace_out => (
 
 Optional code reference called as C<< $on_event->($type, %payload) >> for
 every C<tool.call> and C<tool.result> of a raid, through
-L<Langertha::Raider::Plugin::Events>. Set by C<--stream-json> and its
-siblings.
+L<Langertha::Raider::Plugin::Events>. Set by the command line for
+C<--stream-json> and its siblings and for the session journal.
 
 =cut
 

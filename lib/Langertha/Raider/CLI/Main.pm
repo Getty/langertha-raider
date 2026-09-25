@@ -16,6 +16,7 @@ use Langertha::Raider::CLI::REPL;
 use Langertha::Raider::CLI::Runner;
 use Langertha::Raider::Config;
 use Langertha::Raider::Hall::CLI;
+use Langertha::Raider::SessionStore;
 use Langertha::Raider::Skill;
 
 =head1 SYNOPSIS
@@ -116,6 +117,7 @@ sub config_class  { 'Langertha::Raider::Config' }
 sub machine_class { 'Langertha::Raider::CLI::Machine' }
 sub repl_class    { 'Langertha::Raider::CLI::REPL' }
 sub runner_class  { 'Langertha::Raider::CLI::Runner' }
+sub session_store_class { 'Langertha::Raider::SessionStore' }
 sub skill_class   { 'Langertha::Raider::Skill' }
 
 sub _warn {
@@ -174,6 +176,8 @@ Options:
                            ending with the document (run.finished)
       --stream-msgpack[=N] The same events as MessagePack objects
       --stream-yaml[=N]    The same events as YAML documents
+      --no-session         Do not record the run(s) in a session journal
+                           (default: a new one in .raider/sessions/)
       --max-iterations N   Hard safety cap on tool rounds per raid
                            (default: 10000 — effectively unlimited)
       --no-color           Disable ANSI colors
@@ -255,6 +259,7 @@ sub parse_options {
       'skills=s@'             => $opt{skill_dirs},
       'export-skill:s'        => \$opt{export_skill},
       'export-claude-skill:s' => \$opt{export_claude_skill},
+      'no-session'            => \$opt{no_session},
       'h|help'                => \$opt{help},
     );
   };
@@ -381,7 +386,11 @@ sub run {
   my $machine = $opt->{machine}
     ? $self->machine_class->new(%{ $opt->{machine} }, out => $self->output->out)
     : undef;
-  $args{on_event} = sub { $machine->event(@_) } if $machine && $machine->stream;
+  # The runner, made once the app exists, hands the tool events on to the
+  # stream and the session journal.
+  my $runner;
+  $args{on_event} = sub { $runner->event(@_) if $runner }
+    if !$opt->{no_session} || ($machine && $machine->stream);
 
   # A machine consumer gets its interrupted document also for a signal
   # during startup (configuration, reading the prompt); the runner takes
@@ -459,6 +468,8 @@ sub run {
   # given on argv / piped in / requested as one-shot machine output.
   my $in = $self->in;
   my $interactive = $opt->{interactive} || (!$opt->{machine} && !@prompt && -t $in);
+  $runner = $self->runner_class->new(app => $app, output => $self->output);
+  my $store = $opt->{no_session} ? undef : $self->session_store_class->new(root => $app->root);
 
   if ($interactive) {
     my %seen;
@@ -466,6 +477,8 @@ sub run {
       app              => $app,
       output           => $self->output,
       in               => $in,
+      runner           => $runner,
+      $store ? ( session_store => $store ) : (),
       active_profiles  => [ grep { !$seen{$_}++ } @cli_profiles, $config->profiles($app->engine_name) ],
       saved_profiles   => \%saved_now,
       customize_prompt => $opt->{customize_prompt} ? 1 : 0,
@@ -489,8 +502,32 @@ sub run {
     $self->_warn("No prompt given.\n");
     return EXIT_USAGE;
   }
-  my $runner = $self->runner_class->new(app => $app, output => $self->output);
-  return $runner->run_prompt($text, machine => $machine, catch_signals => 1) ? EXIT_OK : EXIT_RUN_ERROR;
+  my $session = $store ? $self->new_session($store, $machine) : undef;
+  return $runner->run_prompt($text, machine => $machine, session => $session, catch_signals => 1)
+    ? EXIT_OK : EXIT_RUN_ERROR;
+}
+
+=method new_session
+
+    my $session = $main->new_session($store, $machine);
+
+Starts the session a one-shot run is recorded in and names it on L</err>
+(with a machine format the document names it instead). A session that
+cannot be written is reported and the run goes on without one.
+
+=cut
+
+sub new_session {
+  my ( $self, $store, $machine ) = @_;
+  my $session = eval { $store->create };
+  unless ($session) {
+    my $error = $@;
+    $error =~ s/ at \S+ line \d+\.?\n\z//;
+    $self->_warn('session not saved: '.$error."\n");
+    return;
+  }
+  $self->_warn('session '.$session->id.' ('.$session->path.")\n") unless $machine;
+  return $session;
 }
 
 =method interrupt_startup

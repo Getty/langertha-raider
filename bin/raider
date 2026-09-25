@@ -134,6 +134,10 @@ C<iterations>, C<tool_calls>, C<time_ms> (C<completed> only).
 
 =item C<elapsed> -- seconds the run took, to the millisecond.
 
+=item C<session> -- the session the run is recorded in (see
+L</SESSIONS>): C<id> and C<path> of its journal. Missing with
+C<--no-session> and for a signal during startup.
+
 =back
 
 =head2 Streams
@@ -165,10 +169,12 @@ none: its stream is the C<interrupted> state change and C<run.finished>.
 C<status> it ends with (see L</The document>).
 
 =item C<tool.call> -- C<name> and C<arguments> of a tool call, before it
-runs.
+runs; C<call>, its id within the run (C<c1>, C<c2>, ...); C<status>,
+C<dispatched>.
 
-=item C<tool.result> -- C<name>; C<ok> (a boolean, false when the tool
-reported an error); C<size>, the length of the result text in characters;
+=item C<tool.result> -- C<call> and C<name> of the call; C<status>
+(C<succeeded>, or C<failed> when the tool reported an error); C<ok> (the
+same as a boolean); C<size>, the length of the result text in characters;
 C<content>, its first 1000 characters; and C<truncated> (a boolean, true
 when C<content> was cut). The cut limits how much of a tool's output
 reaches the stream, but it is no filter: a secret in a tool's arguments or
@@ -209,6 +215,27 @@ Within a version, fields are only ever added, never renamed, removed or
 changed in meaning, so a consumer must ignore fields it does not know. A
 breaking change is a new version, chosen with C<--json=2>; the plain flag
 stays on the old version for at least one release after the new one ships.
+
+=head1 SESSIONS
+
+Every run is recorded in a session journal (ADR 0015):
+F<.raider/sessions/E<lt>idE<gt>.jsonl> under the working directory
+(C<-r>), one JSON object per line. A one-shot run starts a new session and
+names it on standard error (with a machine output flag, in the document's
+C<session> instead); the REPL starts one with its first prompt and records
+every prompt of it there. C<--no-session> records nothing.
+
+Creating F<.raider/> also writes F<.raider/.gitignore> excluding
+C<sessions/> and C<lib/>, unless that file exists: a journal holds the
+whole output of every tool, so it is not committed by default. API keys
+never enter it.
+
+A run is recorded as C<run.started>, the input as C<message>, every
+C<tool.call> and C<tool.result> (with the whole result text, where the
+stream cuts it), the answer as C<message>, and C<run.finished> with how it
+ended -- also when it failed or was interrupted. While a raider writes a
+session it holds a lock on it; a second writer fails at once instead of
+waiting.
 
 =head1 EXIT STATUS
 

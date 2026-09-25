@@ -123,7 +123,7 @@ The F<sessions> directory under L</base>.
 
 sub base {
   my ( $self ) = @_;
-  return path($self->scope eq 'project' ? $self->root : $self->home)->child('.raider');
+  return path($self->scope eq 'project' ? $self->root : $self->home)->absolute->child('.raider');
 }
 
 sub dir { $_[0]->base->child('sessions') }

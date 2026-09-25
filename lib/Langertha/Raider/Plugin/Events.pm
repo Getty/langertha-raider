@@ -20,11 +20,12 @@ extends 'Langertha::Plugin';
 
 =head1 DESCRIPTION
 
-The source of the C<tool.call> and C<tool.result> events of
-C<raider --stream-json> and its siblings (ADR 0013). Every tool call the
-raid makes is handed to L</on_event> twice: before it runs, with its name
-and arguments, and after, with the outcome and the first
-L</max_content_length> characters of its text.
+The source of the C<tool.call> and C<tool.result> events of a raid: the
+output of C<raider --stream-json> and its siblings (ADR 0013) and the
+session journal (ADR 0015) are both fed from here. Every tool call the raid
+makes is handed to L</on_event> twice: before it runs, with its name and
+arguments, and after, with the outcome and the whole text of its result --
+a consumer that shows less (the stream) cuts it itself.
 
 Load it after any plugin that may skip or rewrite a tool call, so the
 events describe the call that actually runs.
@@ -35,11 +36,13 @@ Code reference called as C<< $on_event->($type, %payload) >>. Required.
 
 =over
 
-=item C<tool.call> -- C<name>, C<arguments>.
+=item C<tool.call> -- C<call> (the id of the call within the raid: C<c1>,
+C<c2>, ...), C<name>, C<arguments> and C<status> (C<dispatched>).
 
-=item C<tool.result> -- C<name>, C<ok> (false when the tool reported an
-error), C<size> (characters of the whole text), C<content> (the text, cut to
-L</max_content_length>) and C<truncated> (whether it was cut).
+=item C<tool.result> -- C<call> (the id of its C<tool.call>), C<name>,
+C<status> (C<failed> when the tool reported an error, else C<succeeded>),
+C<ok> (the same as a boolean), C<size> (characters of the text) and
+C<content> (the whole text).
 
 =back
 
@@ -51,24 +54,24 @@ has on_event => (
   required => 1,
 );
 
-=attr max_content_length
+has _calls => ( is => 'rw', init_arg => undef, default => 0 );
 
-How many characters of a tool result's text go into C<content>. Defaults to
-C<1000>.
-
-=cut
-
-has max_content_length => (
-  is      => 'ro',
-  isa     => 'Int',
-  default => 1000,
-);
+async sub plugin_before_raid {
+  my ( $self, $messages ) = @_;
+  $self->_calls(0);
+  return $messages;
+}
 
 async sub plugin_before_tool_call {
   my ( $self, $name, $input ) = @_;
-  $self->on_event->('tool.call', name => $name, arguments => $input // {});
+  $self->_calls($self->_calls + 1);
+  $self->on_event->('tool.call', call => $self->_call_id, name => $name, arguments => $input // {},
+    status => 'dispatched');
   return ( $name, $input );
 }
+
+# Tool calls run one after another, so a result belongs to the last call.
+sub _call_id { 'c'.$_[0]->_calls }
 
 async sub plugin_after_tool_call {
   my ( $self, $name, $input, $result ) = @_;
@@ -77,13 +80,13 @@ async sub plugin_after_tool_call {
         ref $result->{content} eq 'ARRAY' ? @{ $result->{content} } : ()),
         !$result->{isError} )
     : ( $result // '', 1 );
-  my $max = $self->max_content_length;
   $self->on_event->('tool.result',
-    name      => $name,
-    ok        => $ok ? JSON::MaybeXS->true : JSON::MaybeXS->false,
-    size      => length $text,
-    content   => substr($text, 0, $max),
-    truncated => length $text > $max ? JSON::MaybeXS->true : JSON::MaybeXS->false,
+    call    => $self->_call_id,
+    name    => $name,
+    status  => $ok ? 'succeeded' : 'failed',
+    ok      => $ok ? JSON::MaybeXS->true : JSON::MaybeXS->false,
+    size    => length $text,
+    content => $text,
   );
   return $result;
 }

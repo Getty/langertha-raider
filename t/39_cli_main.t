@@ -189,7 +189,8 @@ subtest 'success exits 0, a failed run 1' => sub {
     'only the JSON document on stdout');
   ( $exit, $out ) = main_run('', @base, '--json', 'fail');
   is($exit, 1, 'failed run');
-  is(JSON::MaybeXS->new->decode($out), { version => 1, status => 'failed', error => 'boom', elapsed => E() },
+  is(JSON::MaybeXS->new->decode($out), { version => 1, status => 'failed', error => 'boom', elapsed => E(),
+      session => { id => T(), path => T() } },
     'JSON error document');
   ( $exit, $out ) = main_run('', @base, 'fail');
   is($exit, 1, 'failed run without --json');

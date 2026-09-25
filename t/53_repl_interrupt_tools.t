@@ -5,6 +5,7 @@ use strict;
 use warnings;
 use Test2::V0;
 use File::Temp qw( tempdir );
+use JSON::MaybeXS ();
 use Path::Tiny;
 use lib 't/lib';
 use Test::Raider::Env qw( clear_engine_env );
@@ -96,6 +97,13 @@ for my $case (
     like($out->slurp, qr/press Ctrl-C again within 2s to quit/, 'the first Ctrl-C only warned')
       if $signal eq 'INT';
     like($out->slurp, qr/bye\.\n\z/, 'and said bye');
+
+    my ( $journal ) = $out->parent->child('.raider', 'sessions')->children(qr/\.jsonl\z/);
+    my $json = JSON::MaybeXS->new(utf8 => 1);
+    my @events = map { $json->decode($_) } $journal ? $journal->lines_raw({ chomp => 1 }) : ();
+    like($events[-1], { type => 'run.finished', run => 'r1', status => 'interrupted', signal => $signal },
+      'the session journal ends the run as interrupted');
+    ok((grep { $_->{type} eq 'tool.call' && $_->{name} eq $tool } @events), 'after the tool call');
 
     my $gone = wait_until(sub { !alive($tool_pid) });
     ok($gone, 'the '.$tool.' subprocess is gone');
