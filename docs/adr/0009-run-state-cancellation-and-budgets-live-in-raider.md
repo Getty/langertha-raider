@@ -24,6 +24,15 @@ status, no cancellation, no budget, no wait states.
   objects. Note: today's `_continuation` holds engine objects and is not serialisable —
   making waits persistent is a loop rework, not an add-on.
 
+## Implementation notes
+
+- 2026-09-25 (karr #64): `Langertha::Raider->cancel` sets a flag and wakes the event loop
+  through a pipe (signal-safe; a plain `later` does not wake a Poll loop interrupted by a
+  signal). The raid stops before its next model or tool call and abandons the future it
+  is waiting on, which also cancels an in-flight Net::Async::HTTP request. A cancelled raid
+  returns a `cancelled` Result, adds nothing to `history`, keeps already recorded tool
+  calls in `session_history`, and reports a cut-off tool call as cancelled.
+
 ## Source
 
 Proposal: `docs/RAIDER-REDESIGN-HANDOFF.md` §7; code check 2026-09-24.

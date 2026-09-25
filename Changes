@@ -157,6 +157,14 @@ Revision history for Langertha-Raider
       signal arrives during startup; tool commands still running (bash,
       perl_eval, perl_cpanm) are ended first. Leaving the REPL with a
       second Ctrl-C or SIGTERM ends them too.
+    - The REPL's first Ctrl-C cancels the running turn: tool commands are
+      ended, the model request is abandoned, the session journal records
+      the run as cancelled, and the REPL goes on; a second Ctrl-C within
+      2s quits.
+    - New Langertha::Raider->cancel stops a raid at its next safe point and
+      is safe in a signal handler; the raid returns a Result of type
+      cancelled (is_cancelled), and a tool call it cut off is reported as
+      cancelled.
     - -i together with a machine output flag is a usage error (exit 2);
       the document's elapsed has millisecond resolution.
     - /reload, the banner and the generated raider skill name a -M
