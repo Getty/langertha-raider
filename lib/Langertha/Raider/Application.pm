@@ -17,6 +17,7 @@ use Langertha::Raider::Packs     qw( build_packs );
 use Langertha::Raider::Config;
 use Langertha::Raider::Detect;
 use Langertha::Raider::EngineResolver;
+use Langertha::Raider::SessionStore;
 use Langertha::Raider;
 
 =head1 SYNOPSIS
@@ -43,7 +44,8 @@ packs (L<Langertha::Raider::Packs>, ADR 0012), compiles the mission (ADR
 (L<Langertha::Raider::WebTools>), the Perl tools
 (L<Langertha::Raider::PerlTools>) when granted, the Hall tools when
 spawned by a Hall -- and builds the L<Langertha::Raider> that runs the
-raids. It prints nothing; presentation such as the live trace belongs to
+raids. It opens, creates and replays the sessions of the project
+(L</session_store>, ADR 0015). It prints nothing; presentation such as the live trace belongs to
 the surface, see L<Langertha::Raider::CLI>.
 
 =cut
@@ -981,6 +983,77 @@ sub loaded_skill_names {
     }
   }
   return @names;
+}
+
+=attr session_store
+
+The L<Langertha::Raider::SessionStore> of the project in L</root> (ADR
+0003, ADR 0015), built on first use.
+
+=cut
+
+has session_store => (
+  is       => 'ro',
+  isa      => 'Langertha::Raider::SessionStore',
+  init_arg => undef,
+  lazy     => 1,
+  builder  => '_build_session_store',
+);
+
+sub session_store_class { 'Langertha::Raider::SessionStore' }
+
+sub _build_session_store {
+  my ($self) = @_;
+  return $self->session_store_class->new(root => $self->root);
+}
+
+=method create_session
+
+    my $session = $app->create_session;
+
+A new session in L</session_store>, open for writing and locked
+(L<Langertha::Raider::SessionStore/create>).
+
+=cut
+
+sub create_session {
+  my ($self) = @_;
+  return $self->session_store->create;
+}
+
+=method open_session
+
+    my $session = $app->open_session($id);
+
+Opens the session C<$id> of L</session_store> for writing; croaks C<...
+is in use> while another raider holds it
+(L<Langertha::Raider::SessionStore/open>).
+
+=cut
+
+sub open_session {
+  my ($self, $id) = @_;
+  return $self->session_store->open($id);
+}
+
+=method replay_session
+
+    my $journal = $app->replay_session($session);
+
+Replays the journal the L<Langertha::Raider::Session> was opened with into
+L</raider> (ADR 0015): C<history> from the C<message> events of the runs
+that got an answer, C<session_history> from all events. Nothing is
+executed. Returns the L<Langertha::Raider::Session::Journal>.
+
+=cut
+
+sub replay_session {
+  my ($self, $session) = @_;
+  my $journal = $session->journal;
+  my $raider  = $self->raider;
+  $raider->add_history($_->{role}, $_->{content}) for @{ $journal->history_messages };
+  $raider->add_session_history(@{ $journal->session_history_messages });
+  return $journal;
 }
 
 =method reload_mission

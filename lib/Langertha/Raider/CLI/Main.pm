@@ -530,13 +530,13 @@ sub run {
   my $in = $self->in;
   my $interactive = $opt->{interactive} || (!$opt->{machine} && !@prompt && -t $in);
   $runner = $self->runner_class->new(app => $app, output => $self->output, err => $self->err);
-  my $store = $opt->{no_session} ? undef : $self->session_store_class->new(root => $app->root);
+  my $store = $opt->{no_session} ? undef : $app->session_store;
 
   # --session ID, --continue, session resume ID: the session is locked
   # and replayed before anything runs.
   my ( $session, @notes );
   if (defined $opt->{session} || $opt->{continue}) {
-    ( my $exit, $session, @notes ) = $self->resume_session($store, $opt->{session}, $app);
+    ( my $exit, $session, @notes ) = $self->resume_session($app, $opt->{session});
     return $exit if defined $exit;
   }
 
@@ -577,7 +577,7 @@ sub run {
     $self->_warn($_."\n") for @notes;
   }
   elsif ($store) {
-    $session = $self->new_session($store, $machine);
+    $session = $self->new_session($app, $machine);
   }
   return $runner->run_prompt($text, machine => $machine, session => $session, catch_signals => 1)
     ? EXIT_OK : EXIT_RUN_ERROR;
@@ -585,12 +585,12 @@ sub run {
 
 =method resume_session
 
-    my ( $exit, $session, @notes ) = $main->resume_session($store, $ref, $app);
+    my ( $exit, $session, @notes ) = $main->resume_session($app, $ref);
 
 Opens the session C<$ref> names (L</resolve_session>; the newest one of
-the project when C<undef>, for C<--continue>) for writing and replays it
-into the app's raider through
-L<Langertha::Raider::CLI::Sessions/restore>. Returns C<undef>, the
+the project when C<undef>, for C<--continue>) for writing through
+L<Langertha::Raider::Application/open_session> and replays it into the
+app's raider through L<Langertha::Raider::CLI::Sessions/restore>. Returns C<undef>, the
 L<Langertha::Raider::Session> and the notes of the resume -- or, after
 reporting why, just the exit status: C<2> when there is no such session
 or C<$ref> is ambiguous, C<4> when another raider has it open, C<1> when
@@ -599,20 +599,21 @@ it cannot be opened or replayed otherwise.
 =cut
 
 sub resume_session {
-  my ( $self, $store, $ref, $app ) = @_;
+  my ( $self, $app, $ref ) = @_;
+  my $store = $app->session_store;
   my $id = defined $ref ? $self->resolve_session($store, $ref) : $store->latest;
   unless (defined $id) {
     $self->_warn('no session to continue in '.$store->dir."\n") unless defined $ref;
     return EXIT_USAGE;
   }
-  my $session = eval { $store->open($id) };
+  my $session = eval { $app->open_session($id) };
   unless ($session) {
     my $error = $self->output->error_text($@);
     $self->_warn($error.($error =~ / is in use\z/ ? ' by another raider' : '')."\n");
     return $error =~ / is in use\z/ ? EXIT_SESSION_IN_USE : EXIT_RUN_ERROR;
   }
   my @notes = eval {
-    $self->sessions_class->new(store => $store, output => $self->output)->restore($app->raider, $session);
+    $self->sessions_class->new(store => $store, output => $self->output)->restore($app, $session);
   };
   if ($@) {
     my $error = $self->output->error_text($@);
@@ -685,17 +686,18 @@ sub resolve_session {
 
 =method new_session
 
-    my $session = $main->new_session($store, $machine);
+    my $session = $main->new_session($app, $machine);
 
-Starts the session a one-shot run is recorded in and names it on L</err>
+Starts the session a one-shot run is recorded in
+(L<Langertha::Raider::Application/create_session>) and names it on L</err>
 (with a machine format the document names it instead). A session that
 cannot be written is reported and the run goes on without one.
 
 =cut
 
 sub new_session {
-  my ( $self, $store, $machine ) = @_;
-  my $session = eval { $store->create };
+  my ( $self, $app, $machine ) = @_;
+  my $session = eval { $app->create_session };
   unless ($session) {
     my $error = $self->output->error_text($@);
     $self->_warn('session not saved: '.$error."\n");

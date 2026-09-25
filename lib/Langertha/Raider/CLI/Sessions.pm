@@ -12,7 +12,7 @@ use JSON::MaybeXS ();
     $sessions->list;                        # raider session list
     $sessions->show($id);                   # raider session show ID
     $sessions->show($id, $machine);         # raider session show ID --json
-    my @notes = $sessions->restore($app->raider, $session);   # --session ID, --continue
+    my @notes = $sessions->restore($app, $session);           # --session ID, --continue
     my $new = $sessions->fork_session($id);                   # raider session fork ID
     $sessions->remove($id);                                   # raider session rm ID
 
@@ -200,21 +200,19 @@ sub notes {
 
 =method restore
 
-    my @notes = $sessions->restore($raider, $session);
+    my @notes = $sessions->restore($app, $session);
 
 Replays the journal the L<Langertha::Raider::Session> was opened with into
-the L<Langertha::Raider> (ADR 0015): C<history> from the C<message> events
-of the runs that got an answer, C<session_history> from all events. Nothing
-is executed. Returns a line saying what was resumed, then the L</notes>.
+the raider of the L<Langertha::Raider::Application>
+(L<Langertha::Raider::Application/replay_session>). Returns a line saying
+what was resumed, then the L</notes>.
 
 =cut
 
 sub restore {
-  my ( $self, $raider, $session ) = @_;
-  my $journal = $session->journal;
+  my ( $self, $app, $session ) = @_;
+  my $journal = $app->replay_session($session);
   my $history = $journal->history_messages;
-  $raider->add_history($_->{role}, $_->{content}) for @$history;
-  $raider->add_session_history(@{ $journal->session_history_messages });
   my $runs = scalar @{ $journal->runs };
   return ( 'resumed session '.$session->id.': '.$runs.' run'.($runs == 1 ? '' : 's').', '
     .scalar(@$history).' messages in the history', $self->notes($journal) );
