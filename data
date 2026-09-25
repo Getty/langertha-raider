@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-25T22:08:03Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-25T22:08:03Z
+created: 2026-09-25T21:58:19Z
+id: 81
+priority: medium
+started: 2026-09-25T21:58:47Z
+status: done
+tags:
+- hall
+- cleanup
+title: 'Hall: persona als Pack, mcp/isolated streichen, lib-Pfad korrigieren'
+updated: 2026-09-25T22:08:03Z
+---
+
+Aus #22, Maintainer-Entscheid 2026-09-25: Hall-Raider-Feld persona: X wird zu --pack X (zusaetzlich zu packs:). mcp und isolated aus hall init/add-raider, Default-YAML, POD und _spawn_raider entfernen (bis ADR 0005 Tool-Quellen regelt); vorhandene Keys in alten .raider-hall.yml still ignorieren oder einmal warnen. preferred_lib_target: PERL5LIB fuer gespawnte Raider muss zu cpanm --local-lib passen (<target>/lib/perl5), nicht .raider-hall/raiders/NAME/lib; toter Top-Level-Key entweder gelesen oder entfernt. Tests.
