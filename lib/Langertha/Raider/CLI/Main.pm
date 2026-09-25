@@ -139,7 +139,11 @@ Options:
                            preferred_lib_target, engine) configure raider.
   -r, --root DIR           Working directory (default: cwd). File tools are
                            confined to this directory.
-  -M, --mission TEXT       System prompt / mission
+  -M, --mission TEXT       Instructions: replaces the default persona and
+                           .raider.md; skills, packs and the tool
+                           description still apply
+      --bare               Isolated context: no .raider.md, skills, packs
+                           or detection (/pack NAME still works)
   -i, --interactive        REPL mode (default when stdin is a TTY with no
                            prompt argv and no pipe; forces it otherwise)
       --json               Emit JSON ({response, metrics, elapsed}) and exit
@@ -196,6 +200,7 @@ sub parse_options {
       'm|model=s'             => \$opt{model},
       'r|root=s'              => \$opt{root},
       'M|mission=s'           => \$opt{mission},
+      'bare'                  => \$opt{bare},
       'k|api-key=s'           => \$opt{api_key},
       'o|option=s@'           => \@raw_engine_opts,
       'i|interactive'         => \$opt{interactive},
@@ -253,7 +258,7 @@ JSON document.
 sub app_args {
   my ( $self, $opt ) = @_;
   my %args;
-  for my $key (qw( engine model root mission api_key trace perl detect max_iterations )) {
+  for my $key (qw( engine model root mission api_key trace perl detect max_iterations bare )) {
     $args{$key} = $opt->{$key} if defined $opt->{$key};
   }
   $args{trace}          = 0                        if $opt->{json} && !defined $opt->{trace};

@@ -86,8 +86,9 @@ subtest '/reload names where the mission comes from' => sub {
   path($flag->root)->child('.raider.md')->spew_utf8("Custom persona.\n");
   my ( $fcmds, $fread ) = commands($flag);
   $fcmds->dispatch('/reload');
-  is($fread->(), "mission reloaded: -M mission kept, .raider.md not used (15 chars)\n", '-M');
-  is($flag->raider->mission, 'The -M mission.', '-M kept');
+  like($fread->(), qr/^mission reloaded: -M mission kept, \.raider\.md not used \(\d+ chars\)\n\z/, '-M');
+  like($flag->raider->mission, qr/\AThe -M mission\./, '-M kept');
+  unlike($flag->raider->mission, qr/Custom persona/, '.raider.md not used');
 };
 
 subtest '/config' => sub {

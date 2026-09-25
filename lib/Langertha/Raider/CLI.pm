@@ -210,9 +210,14 @@ has api_key => (
 
 =attr mission
 
-System prompt / mission statement for the Raider. Defaults to a generic
-assistant persona plus F<.raider.md>, skills and packs. A C<mission> passed to
-the constructor (C<-M>) replaces all of that, also across L</reload_mission>.
+System prompt of the Raider, compiled from separate items (ADR 0004,
+ADR 0014): the instructions (a generic assistant persona plus
+F<.raider.md>), the tool description, the loaded skills and the active
+packs. A C<mission> passed to the constructor (C<-M>) replaces the
+instructions item only, also across L</reload_mission>; the other items
+still apply. With L</bare> the skills, F<.raider.md> and all packs not
+switched on by C</pack> are left out, and a C<-M> mission is the whole
+system prompt.
 
 =cut
 
@@ -231,22 +236,58 @@ has _explicit_mission => (
   predicate => '_has_explicit_mission',
 );
 
+=attr bare
+
+C<--bare>: an isolated context. No F<.raider.md>, no skills, no packs and
+no pack detection; C</pack NAME> still switches a pack on explicitly.
+Without a C<-M> mission the default persona and the tool description
+remain; with one, the C<-M> text alone.
+
+=cut
+
+has bare => (
+  is      => 'ro',
+  isa     => 'Bool',
+  default => 0,
+);
+
 sub _build_mission {
   my ($self) = @_;
+  my @items = ( $self->_instructions_text );
+  push @items, $self->_tools_text unless $self->bare && $self->_has_explicit_mission;
+
+  my @skills = $self->_load_skill_texts;
+  push @items, "Loaded skills (domain knowledge the user enabled for this session):\n\n"
+    .join("\n\n", @skills)."\n" if @skills;
+
+  my @pack_texts = $self->packs->skill_texts;
+  push @items, "Active packs:\n\n".join("\n\n", @pack_texts)."\n" if @pack_texts;
+
+  return join "\n\n---\n", @items;
+}
+
+# The instructions item: the -M text, or the default persona with
+# .raider.md.
+sub _instructions_text {
+  my ($self) = @_;
   return $self->_explicit_mission if $self->_has_explicit_mission;
-  my $root = $self->root;
-  my $base = <<"EOM";
-You are Langertha, viking shield-maiden. Autonomous CLI agent on user's
-local machine. CLI name: "raider". Just CLI. No pause, no abort, no ask
-to stop. You do things.
+  my $base = $self->_persona_text;
+  return $base if $self->bare;
+  my $custom_file = path($self->root)->child('.raider.md');
+  if (-f $custom_file) {
+    my $custom = eval { $custom_file->slurp_utf8 };
+    if (defined $custom && length $custom) {
+      $base .= "\n\n---\nUser's custom instructions (from $custom_file):\n\n$custom\n";
+    }
+  }
+  return $base;
+}
 
-Name, persona, tone are defaults. User can rename you, rewrite your
-background, or change persona entirely via C<.raider.md> in working dir.
-If present, its content appended below as user's custom instructions.
-User's custom instructions override this default where they conflict.
-
-Working directory: $root
-
+# The tool description item. Hand-written until ADR 0005 derives it from
+# the active tool set; -M never replaces it.
+sub _tools_text {
+  my ($self) = @_;
+  return 'Working directory: '.$self->root."\n\n".<<'EOM';
 Tools (MCP):
   - list_files(path)
   - read_file(path)
@@ -255,6 +296,18 @@ Tools (MCP):
   - bash(command, [working_directory], [timeout])
   - web_search(query, [limit])
   - web_fetch(url, [as_html])
+EOM
+}
+
+sub _persona_text { <<'EOM' }
+You are Langertha, viking shield-maiden. Autonomous CLI agent on user's
+local machine. CLI name: "raider". Just CLI. No pause, no abort, no ask
+to stop. You do things.
+
+Name, persona, tone are defaults. User can rename you, rewrite your
+background, or change persona entirely via C<.raider.md> in working dir.
+If present, its content appended below as user's custom instructions.
+User's custom instructions override this default where they conflict.
 
 How you work:
   - User turn = task. Pursue with tools until done. Unlimited iterations.
@@ -269,28 +322,6 @@ How you work:
 You have no yield / ask / abort tool. Task done: plain text reply. CLI
 loops back to user.
 EOM
-
-  my $custom_file = path($self->root)->child('.raider.md');
-  if (-f $custom_file) {
-    my $custom = eval { $custom_file->slurp_utf8 };
-    if (defined $custom && length $custom) {
-      $base .= "\n\n---\nUser's custom instructions (from $custom_file):\n\n$custom\n";
-    }
-  }
-
-  my @skills = $self->_load_skill_texts;
-  if (@skills) {
-    $base .= "\n\n---\nLoaded skills (domain knowledge the user enabled for this session):\n\n"
-           . join("\n\n", @skills) . "\n";
-  }
-
-  my @pack_texts = $self->packs->skill_texts;
-  if (@pack_texts) {
-    $base .= "\n\n---\nActive packs:\n\n" . join("\n\n", @pack_texts) . "\n";
-  }
-
-  return $base;
-}
 
 =attr root
 
@@ -513,6 +544,12 @@ sub detect_class { 'Langertha::Raider::Detect' }
 
 sub _build_packs {
   my ($self) = @_;
+  if ($self->bare) {
+    # --bare: no pack at start, not even a default one; /pack still works.
+    my $collection = build_packs(root => $self->root);
+    $collection->disable($_) for @{ [ @{$collection->active_pack_names} ] };
+    return $collection;
+  }
   my ( $list, $source, $reason ) = $self->_explicit_packs;
 
   my $collection = build_packs(root => $self->root);
@@ -553,6 +590,7 @@ C<--no-detect>, C<detect: false> or C<default>.
 
 sub detection_state {
   my ($self) = @_;
+  return ( 0, '--bare' ) if $self->bare;
   return ( $self->detect ? ( 1, '--detect' ) : ( 0, '--no-detect' ) ) if $self->has_detect_flag;
   return ( 0, 'detect: false' ) unless $self->_detect_settings->{enabled};
   return ( 1, 'default' );
@@ -672,7 +710,7 @@ is a hashref:
 
 Defaults to the C<skills> entries of F<.raider.yml> (see
 L<Langertha::Raider::Config>) followed by L</cli_skill_sources>. Passing
-C<skill_sources> explicitly replaces both.
+C<skill_sources> explicitly replaces both. With L</bare> there are none.
 
 =cut
 
@@ -742,6 +780,7 @@ our %AGENT_PROFILES = (
 
 sub _build_skill_sources {
   my ($self) = @_;
+  return [] if $self->bare;
   return [ $self->config->skill_specs(
     $self->engine_name,
     @{ $self->_cli_app_options->{skills} // [] },
@@ -1074,6 +1113,7 @@ banner's "seeing AGENTS.md, ignoring" notice.
 
 sub ignored_agent_files {
   my ($self) = @_;
+  return if $self->bare;
 
   my %loaded;
   for my $s (@{$self->skill_sources}) {
@@ -1135,16 +1175,16 @@ sub reload_mission {
 
 =method mission_source
 
-Where L</mission> comes from: C<-M> for a mission passed to the
-constructor, C<.raider.md> when that file customizes the generated one,
-C<default> otherwise.
+Where the instructions item of L</mission> comes from: C<-M> for a
+mission passed to the constructor, C<.raider.md> when that file customizes
+the default persona (never with L</bare>), C<default> otherwise.
 
 =cut
 
 sub mission_source {
   my ($self) = @_;
   return '-M' if $self->_has_explicit_mission;
-  return -f Path::Tiny::path($self->root)->child('.raider.md') ? '.raider.md' : 'default';
+  return !$self->bare && -f Path::Tiny::path($self->root)->child('.raider.md') ? '.raider.md' : 'default';
 }
 
 =method explain_config
@@ -1165,6 +1205,8 @@ L<Langertha::Raider::Packs::Collection/activation_report>: each pack with
 its source (C<flag>, C<config>, C<default>, C<detected>, C<manual>) and,
 for detection rules, the clause that matched or failed. C<perl_tools> is
 L</perl_tools_grant>: whether the Perl tools are mounted, and why.
+
+C<instructions> is L</mission_source> and C<bare> is L</bare>.
 
 =cut
 
@@ -1252,10 +1294,12 @@ sub explain_config {
   my ( $detecting, $why ) = $self->detection_state;
   return {
     %$report,
-    values     => \@values,
-    detection  => $detecting ? 'on' : 'off ('.$why.')',
-    packs      => $self->packs->activation_report,
-    perl_tools => $self->perl_tools_grant,
+    values       => \@values,
+    detection    => $detecting ? 'on' : 'off ('.$why.')',
+    instructions => $self->mission_source,
+    bare         => $self->bare ? 1 : 0,
+    packs        => $self->packs->activation_report,
+    perl_tools   => $self->perl_tools_grant,
   };
 }
 

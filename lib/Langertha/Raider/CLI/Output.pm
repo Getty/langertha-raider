@@ -131,7 +131,8 @@ sub render_inline_code {
 
 Prints a report of L<Langertha::Raider::CLI/explain_config>: one line per
 setting with its value, source, what it overrides and whether it applies to
-the engine or to raider.
+the engine or to raider; the instructions source (C<-M>, C<.raider.md>,
+C<default>) with C<(bare)> under C<--bare>.
 
 =cut
 
@@ -141,6 +142,8 @@ sub config_report {
   $self->emit($self->c(meta => 'file:   '), $self->c(title => $report->{file}),
     $self->c(meta => $report->{exists} ? '' : ' (not present)'), "\n");
   $self->emit($self->c(meta => 'engine: '), $self->c(title => $report->{engine}), "\n");
+  $self->emit($self->c(meta => 'instructions: '), $self->c(title => $report->{instructions}),
+    $self->c(meta => $report->{bare} ? ' (bare)' : ''), "\n") if defined $report->{instructions};
   for my $v (@{ $report->{values} }) {
     my $value = ref $v->{value} ? $json->encode($v->{value}) : $v->{value} // '';
     my $from  = 'from '.$v->{source};

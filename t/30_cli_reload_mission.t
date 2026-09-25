@@ -6,7 +6,8 @@ use Path::Tiny;
 use Langertha::Raider::CLI;
 
 # /reload and /pack call reload_mission: it must keep a mission passed with
-# -M, and swap the mission of the running raider without losing its history.
+# -M as the instructions item (ADR 0014), and swap the mission of the
+# running raider without losing its history.
 
 sub app {
   my ( %args ) = @_;
@@ -21,10 +22,12 @@ sub app {
 
 subtest '-M mission survives reload' => sub {
   my $app = app(mission => 'You are the flag mission.');
-  is($app->raider->mission, 'You are the flag mission.', 'raider starts with -M');
+  like($app->raider->mission, qr/\AYou are the flag mission\./, 'raider starts with -M');
   path($app->root)->child('.raider.md')->spew_utf8("Custom persona.\n");
-  is($app->reload_mission, 'You are the flag mission.', 'reload returns -M');
-  is($app->raider->mission, 'You are the flag mission.', 'raider keeps -M');
+  my $new = $app->reload_mission;
+  like($new, qr/\AYou are the flag mission\./, 'reload returns -M');
+  unlike($new, qr/Custom persona/, '.raider.md not used');
+  is($app->raider->mission, $new, 'raider keeps -M');
 };
 
 subtest '-M mission survives a pack toggle' => sub {
@@ -33,7 +36,7 @@ subtest '-M mission survives a pack toggle' => sub {
   my ($name) = @{ $app->packs->all_pack_names } or skip_all 'no packs installed';
   $app->packs->toggle($name);
   $app->reload_mission;
-  is($app->raider->mission, 'You are the flag mission.', 'raider keeps -M');
+  like($app->raider->mission, qr/\AYou are the flag mission\./, 'raider keeps -M');
 };
 
 subtest 'generated mission picks up .raider.md on reload' => sub {

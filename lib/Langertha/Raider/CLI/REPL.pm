@@ -144,6 +144,7 @@ sub banner {
   my $persona = $source eq '-M'         ? 'from -M (.raider.md not used)'
               : $source eq '.raider.md' ? 'custom (.raider.md loaded)'
               :                           'Langertha (default)';
+  $persona .= ', bare (no .raider.md, skills or packs)' if $app->bare;
 
   $out->emit($out->c(brand => $LOGO));
   $out->emit($out->c(accent => ' perl agent - powered by Langertha'), "\n\n");
