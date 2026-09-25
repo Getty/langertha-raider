@@ -179,25 +179,4 @@ subtest 'bin/raider --msgpack writes binary stdout' => sub {
     'stdout is one MessagePack document');
 };
 
-subtest 'the Hall reads a --json log back' => sub {
-  require Langertha::Raider::Hall;
-  require Langertha::Raider::Hall::ACP;
-  require Langertha::Raider::Hall::Raider;
-  my $hall_root = path(tempdir(CLEANUP => 1));
-  $hall_root->child('.raider-hall.yml')->spew_utf8("raiders:\n  Testie:\n    engine: openai\n");
-  my $hall = Langertha::Raider::Hall->new(root => $hall_root);
-  my $acp  = Langertha::Raider::Hall::ACP->new(hall => $hall, port => 0, host => '127.0.0.1');
-  my $log  = $hall_root->child('testie.log');
-
-  # Spawned like Hall->_spawn_raider does it: --json, stdout and stderr
-  # appended to the same log.
-  `@{[ $q->(@cmd, '--json', @base, '-o', 'url=http://127.0.0.1:1', '--', 'hi') ]} >>'$log' 2>&1 </dev/null`;
-  is($? >> 8, 1, 'the raider failed');
-  $hall->raiders->{testie} = Langertha::Raider::Hall::Raider->new(
-    id => 'testie-1', slot_name => 'testie', base_name => 'Testie', log_path => $log, mission => 'hi');
-  my $body = $acp->_read_raider_response('testie-1');
-  like($body, qr/raid request failed|127\.0\.0\.1/, 'ACP forwards the error of the document');
-  unlike($body, qr/"version"/, 'not the raw log');
-};
-
 done_testing;

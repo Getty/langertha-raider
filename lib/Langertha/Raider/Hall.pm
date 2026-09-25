@@ -40,6 +40,13 @@ All state flows through the event bus (JSONL pub/sub). Clients
 subscribe with C<{type: subscribe, payload: {filter: 'raider.'}}> and
 commands are separate frames (C<{type: command, payload: {cmd: ...}}>).
 
+Each raider runs with C<--stream-json>. Its stdout goes to a file of its
+own per run, F<.raider-hall/logs/ID.events.jsonl>; its stderr is appended
+to the human-readable F<.raider-hall/logs/SLOT.log>. When the process
+ends, C<raider.done> carries C<status> and C<response> or C<error> from
+the run's last C<run.finished> event. A run that ended without one
+(killed, crashed) is C<failed>, with an error saying so.
+
 =head1 CONFIG FILE
 
 C<.raider-hall.yml> in the hall root:
@@ -479,6 +486,7 @@ sub _reap_raider {
     pid => $pid,
     exit_code => $status >> 8,
     signaled => ($status & 127) ? 1 : 0,
+    %{ $self->_raider_result($raider, $status) },
   });
 
   delete $self->raiders->{$slot};
@@ -493,6 +501,27 @@ sub _reap_raider {
       $self->_spawn_next_in_queue($slot, $base, $next);
     }
   }
+}
+
+# The run's outcome for raider.done: status plus response or error, taken
+# from the last run.finished event of the run. Without one (killed, crashed
+# before it could write it) the run counts as failed, with an error that
+# says so instead of whatever text the process left behind.
+sub _raider_result {
+  my ($self, $raider, $status) = @_;
+  if (my $doc = $raider->run_finished) {
+    return {
+      status => $doc->{status} // 'failed',
+      defined $doc->{response} ? ( response => $doc->{response} ) : (),
+      defined $doc->{error}    ? ( error    => $doc->{error} )    : (),
+    };
+  }
+  my $how = ($status & 127) ? 'killed by signal '.($status & 127)
+                            : 'exit code '.($status >> 8);
+  return {
+    status => 'failed',
+    error  => 'raider '.$raider->id.' ended without a result ('.$how.')',
+  };
 }
 
 sub _find_raider_by_pid {
@@ -564,7 +593,7 @@ sub _spawn_raider {
   my $isolated = $raider_config->{isolated} // 0;
 
   my $raider_bin = $self->_raider_bin;
-  my @cmd = ($^X, $raider_bin, '--json');
+  my @cmd = ($^X, $raider_bin, '--stream-json');
   push @cmd, '--engine', $engine if $engine;
   push @cmd, '--model', $model if $model;
   push @cmd, '--pack', $_ for @$packs;
@@ -575,7 +604,11 @@ sub _spawn_raider {
   my $log_dir = $self->root->child('.raider-hall', 'logs');
   $log_dir->mkpath unless -d $log_dir;
 
+  # stderr is the human-readable log, appended across runs of the slot;
+  # stdout is the event stream, a fresh file per run.
   my $log_path = $log_dir->child("${slot}.log");
+  my $id = "$slot-" . time;
+  my $events_path = $log_dir->child("${id}.events.jsonl");
 
   my $lib_path = $self->_raider_lib_path($base_name);
   my $extra_perl5lib = join ':', grep { defined && length } ($lib_path,
@@ -594,7 +627,7 @@ sub _spawn_raider {
     command => \@cmd,
     setup => [
       stdin  => [ 'open', '<', '/dev/null' ],
-      stdout => [ 'open', '>>', "$log_path" ],
+      stdout => [ 'open', '>', "$events_path" ],
       stderr => [ 'open', '>>', "$log_path" ],
       env => {
         %env,
@@ -615,13 +648,13 @@ sub _spawn_raider {
 
   $self->loop->add($process);
 
-  my $id = "$slot-" . time;
   my $raider = Langertha::Raider::Hall::Raider->new({
     id => $id,
     pid => $process->pid,
     slot_name => $slot,
     base_name => $base_name,
-    log_path => $log_dir->child("${slot}.log"),
+    log_path => $log_path,
+    events_path => $events_path,
     mission => $mission,
   });
   $self->raiders->{$slot} = $raider;
@@ -685,6 +718,7 @@ sub attach {
       slot => $r->slot_name,
       pid => $r->pid,
       log_path => $r->log_path->stringify,
+      $r->has_events_path ? ( events_path => $r->events_path->stringify ) : (),
     };
   }
   return { error => 'raider not found' };
