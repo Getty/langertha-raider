@@ -142,8 +142,9 @@ Options:
   -M, --mission TEXT       Instructions: replaces the default persona and
                            .raider.md; skills, packs and the tool
                            description still apply
-      --bare               Isolated context: no .raider.md, skills, packs
-                           or detection (/pack NAME still works)
+      --bare               Isolated context: no .raider.md, skills, packs:,
+                           default packs or detection (--pack NAME and
+                           /pack NAME still work)
   -i, --interactive        REPL mode (default when stdin is a TTY with no
                            prompt argv and no pipe; forces it otherwise)
       --json               Emit JSON ({response, metrics, elapsed}) and exit

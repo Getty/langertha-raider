@@ -23,13 +23,14 @@ model's description of its tools as a side effect.
 - **`-M` replaces the instructions item only**: the default persona together with
   `.raider.md`. Skills, packs (configured, flagged or detected) and the tool description
   stay separate context items and still apply.
-- **`--bare` gives an isolated context**: no `.raider.md`, no skills, no packs, no
-  detection. `-M TEXT --bare` is exactly today's `-M TEXT`. `--bare` without `-M` uses the
-  default persona alone.
+- **`--bare` gives an isolated context**: no `.raider.md`, no skills, no detection, and
+  no packs from `packs:` or `enabled_by_default`. `-M TEXT --bare` gives `TEXT` plus the
+  tool description only; `--bare` without `-M` gives the default persona plus the tool
+  description. `--pack NAME` and `/pack NAME` still switch packs on explicitly under
+  `--bare`.
 - The tool description is never part of what `-M` replaces. Until ADR 0005 derives it from
   the active tool set, it is emitted as its own item next to the instructions.
-- `/pack`, `/reload` and detection behave the same with or without `-M`; with `--bare`,
-  `/pack NAME` still switches a pack on explicitly.
+- `/pack`, `/reload` and detection behave the same with or without `-M`.
 - `raider config explain` (and later `raider context explain`, ADR 0004) shows the
   instructions source as `-M`, `.raider.md` or `default`, and `bare` when set.
 

@@ -125,10 +125,14 @@ subtest '--bare: default persona and tools, nothing else' => sub {
   ok(!$app->perl_tools_enabled, 'no pack requests the perl tools');
 };
 
-subtest '-M TEXT --bare is exactly TEXT' => sub {
+subtest '-M TEXT --bare is TEXT plus the tool description' => sub {
   my $app = app(mission => 'You are the flag mission.', bare => 1);
-  is($app->mission, 'You are the flag mission.', 'mission is the -M text alone');
-  is($app->reload_mission, 'You are the flag mission.', 'also after reload');
+  my $m = $app->mission;
+  like($m, qr/\AYou are the flag mission\.\n\n---\nWorking directory: /, '-M text, then the tools');
+  like($m, $TOOLS, 'tool description kept');
+  unlike($m, $PERSONA, 'no default persona');
+  unlike($m, qr/Custom persona|House skill body|### Pack:/, 'nothing else');
+  is($app->reload_mission, $m, 'same after reload');
 };
 
 subtest '--bare: /pack NAME still switches a pack on' => sub {
@@ -147,15 +151,27 @@ subtest '--bare: /pack NAME still switches a pack on' => sub {
   my ( $fcmds ) = commands($flag);
   $flag->raider;
   $fcmds->dispatch('/pack on polite');
-  like($flag->raider->mission, qr/\AFlag\.\n.*### Pack: polite/s, 'with -M too');
+  like($flag->raider->mission, qr/\AFlag\.\n.*Tools \(MCP\):.*### Pack: polite/s, 'with -M too');
 };
 
-subtest '--bare ignores configured and flagged packs' => sub {
+subtest '--bare: --pack is honoured, packs: from .raider.yml is not' => sub {
   my $app = app(bare => 1, pack_names => ['polite']);
-  is($app->packs->active_pack_names, [], 'no pack active');
+  is($app->packs->active_pack_names, ['polite'], '--pack switches polite on');
+  like($app->mission, qr/### Pack: polite/, 'pack text in the mission');
+  unlike($app->mission, qr/### Pack: (?:perl|caveman)/, 'no detected or default pack');
   my $report = $app->explain_config;
-  is($report->{packs}, [], q{explain lists no pack});
+  is([ map { $_->{name} } @{ $report->{packs} } ], ['polite'], 'explain lists only polite');
   is($report->{detection}, q{off (--bare)}, q{explain names --bare});
+
+  my $cfg = app(bare => 1);
+  path($cfg->root)->child('.raider.yml')->spew_utf8("packs: [polite]\n");
+  is($cfg->packs->active_pack_names, [], 'packs: in .raider.yml ignored');
+};
+
+subtest '--bare: perl tools only by --perl or --pack perl' => sub {
+  ok(!app(bare => 1)->perl_tools_enabled, 'detected perl pack does not count');
+  ok(app(bare => 1, pack_names => ['perl'])->perl_tools_enabled, '--pack perl');
+  ok(app(bare => 1, perl => 1)->perl_tools_enabled, '--perl');
 };
 
 subtest 'config explain names the instructions source and bare' => sub {
@@ -175,7 +191,7 @@ subtest 'config explain names the instructions source and bare' => sub {
 subtest 'banner and skill export mention bare' => sub {
   my $persona = sub { $_[0] =~ /^- Persona: (.*)$/m ? $1 : undef };
   is($persona->(Langertha::Raider::Skill->new(app => app(bare => 1))->markdown),
-    'Langertha (default viking persona), bare (no .raider.md, skills or packs)', 'bare default');
+    'Langertha (default viking persona), bare (no .raider.md or skills, only explicit packs)', 'bare default');
   is($persona->(Langertha::Raider::Skill->new(app => app(mission => 'X'))->markdown),
     'from -M (.raider.md not used)', '-M');
 };

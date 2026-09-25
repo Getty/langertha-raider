@@ -216,8 +216,7 @@ F<.raider.md>), the tool description, the loaded skills and the active
 packs. A C<mission> passed to the constructor (C<-M>) replaces the
 instructions item only, also across L</reload_mission>; the other items
 still apply. With L</bare> the skills, F<.raider.md> and all packs not
-switched on by C</pack> are left out, and a C<-M> mission is the whole
-system prompt.
+switched on by C<--pack> or C</pack> are left out.
 
 =cut
 
@@ -238,10 +237,11 @@ has _explicit_mission => (
 
 =attr bare
 
-C<--bare>: an isolated context. No F<.raider.md>, no skills, no packs and
-no pack detection; C</pack NAME> still switches a pack on explicitly.
-Without a C<-M> mission the default persona and the tool description
-remain; with one, the C<-M> text alone.
+C<--bare>: an isolated context. No F<.raider.md>, no skills, no pack
+detection, and no packs from C<packs:> or C<enabled_by_default>;
+C<--pack NAME> and C</pack NAME> still switch a pack on explicitly. What
+remains is the instructions (the default persona, or the C<-M> text) and
+the tool description.
 
 =cut
 
@@ -253,8 +253,7 @@ has bare => (
 
 sub _build_mission {
   my ($self) = @_;
-  my @items = ( $self->_instructions_text );
-  push @items, $self->_tools_text unless $self->bare && $self->_has_explicit_mission;
+  my @items = ( $self->_instructions_text, $self->_tools_text );
 
   my @skills = $self->_load_skill_texts;
   push @items, "Loaded skills (domain knowledge the user enabled for this session):\n\n"
@@ -497,7 +496,8 @@ has detect => (
 
 L<Langertha::Raider::Packs::Collection> of the installed packs. Defaults
 come from the bundled C<share/packs/> plus C<$RAIDER_PACK_DIRS>. Which are
-enabled, highest priority first (ADR 0012):
+enabled, highest priority first (ADR 0012); with L</bare> only
+C<--pack NAME> applies:
 
 =over
 
@@ -544,17 +544,14 @@ sub detect_class { 'Langertha::Raider::Detect' }
 
 sub _build_packs {
   my ($self) = @_;
-  if ($self->bare) {
-    # --bare: no pack at start, not even a default one; /pack still works.
-    my $collection = build_packs(root => $self->root);
-    $collection->disable($_) for @{ [ @{$collection->active_pack_names} ] };
-    return $collection;
-  }
-  my ( $list, $source, $reason ) = $self->_explicit_packs;
+  # --bare: only --pack counts, not packs:, defaults or detection.
+  my ( $list, $source, $reason ) = !$self->bare ? $self->_explicit_packs
+    : $self->has_pack_names ? ( $self->pack_names, flag => '--pack' )
+    :                         ( [] );
 
   my $collection = build_packs(root => $self->root);
 
-  if ($list && ref $list eq 'ARRAY' && @$list) {
+  if ($list && ref $list eq 'ARRAY' && ( @$list || $self->bare )) {
     # Explicit packs — enable exactly those
     for my $name (@{$collection->all_pack_names}) {
       $collection->disable($name);

@@ -95,7 +95,7 @@ sub markdown {
   my $persona = $source eq '-M'         ? 'from -M (.raider.md not used)'
               : $source eq '.raider.md' ? 'custom (loaded from '.path($app->root)->child('.raider.md').')'
               :                           'Langertha (default viking persona)';
-  $persona .= ', bare (no .raider.md, skills or packs)' if $app->bare;
+  $persona .= ', bare (no .raider.md or skills, only explicit packs)' if $app->bare;
   my $config  = $app->config;
   my $yml_loaded = $config->file_exists && $config->data ? 'yes ('.$config->file.')' : 'no';
   my $model   = $app->has_model ? $app->model : '(engine default)';
