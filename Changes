@@ -104,7 +104,8 @@ Revision history for Langertha-Raider
       "interrupted" document (or run.state/run.finished when streaming),
       then dies of the same signal (shell status 130/143), also when the
       signal arrives during startup; tool commands still running (bash,
-      perl_eval, perl_cpanm) are ended first.
+      perl_eval, perl_cpanm) are ended first. Leaving the REPL with a
+      second Ctrl-C or SIGTERM ends them too.
     - -i together with a machine output flag is a usage error (exit 2);
       the document's elapsed has millisecond resolution.
     - /reload, the banner and the generated raider skill name a -M
