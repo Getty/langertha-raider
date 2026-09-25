@@ -88,6 +88,15 @@ Revision history for Langertha-Raider
       /reload detects packs again. config explain also says whether the
       Perl tools are on and why (--perl, perl:, or the pack that asks for
       them). A pack directory without a SKILL.md loads.
+    - -M now replaces only the instructions (default persona and
+      .raider.md); skills, packs (configured, flagged or detected) and the
+      tool description still apply. Anyone who used -M to drop everything
+      else needs --bare.
+    - New --bare: isolated context without .raider.md, skills, pack
+      detection, packs: or default packs; --pack NAME and /pack NAME still
+      switch packs on. -M TEXT --bare gives TEXT plus the tool
+      description. config explain and /config show the instructions source
+      (-M, .raider.md, default) and bare.
     - Fix Hall singleton queue replay, --pack propagation, Telegram
       future retention, and MCP tool result handling.
     - Add `--pack NAME` CLI parsing for one-shot pack activation.
