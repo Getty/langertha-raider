@@ -181,6 +181,8 @@ SKIP: {
     ok($gone->($tool_pid), 'the bash subprocess is gone');
     my $journal = journal_of($doc);
     ok((grep { $_->{type} eq 'tool.call' && $_->{name} eq 'bash' } @$journal), 'after the tool call');
+    my ( $result ) = grep { $_->{type} eq 'tool.result' } @$journal;
+    like($result, { name => 'bash', status => 'cancelled' }, 'the cut-off call reported cancelled');
     like($journal->[-1], { type => 'run.finished', status => 'cancelled' }, 'the run as cancelled');
   };
 

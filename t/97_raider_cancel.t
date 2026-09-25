@@ -158,6 +158,32 @@ subtest 'cancelled by a tool that finishes: the next tool does not run' => sub {
     'its result is kept as it was');
 };
 
+subtest 'a tool that fails once the cancel is requested: reported cancelled' => sub {
+  # The tool ends with an error right after the cancel, before the loop
+  # sees it -- as when the tool subprocess was ended by the canceller.
+  for my $how (qw( error fail )) {
+    my $tool_f;
+    my ( $raider, $engine, $mcp, $events ) = raider(
+      script => [ { tool_calls => [ [ slow => {} ], [ never => {} ] ] } ],
+      tools  => {
+        slow  => sub { $tool_f = $loop->new_future },
+        never => sub { Future->done({ content => [] }) },
+      },
+    );
+    $loop->watch_time(after => 0.2, code => sub {
+      $raider->cancel;
+      $how eq 'error'
+        ? $tool_f->done({ content => [ { type => 'text', text => 'killed by SIGTERM' } ], isError => 1 })
+        : $tool_f->fail('connection lost');
+    });
+    my $r = raid($raider);
+    ok($r->is_cancelled, $how.': cancelled');
+    is($mcp->calls, [ 'slow' ], $how.': the second tool never ran');
+    is([ map { [ $_->[0], { @$_[1 .. $#$_] }->{status} ] } @$events ],
+      [ [ 'tool.call', 'dispatched' ], [ 'tool.result', 'cancelled' ] ], $how.': tool.result cancelled, not failed');
+  }
+};
+
 subtest 'a cancel before the raid starts ends it before the first model call' => sub {
   my ( $raider, $engine ) = raider();
   $raider->cancel;

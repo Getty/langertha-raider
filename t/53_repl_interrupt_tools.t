@@ -193,7 +193,7 @@ subtest 'Ctrl-C once cancels the turn, the REPL goes on' => sub {
   is([ map { [ $_->{run}, $_->{status} ] } grep { $_->{type} eq 'run.finished' } @events ],
     [ [ r1 => 'cancelled' ], [ r2 => 'completed' ] ], 'r1 cancelled, r2 completed');
   my ( $first ) = grep { $_->{type} eq 'tool.result' && $_->{run} eq 'r1' } @events;
-  like($first, { name => 'bash', status => in_set('cancelled', 'failed') }, 'the cut-off call has its result');
+  like($first, { name => 'bash', status => 'cancelled' }, 'the cut-off call has its result');
   is([ map { $_->{content} } grep { $_->{type} eq 'message' && $_->{role} eq 'assistant' } @events ], [ 'done' ],
     'only r2 answered');
 };

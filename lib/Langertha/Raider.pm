@@ -474,7 +474,10 @@ abandoned: that future is cancelled, which aborts an HTTP request in
 flight on L<Net::Async::HTTP>. A tool call cut off this way still gets its
 result, marked C<cancelled> (text C<Tool call 'NAME' was cancelled.>,
 C<isError>, C<< cancelled => 1 >>), through C<plugin_after_tool_call>.
-Tool subprocesses are not signalled; that is the caller's to do.
+Tool subprocesses are not signalled; that is the caller's to do. A tool call
+that ends with an error once the cancel is requested -- its subprocess
+ended by the caller -- counts as cut off too; one that succeeds keeps its
+result.
 
 The raid then resolves with a C<cancelled> L<Langertha::Raider::Result>.
 Like a failed raid it adds nothing to L</history>; the tool calls made so
@@ -584,6 +587,16 @@ sub _cancelled_result {
   $m->{tool_calls} += ${ $state->{raid_tool_calls} };
   $m->{time_ms}    += tv_interval($state->{t0}) * 1000;
   return Langertha::Raider::Result->cancelled('Cancelled');
+}
+
+# Whether a cancel cut off the tool call $call_f: it was abandoned, or it
+# ended with an error after the cancel was requested -- ended by the
+# canceller, as a tool subprocess the CLI terminates. A call that succeeds
+# keeps its result.
+sub _cut_off {
+  my ( $self, $call_f, $result ) = @_;
+  return 1 unless $call_f->is_done;
+  return $self->cancel_requested && ref $result eq 'HASH' && $result->{isError} ? 1 : 0;
 }
 
 # The result of a tool call cut off by a cancel.
@@ -2155,7 +2168,7 @@ async sub _run_raid_loop {
         });
       });
       my $result = await $self->_until_cancelled($call_f);
-      $result = $self->_cancelled_tool_result($name) unless $call_f->is_done;
+      $result = $self->_cancelled_tool_result($name) if $self->_cut_off($call_f, $result);
 
       # Plugin hook: transform tool result
       for my $plugin (@{$self->_plugin_instances}) {
@@ -2310,7 +2323,7 @@ async sub _respond_f {
       });
     });
     my $result = await $self->_until_cancelled($call_f);
-    $result = $self->_cancelled_tool_result($name) unless $call_f->is_done;
+    $result = $self->_cancelled_tool_result($name) if $self->_cut_off($call_f, $result);
 
     for my $plugin (@{$self->_plugin_instances}) {
       $result = await $plugin->plugin_after_tool_call($name, $input, $result);
