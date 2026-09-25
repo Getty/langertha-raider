@@ -117,6 +117,14 @@ subtest 'plugin_after_llm_response accumulates token_stats across shapes' => sub
 
   $plugin->plugin_after_llm_response({ no_usage_here => 1 }, 4)->get;
   is($plugin->token_stats->{calls}, 3, 'a response without usage does not bump calls');
+
+  # Langertha::Usage->from_raw (k195) also reads Gemini and Ollama-native
+  # bodies, which the hand-written parser counted as "no usage".
+  $plugin->plugin_after_llm_response({ usageMetadata => { promptTokenCount => 4, candidatesTokenCount => 2, totalTokenCount => 6 } }, 5)->get;
+  is($plugin->token_stats, { prompt => 18, completion => 10, total => 28, calls => 4 }, 'gemini usageMetadata counted');
+
+  $plugin->plugin_after_llm_response({ prompt_eval_count => 7, eval_count => 3 }, 6)->get;
+  is($plugin->token_stats, { prompt => 25, completion => 13, total => 38, calls => 5 }, 'ollama-native top-level counts counted');
 };
 
 subtest 'plugin_before_llm_call passes the conversation through unchanged' => sub {

@@ -10,6 +10,8 @@ use Scalar::Util qw( blessed );
 use JSON::MaybeXS qw( JSON );
 use MCP::Server;
 use Net::Async::MCP;
+use IO::Async::Loop;
+use Langertha::Usage;
 use Langertha::Raider::Result;
 use Langertha::RunContext;
 
@@ -847,19 +849,6 @@ automatically resets to the default engine.
 
 =cut
 
-sub _extract_prompt_tokens {
-  my ( $self, $data ) = @_;
-  # OpenAI-compatible (OpenAI, Groq, Mistral, DeepSeek, MiniMax, vLLM, Ollama, AKI)
-  if (my $u = $data->{usage}) {
-    return $u->{prompt_tokens} // $u->{input_tokens};
-  }
-  # Gemini
-  if (my $m = $data->{usageMetadata}) {
-    return $m->{promptTokenCount};
-  }
-  return undef;
-}
-
 async sub compress_history_f {
   my ( $self ) = @_;
   my @history = @{$self->history};
@@ -875,7 +864,7 @@ async sub compress_history_f {
   );
 
   my $request = $engine->chat_request(\@messages);
-  my $response = await $engine->_async_http->do_request(request => $request);
+  my $response = await $engine->async_request_f($request);
   my $data = $engine->parse_response($response);
   my $summary = $engine->response_text_content($data);
 
@@ -1098,29 +1087,6 @@ sub _langfuse_model_parameters {
   $p{temperature} = $e->temperature if $e->can('has_temperature') && $e->has_temperature;
   $p{max_tokens} = $e->get_response_size if $e->can('get_response_size') && $e->get_response_size;
   return keys %p ? \%p : undef;
-}
-
-sub _langfuse_usage {
-  my ( $self, $data ) = @_;
-  # OpenAI-compatible + Anthropic (both use $data->{usage})
-  if (my $u = $data->{usage}) {
-    my $input  = $u->{prompt_tokens} // $u->{input_tokens};
-    my $output = $u->{completion_tokens} // $u->{output_tokens};
-    return {
-      input  => $input,
-      output => $output,
-      total  => $u->{total_tokens} // (($input // 0) + ($output // 0)),
-    };
-  }
-  # Gemini
-  if (my $m = $data->{usageMetadata}) {
-    return {
-      input  => $m->{promptTokenCount},
-      output => $m->{candidatesTokenCount},
-      total  => $m->{totalTokenCount},
-    };
-  }
-  return undef;
 }
 
 sub _self_tool_enabled {
@@ -1571,7 +1537,7 @@ async sub _initialize_inline_mcp_f {
   }
 
   my $mcp = Net::Async::MCP->new(server => $server);
-  $self->engine->_async_http->loop->add($mcp);
+  ($self->engine->async_loop // IO::Async::Loop->new)->add($mcp);
   await $mcp->initialize;
   $self->_inline_mcp($mcp);
 }
@@ -1734,7 +1700,7 @@ async sub _run_raid_loop {
     # the pre-plugin array and drops every message accumulated after divergence.
     $state->{conversation} = $conversation;
 
-    my $iter_t0 = $langfuse ? $engine->_langfuse_timestamp : undef;
+    my $iter_t0 = $langfuse ? $engine->langfuse_timestamp : undef;
 
     # Langfuse: create iteration span
     my $iter_span_id;
@@ -1749,7 +1715,7 @@ async sub _run_raid_loop {
     # Build and send the request
     my $request = $engine->build_tool_chat_request($conversation, $formatted_tools);
 
-    my $response = await $engine->_async_http->do_request(request => $request);
+    my $response = await $engine->async_request_f($request);
 
     unless ($response->is_success) {
       die "".(ref $engine)." raid request failed: ".$response->status_line."\n".$response->content;
@@ -1762,12 +1728,19 @@ async sub _run_raid_loop {
       $data = await $plugin->plugin_after_llm_response($data, $iteration);
     }
 
-    # Track prompt tokens for auto-compression
-    my $pt = $self->_extract_prompt_tokens($data);
-    $self->_last_prompt_tokens($pt) if defined $pt;
+    # Track prompt tokens for auto-compression. from_raw is undef when the
+    # body reports no usage, but a Usage without a prompt count still has
+    # input_tokens 0: treat 0 as not reported, so it never resets the count.
+    my $usage = Langertha::Usage->from_raw($data);
+    $self->_last_prompt_tokens($usage->input_tokens)
+      if $usage && $usage->input_tokens > 0;
 
     # Extract usage for Langfuse
-    my $langfuse_usage = $langfuse ? $self->_langfuse_usage($data) : undef;
+    my $langfuse_usage = $langfuse && $usage ? {
+      input  => $usage->input_tokens,
+      output => $usage->output_tokens,
+      total  => $usage->total_tokens,
+    } : undef;
 
     # Extract tool calls
     my $tool_calls = $engine->response_tool_calls($data);
@@ -1779,7 +1752,7 @@ async sub _run_raid_loop {
         ($text) = $engine->filter_think_content($text);
       }
 
-      my $iter_t1 = $langfuse ? $engine->_langfuse_timestamp : undef;
+      my $iter_t1 = $langfuse ? $engine->langfuse_timestamp : undef;
 
       # Langfuse: generation nested under iteration span
       if ($langfuse) {
@@ -1837,7 +1810,7 @@ async sub _run_raid_loop {
     }
 
     # Langfuse: generation for the LLM call that produced tool calls
-    my $post_llm_t = $langfuse ? $engine->_langfuse_timestamp : undef;
+    my $post_llm_t = $langfuse ? $engine->langfuse_timestamp : undef;
     if ($langfuse) {
       $engine->langfuse_generation(
         trace_id              => $trace_id,
@@ -1874,7 +1847,7 @@ async sub _run_raid_loop {
       }
       ( $name, $input ) = @plugin_tc;
 
-      my $tool_t0 = $langfuse ? $engine->_langfuse_timestamp : undef;
+      my $tool_t0 = $langfuse ? $engine->langfuse_timestamp : undef;
 
       # Check for virtual self-tools
       if ($name =~ /^raider_/ && $self->has_raider_mcp) {
@@ -1927,7 +1900,7 @@ async sub _run_raid_loop {
         }
 
         if ($self_result->{type} eq 'wait') {
-          my $loop = $engine->_async_http->loop;
+          my $loop = $engine->async_loop // IO::Async::Loop->new;
           await $loop->delay_future(after => $self_result->{seconds});
           my $result = {
             content => [{ type => 'text', text => "Waited $self_result->{seconds} seconds." }],
@@ -1941,7 +1914,7 @@ async sub _run_raid_loop {
               input                 => $input,
               output                => "Waited $self_result->{seconds} seconds.",
               start_time            => $tool_t0,
-              end_time              => $engine->_langfuse_timestamp,
+              end_time              => $engine->langfuse_timestamp,
             );
           }
 
@@ -1967,7 +1940,7 @@ async sub _run_raid_loop {
             input                 => $input,
             output                => $tool_output,
             start_time            => $tool_t0,
-            end_time              => $engine->_langfuse_timestamp,
+            end_time              => $engine->langfuse_timestamp,
           );
         }
 
@@ -2003,7 +1976,7 @@ async sub _run_raid_loop {
           input                 => $input,
           output                => $tool_output,
           start_time            => $tool_t0,
-          end_time              => $engine->_langfuse_timestamp,
+          end_time              => $engine->langfuse_timestamp,
           $result->{isError} ? ( level => 'ERROR' ) : (),
         );
       }
@@ -2016,7 +1989,7 @@ async sub _run_raid_loop {
     if ($langfuse) {
       $engine->langfuse_update_span(
         id       => $iter_span_id,
-        end_time => $engine->_langfuse_timestamp,
+        end_time => $engine->langfuse_timestamp,
         metadata => {
           tool_calls => scalar @$tool_calls,
           tools_used => [map {
@@ -2102,7 +2075,7 @@ async sub respond_f {
       }
 
       if ($self_result->{type} eq 'wait') {
-        my $loop = $engine->_async_http->loop;
+        my $loop = $engine->async_loop // IO::Async::Loop->new;
         await $loop->delay_future(after => $self_result->{seconds});
         push @results, {
           tool_call => $tc,
@@ -2145,7 +2118,7 @@ async sub respond_f {
   if ($state->{langfuse} && $cont->{iter_span_id}) {
     $engine->langfuse_update_span(
       id       => $cont->{iter_span_id},
-      end_time => $engine->_langfuse_timestamp,
+      end_time => $engine->langfuse_timestamp,
       metadata => { tool_calls => scalar @results },
     );
   }

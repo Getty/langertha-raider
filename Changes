@@ -16,6 +16,12 @@ Revision history for Langertha-Raider
       App::Raider::Plugin::Trace, App::Raider::Skill, App::Raider::WebTools)
       ship as empty reserved-namespace stubs pointing to their
       Langertha::Raider replacements.
+    - Langertha::Raider calls only Langertha's public engine methods
+      (async_request_f, async_loop, langfuse_timestamp,
+      Langertha::Usage->from_raw). Inline MCP tools and raider_wait run on
+      the engine's event loop, so an engine on its own loop no longer
+      hangs a raid; the trace and Langfuse count tokens from Gemini and
+      Ollama native responses too.
     - Fix filesystem confinement to reject symlink escapes for read and
       write operations, with regression tests.
     - Fix WebTools sync wrappers to await IO::Async futures through the

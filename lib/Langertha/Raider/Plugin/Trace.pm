@@ -8,6 +8,7 @@ use Future::AsyncAwait;
 use Term::ANSIColor qw( colored );
 use JSON::MaybeXS ();
 use IO::Async::Timer::Periodic;
+use Langertha::Usage;
 
 extends 'Langertha::Plugin';
 
@@ -145,17 +146,6 @@ sub _stop_spinner {
   print { $self->out } "\r\033[K";
 }
 
-sub _extract_usage {
-  my ($data) = @_;
-  return unless ref $data eq 'HASH';
-  my $u = $data->{usage} // $data->{response}{usage};
-  return unless ref $u eq 'HASH';
-  my $p = $u->{prompt_tokens}     // $u->{input_tokens};
-  my $c = $u->{completion_tokens} // $u->{output_tokens};
-  my $t = $u->{total_tokens}      // (($p // 0) + ($c // 0));
-  return { prompt => $p // 0, completion => $c // 0, total => $t // 0 };
-}
-
 my %C = (
   iter   => 'bright_black',
   tool   => 'blue',
@@ -205,12 +195,12 @@ async sub plugin_after_llm_response {
   my ($self, $data, $iteration) = @_;
   $self->_stop_spinner;
 
-  my $usage = _extract_usage($data);
+  my $usage = Langertha::Usage->from_raw($data);
   if ($usage) {
     my $s = $self->token_stats;
-    $s->{prompt}     += $usage->{prompt};
-    $s->{completion} += $usage->{completion};
-    $s->{total}      += $usage->{total};
+    $s->{prompt}     += $usage->input_tokens;
+    $s->{completion} += $usage->output_tokens;
+    $s->{total}      += $usage->total_tokens;
     $s->{calls}++;
   }
 

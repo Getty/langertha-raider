@@ -137,9 +137,8 @@ async sub test_raider {
 
   # --- Langfuse flush ---
   if ($engine->can('langfuse_enabled') && $engine->langfuse_enabled) {
-    my $batch_size = scalar @{$engine->_langfuse_batch};
     $engine->langfuse_flush;
-    diag "$name: flushed $batch_size Langfuse events";
+    diag "$name: flushed Langfuse events";
   }
 
   # --- clear_history ---

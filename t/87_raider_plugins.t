@@ -309,7 +309,7 @@ subtest 'plugin self-tools are registered' => sub {
   use Moose;
   extends 'MockEngine';
   has _http => (is => 'ro', default => sub { MockLoopHTTP->new });
-  sub _async_http { $_[0]->_http }
+  sub async_loop { $_[0]->_http->loop }
   __PACKAGE__->meta->make_immutable;
 }
 
@@ -325,6 +325,41 @@ subtest 'plugin self-tools are listed exactly once' => sub {
   is(scalar @names, 1, 'plugin tool gathered once');
   ok($map->{my_custom_tool}, 'plugin tool routed through the inline MCP');
   is(ref $raider->_inline_mcp, 'Net::Async::MCP', 'inline MCP is a plain Net::Async::MCP');
+};
+
+# The inline MCP notifier must live on the loop the engine's HTTP futures run
+# on ($engine->async_loop, ADR 0028 in core): a raid awaiting futures from two
+# loops hangs, since the outer ->get drives only one. Only when the engine has
+# no loop (sync fallback, loop-less client) does raider fall back to the
+# process-wide IO::Async::Loop->new (k195).
+{
+  package MockForeignLoopEngine;
+  use Moose;
+  use IO::Async::Loop::Poll;
+  extends 'MockEngine';
+  has _loop => (is => 'ro', default => sub { IO::Async::Loop::Poll->new });
+  sub async_loop { $_[0]->_loop }
+  __PACKAGE__->meta->make_immutable;
+}
+
+{
+  package MockNoLoopEngine;
+  use Moose;
+  extends 'MockEngine';
+  sub async_loop { undef }
+  __PACKAGE__->meta->make_immutable;
+}
+
+subtest 'inline MCP joins the engine loop, falls back without one' => sub {
+  my $engine = MockForeignLoopEngine->new;
+  isnt($engine->async_loop, IO::Async::Loop->new, 'test engine runs on a foreign loop');
+  my $raider = Langertha::Raider->new(engine => $engine, plugins => ['TestPlugin::WithTool']);
+  $raider->_initialize_inline_mcp_f->get;
+  is($raider->_inline_mcp->loop, $engine->async_loop, 'inline MCP added to the engine loop');
+
+  my $raider2 = Langertha::Raider->new(engine => MockNoLoopEngine->new, plugins => ['TestPlugin::WithTool']);
+  $raider2->_initialize_inline_mcp_f->get;
+  is($raider2->_inline_mcp->loop, IO::Async::Loop->new, 'no engine loop: the process-wide loop');
 };
 
 # --- Test: pre-instantiated plugin objects ---
@@ -526,6 +561,10 @@ subtest 'multiple event consumers all receive event' => sub {
 
   sub provides_events { ['engine_test'] }
 
+  # Answers with itself, so the test reaches the instance through the public
+  # fire_event_f instead of core's private _plugin_instances (k195).
+  async sub on_engine_test { my ($self) = @_; push @{$self->log}, 'engine_test'; return $self }
+
   __PACKAGE__->meta->make_immutable;
 }
 
@@ -538,14 +577,12 @@ subtest 'plugins work on Engine via PluginHost role' => sub {
     plugins => ['TestPlugin::EngineLogger'],
   );
 
-  is(scalar @{$engine->_plugin_instances}, 1, 'one plugin on engine');
-  isa_ok($engine->_plugin_instances->[0], 'TestPlugin::EngineLogger');
-  is($engine->_plugin_instances->[0]->host, $engine, 'host is the engine');
-  is($engine->_plugin_instances->[0]->raider, undef, 'raider returns undef on engine');
-
-  # fire_event_f works on engine
   my @results = $engine->fire_event_f('engine_test')->get;
-  is(scalar @results, 0, 'event fired (no listeners)');
+  is(scalar @results, 1, 'one plugin on engine answered the event');
+  isa_ok($results[0], 'TestPlugin::EngineLogger');
+  is($results[0]->host, $engine, 'host is the engine');
+  is($results[0]->raider, undef, 'raider returns undef on engine');
+  is_deeply($results[0]->log, ['engine_test'], 'handler ran once');
 };
 
 subtest 'engine plugin event validation works' => sub {
@@ -555,7 +592,7 @@ subtest 'engine plugin event validation works' => sub {
     model   => 'gpt-4o-mini',
     plugins => ['TestPlugin::EventNeedsMissing'],
   );
-  eval { $engine->_plugin_instances };
+  eval { $engine->fire_event_f('engine_test')->get };
   like($@, qr/requires event 'nonexistent_event'/, 'engine validates events too');
 };
 

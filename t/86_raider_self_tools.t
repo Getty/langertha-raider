@@ -565,7 +565,7 @@ subtest 'a failed embedding still leaves its slot' => sub {
   package MockCompressionEngine;
   use Moose;
   sub chat_request { return { mock_request => 1 } }
-  sub _async_http { return MockCompressionHTTP->new }
+  sub async_request_f { return MockCompressionHTTP->new->do_request }
   sub parse_response { return $_[1] }
   sub response_text_content { return 'compressed summary' }
   __PACKAGE__->meta->make_immutable;
@@ -756,7 +756,8 @@ subtest 'cosine similarity' => sub {
   has captured       => (is => 'ro', default => sub { [] });
   has _http          => (is => 'ro', lazy => 1, default => sub { SeqHTTP->new });
 
-  sub _async_http { return $_[0]->_http }
+  sub async_request_f { return $_[0]->_http->do_request }
+  sub async_loop      { return $_[0]->_http->loop }
 
   sub format_tools            { return $_[1] }
   sub build_tool_chat_request { return { request => 1 } }
@@ -855,6 +856,42 @@ subtest 'respond_f leaves a trailing raider_wait with a tool_result' => sub {
   ok(!(grep { $_ != 1 } values %$counts), 'no tool_use left without a tool_result');
 };
 
+# Auto-compression keys on the last reported prompt size. Usage comes from
+# Langertha::Usage->from_raw (k195), which yields input_tokens 0 when a body has
+# usage but no prompt count: that 0 must not overwrite the last real count, or
+# a provider omitting the key would switch auto-compression off.
+subtest 'last prompt tokens: a usage without a prompt count keeps the old value' => sub {
+  my $turn = sub { { tool_calls => [], text => 'ok', @_ } };
+  my $engine = SeqEngine->new(turns => [
+    $turn->(usage => { prompt_tokens => 42, completion_tokens => 1 }),
+    $turn->(usage => { completion_tokens => 5 }),
+    $turn->(),
+    $turn->(usageMetadata => { promptTokenCount => 77, candidatesTokenCount => 3 }),
+  ]);
+  my $raider = Langertha::Raider->new(engine => $engine, raider_mcp => 1);
+
+  $raider->raid('one');
+  is($raider->_last_prompt_tokens, 42, 'prompt count recorded');
+  $raider->raid('two');
+  is($raider->_last_prompt_tokens, 42, 'usage without a prompt count does not reset it to 0');
+  $raider->raid('three');
+  is($raider->_last_prompt_tokens, 42, 'a body without usage leaves it alone');
+  $raider->raid('four');
+  is($raider->_last_prompt_tokens, 77, 'gemini usageMetadata prompt count recorded');
+};
+
+subtest 'raider_wait runs when the engine has no event loop' => sub {
+  my $engine = SeqEngine->new(turns => [
+    { tool_calls => [ { name => 'raider_wait', input => { seconds => 0 }, id => 'tc_wait' } ] },
+    { tool_calls => [], text => 'waited' },
+  ]);
+  no warnings 'redefine';
+  local *SeqEngine::async_loop = sub { undef };   # sync fallback: core promises no loop
+  my $r = Langertha::Raider->new(engine => $engine, raider_mcp => 1)->raid('wait a bit');
+  is("$r", 'waited', 'wait fell back to the process-wide loop');
+  is(result_id_counts($engine)->{tc_wait}, 1, 'the wait got its tool_result');
+};
+
 subtest 'respond_f re-pauses on a second interactive self-tool in the batch' => sub {
   my $engine = SeqEngine->new(
     turns => [
@@ -932,7 +969,8 @@ subtest 'respond_f re-pauses on a second interactive self-tool in the batch' => 
   has sent           => (is => 'ro', default => sub { [] });
   has _http          => (is => 'ro', lazy => 1, default => sub { SeqHTTP->new });
 
-  sub _async_http { return $_[0]->_http }
+  sub async_request_f { return $_[0]->_http->do_request }
+  sub async_loop      { return $_[0]->_http->loop }
 
   sub format_tools          { return $_[1] }
   sub response_tool_calls   { return $_[1]->{tool_calls} // [] }

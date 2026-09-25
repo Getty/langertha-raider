@@ -65,7 +65,8 @@ clear_engine_env();
   has _turn_idx      => (is => 'rw', default => 0);
   has _http          => (is => 'ro', lazy => 1, default => sub { SeqHTTP->new });
 
-  sub _async_http { return $_[0]->_http }
+  sub async_request_f { return $_[0]->_http->do_request }
+  sub async_loop      { return $_[0]->_http->loop }
 
   sub format_tools            { return $_[1] }
   sub build_tool_chat_request { return { request => 1 } }
