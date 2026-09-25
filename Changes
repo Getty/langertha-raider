@@ -82,6 +82,11 @@ Revision history for Langertha-Raider
       as the run happens, run.finished always last. All six machine flags
       exclude each other; with any of them --trace goes to stderr and
       stdout carries only the machine output. Requires Data::MessagePack.
+    - Raider Hall runs raiders with --stream-json: stdout goes to a file per
+      run, stderr to the slot log, and raider.done carries status and
+      response or error from run.finished; a raider killed before its
+      result is a clear failure, and ACP forwards that instead of raw log
+      text.
     - /reload, the banner and the generated raider skill name a -M
       mission as the persona; the generated skill lists /config, /model,
       /packs and /pack.
