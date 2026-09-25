@@ -1,0 +1,19 @@
+---
+class: standard
+completed: 2026-09-25T01:35:16Z
+created: 2026-09-24T22:27:47Z
+id: 40
+priority: low
+started: 2026-09-25T01:35:16Z
+status: done
+tags:
+- idea
+- needs-adr
+- cli
+title: 'Idee: versioniertes --json / --stream-json'
+updated: 2026-09-25T01:35:16Z
+---
+
+Aus #21: --json-Format {response,metrics,elapsed}|{error,elapsed} ist unversioniert; Stream-Variante fehlt. Handoff RDR-04 erwaehnt beides. Braucht ADR.
+
+ADR 0013 (proposed) geschrieben.
