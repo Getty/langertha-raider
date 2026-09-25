@@ -17,6 +17,9 @@ for my $module (qw(
   Langertha::Raider::Hall::Telegram
   Langertha::Raider::Packs::Collection
   Langertha::Raider::Packs::Pack
+  Langertha::Raider::Session
+  Langertha::Raider::Session::Journal
+  Langertha::Raider::SessionStore
 )) {
   ok(eval "require $module; 1", 'load '.$module) or diag $@;
 }
