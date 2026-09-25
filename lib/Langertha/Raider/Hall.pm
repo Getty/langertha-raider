@@ -254,7 +254,7 @@ messages;
 =item * C<cron:ID> -- a cron job, its own session per job;
 
 =item * C<acp:SESSION> -- an ACP session, for as long as its connection
-lasts;
+lasts; a hall start forgets any left over;
 
 =item * C<slot:1NAME> -- a numbered slot, continued by each queued
 mission that has no binding of its own.
@@ -263,6 +263,9 @@ mission that has no binding of its own.
 
 A run of a plain name (C<bjorn>) without such a binding is not bound: the
 raider starts a fresh session of its own.
+
+Telegram, cron and slot bindings stay until they are reset (see
+L</reset_session>); journals are never deleted by the hall.
 
 =cut
 
@@ -327,6 +330,40 @@ sub unbind_session {
   my ($self, $binding) = @_;
   return unless defined delete $self->session_bindings->{$binding};
   $self->_persist_session_bindings;
+  return;
+}
+
+=method reset_session
+
+    my $res = $hall->reset_session('telegram:ops:42');
+    # { reset => 1, binding => ..., session => OLD_ID } or { error => ... }
+
+Starts a binding over: its next mission gets a new session. The old
+journal stays, and a run still going on the binding finishes in it.
+Emits C<session.reset>. C<raider hall session reset BINDING> and C</new>
+in a Telegram chat end up here.
+
+=cut
+
+sub reset_session {
+  my ($self, $binding) = @_;
+  return { error => 'session_reset requires a binding' }
+    unless defined $binding && length $binding;
+  my $id = $self->session_bindings->{$binding};
+  return { error => 'no session bound to '.$binding } unless defined $id;
+  $self->unbind_session($binding);
+  $self->_emit('session.reset', { binding => $binding, session => $id });
+  return { reset => 1, binding => $binding, session => $id };
+}
+
+# ACP bindings live as long as their connection, which a hall restart
+# ends: forget them and the prompts they left waiting. Journals stay.
+sub _forget_acp_bindings {
+  my ($self) = @_;
+  my @acp = grep { /^acp:/ } keys %{$self->session_bindings};
+  delete @{$self->session_bindings}{@acp};
+  $self->_persist_session_bindings if @acp;
+  $self->_drop_binding_queue($_) for grep { /^acp:/ } keys %{$self->binding_queues};
   return;
 }
 
@@ -503,6 +540,7 @@ sub run {
   $self->_setup_cron;
   $self->_setup_telegram;
   $self->_setup_acp;
+  $self->_forget_acp_bindings;
   $self->_drain_binding_queues;
 
   $self->_emit('hall.started', { root => $self->root->stringify });
@@ -1005,13 +1043,15 @@ sub _spawn_raider {
   my $extra_perl5lib = join ':', grep { defined && length } ($lib_path,
     ($self->config->{longhouse} ? $self->longhouse_lib_path->stringify : ()));
 
-  # The Telegram chat this raider answers; telegram_reply is bound to it.
-  # Never inherited from the hall's own env.
+  # The Telegram chat (and forum topic) this raider answers; telegram_reply
+  # is bound to it. Never inherited from the hall's own env.
   my %env = %ENV;
-  delete @env{qw( RAIDER_HALL_TELEGRAM_BOT RAIDER_HALL_TELEGRAM_CHAT_ID )};
+  delete @env{qw( RAIDER_HALL_TELEGRAM_BOT RAIDER_HALL_TELEGRAM_CHAT_ID RAIDER_HALL_TELEGRAM_THREAD_ID )};
   if ($telegram) {
     $env{RAIDER_HALL_TELEGRAM_BOT}     = $telegram->{bot};
     $env{RAIDER_HALL_TELEGRAM_CHAT_ID} = $telegram->{chat_id};
+    $env{RAIDER_HALL_TELEGRAM_THREAD_ID} = $telegram->{message_thread_id}
+      if defined $telegram->{message_thread_id};
   }
 
   my $process = IO::Async::Process->new(

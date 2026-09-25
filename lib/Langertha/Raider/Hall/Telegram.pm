@@ -24,7 +24,12 @@ messages emit a C<telegram.rejected> event and are neither stored nor routed.
 A routed message runs in the session bound to its chat --
 C<telegram:BOT:CHAT_ID>, with C<:THREAD> for a forum topic -- so the
 conversation continues across messages (see
-L<Langertha::Raider::Hall/session_bindings>).
+L<Langertha::Raider::Hall/session_bindings>). The raider's
+C<telegram_reply> answers into the same chat and forum topic.
+
+C</new> (or C</new@BOTNAME>) from an accepted sender is not a mission: the
+chat's (topic's) next message starts a new session, and the bot confirms
+with a short message. The old journal stays.
 
 =cut
 
@@ -194,6 +199,7 @@ sub _handle_update {
   $self->hall->_emit('telegram.in', {
     bot => $bot_name,
     chat_id => $chat_id,
+    defined $msg->{message_thread_id} ? ( message_thread_id => $msg->{message_thread_id} ) : (),
     text => $text,
     first_name => $msg->{from}{first_name} // '',
     username => $msg->{from}{username} // '',
@@ -202,16 +208,40 @@ sub _handle_update {
 
   $self->_save_history($bot_name, $chat_id, $update);
 
+  # One session per chat (per forum topic), continued by every message.
+  my $thread = $msg->{message_thread_id};
+  my %target = (
+    bot => $bot_name,
+    chat_id => $chat_id,
+    defined $thread ? ( message_thread_id => $thread ) : (),
+  );
+  my $binding = join(':', 'telegram', $bot_name, $chat_id, defined $thread ? $thread : ());
+
+  return $self->_start_new_session($binding, %target) if $self->_is_new_command($text);
+
   if ($target_raider) {
-    # One session per chat (per forum topic), continued by every message.
-    my $thread = $msg->{message_thread_id};
     $self->hall->spawn(
       name => $target_raider,
       mission => $text,
-      telegram => { bot => $bot_name, chat_id => $chat_id },
-      binding => join(':', 'telegram', $bot_name, $chat_id, defined $thread ? $thread : ()),
+      telegram => \%target,
+      binding => $binding,
     );
   }
+}
+
+# /new, or /new@BOTNAME in a group.
+sub _is_new_command {
+  my ($self, $text) = @_;
+  return $text =~ m{\A\s*/new(?:\@\w+)?\s*\z};
+}
+
+# /new: the chat's next message starts a new session. Not a mission;
+# answered with a short confirmation into the same chat and topic.
+sub _start_new_session {
+  my ($self, $binding, %target) = @_;
+  $self->hall->reset_session($binding);
+  $self->send_message(%target, text => 'Started a new session.');
+  return;
 }
 
 sub _save_history {
@@ -237,6 +267,7 @@ sub send_message {
   my $uri = URI->new("https://api.telegram.org/bot$token/sendMessage");
   my $req = HTTP::Request::Common::POST($uri, [
     chat_id => $chat_id,
+    defined $args{message_thread_id} ? ( message_thread_id => $args{message_thread_id} ) : (),
     text => $text,
     parse_mode => 'Markdown',
   ]);

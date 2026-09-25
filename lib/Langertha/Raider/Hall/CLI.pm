@@ -35,7 +35,8 @@ sub main {
   if ($cmd eq 'attach')     { return run_attach(@args); }
   if ($cmd eq 'logs')       { return run_logs(@args); }
   if ($cmd eq 'kill')       { return run_kill(@args); }
-  if ($cmd eq 'install')    { return run_install(@args); }
+  if ($cmd eq 'session')    { return run_session(@args); }
+  if ($cmd eq 'install')   { return run_install(@args); }
   if ($cmd eq 'help')       { print usage(); exit 0; }
 
   die "Unknown subcommand: $cmd\n\n" . usage();
@@ -83,6 +84,7 @@ Subcommands:
   attach [DIR] ID    Attach to a raider's event stream
   logs [DIR] ID      Fetch raider logs
   kill [DIR] ID      Terminate a raider
+  session reset [DIR] BINDING  Start a new session for a binding
   install [DIR]      Install systemd user unit
   help               Show this help
 
@@ -532,6 +534,46 @@ sub print_kill_help {
 raider hall kill [DIR] ID
 
 Terminate a raider.
+EOF
+  exit 0;
+}
+
+sub run_session {
+  my @args = @_;
+  my %opt;
+  local @ARGV = @args;
+  Getopt::Long::GetOptions(\%opt, 'help');
+  return print_session_help() if $opt{help};
+  @args = @ARGV;
+
+  my $usage = "Usage: raider hall session reset [DIR] BINDING\n";
+  my $sub = shift @args // '';
+  die $usage unless $sub eq 'reset';
+  my $dir = hall_dir(\@args, 1);
+  die $usage unless @args == 1;
+
+  my $binding = shift @args;
+  my $socket = path($dir)->child('.raider-hall.socket');
+  die "Hall not running (no socket found)\n" unless -e $socket;
+
+  my $result = _send_command($socket, {
+    type => 'command',
+    payload => { cmd => 'session_reset', binding => $binding },
+  });
+  die "Hall: $result->{error}\n" if $result->{error};
+  print 'Binding '.$binding.' reset: its next mission starts a new session'
+    .' (the old one, '.$result->{session}.', is kept).'."\n";
+  return 0;
+}
+
+sub print_session_help {
+  print <<"EOF";
+raider hall session reset [DIR] BINDING
+
+Start BINDING over: its next mission runs in a new session. BINDING is a
+key of .raider-hall/state/sessions.json, e.g. telegram:ops:42,
+telegram:ops:-1001234:7, cron:nightly, slot:1bjorn. The old journal is
+kept. In a Telegram chat, /new does the same for that chat.
 EOF
   exit 0;
 }

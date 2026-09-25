@@ -4,6 +4,7 @@ use Test2::V0;
 use Path::Tiny;
 use File::Temp qw( tempdir );
 use JSON::MaybeXS ();
+use URI;
 use Langertha::Raider::Hall;
 use Langertha::Raider::Hall::Raider;
 use Langertha::Raider::Hall::Telegram;
@@ -162,5 +163,100 @@ subtest 'unbound telegram_reply still requires bot and chat_id' => sub {
   my $tool = tool_named( build_hall_tools_server( socket => '/nonexistent' ), 'telegram_reply' );
   is( $tool->input_schema->{required}, [qw( bot chat_id text )], 'all three required' );
 };
+
+
+# Forum topics: the thread is part of the reply target, like bot and chat_id,
+# so the answer lands in the topic the message came from.
+
+subtest 'a forum topic message carries its thread in the reply target' => sub {
+  my @spawns;
+  no warnings 'redefine';
+  local *Langertha::Raider::Hall::_emit = sub {};
+  local *Langertha::Raider::Hall::spawn = sub { my ( $self, %args ) = @_; push @spawns, \%args };
+  my $hall = Langertha::Raider::Hall->new( root => path( tempdir( CLEANUP => 1 ) ) );
+  my $tg = Langertha::Raider::Hall::Telegram->new( hall => $hall );
+  $tg->_workers->{ops} = { token => 'x', allowlist => [42], allowed_chats => [-100],
+    routing => { '*' => 'lagertha' }, active => 0 };
+  $tg->_handle_update( ops => { update_id => 1, message => {
+    chat => { id => -100 }, from => { id => 42 }, message_thread_id => 7, text => 'hi' } } );
+  is( $spawns[0]{telegram}, { bot => 'ops', chat_id => -100, message_thread_id => 7 }, 'thread passed' );
+};
+
+subtest 'spawned raider gets the thread in its env, never an inherited one' => sub {
+  my $env = spawn_and_read_env( telegram => { bot => 'ops', chat_id => -100, message_thread_id => 7 } );
+  is( $env->{RAIDER_HALL_TELEGRAM_THREAD_ID}, 7, 'thread' );
+  local $ENV{RAIDER_HALL_TELEGRAM_THREAD_ID} = 666;
+  $env = spawn_and_read_env( telegram => { bot => 'ops', chat_id => 42 } );
+  ok( !exists $env->{RAIDER_HALL_TELEGRAM_THREAD_ID}, 'none for a chat without topics' );
+};
+
+subtest 'bound telegram_reply answers into the bound thread' => sub {
+  @calls = ();
+  my $tool = tool_named( build_hall_tools_server(
+    socket   => '/nonexistent',
+    telegram => { bot => 'ops', chat_id => -100, message_thread_id => 7 }
+  ), 'telegram_reply' );
+  is( $tool->input_schema->{required}, ['text'], 'still only text required' );
+  $tool->code->( $tool, { text => 'hello' } );
+  is( \@calls, [ { cmd => 'telegram_reply', bot => 'ops', chat_id => -100,
+    message_thread_id => 7, text => 'hello' } ], 'thread sent along' );
+
+  @calls = ();
+  local $ENV{RAIDER_HALL_TELEGRAM_BOT} = 'ops';
+  local $ENV{RAIDER_HALL_TELEGRAM_CHAT_ID} = -100;
+  local $ENV{RAIDER_HALL_TELEGRAM_THREAD_ID} = 7;
+  $tool = tool_named( build_hall_tools_server( socket => '/nonexistent' ), 'telegram_reply' );
+  $tool->code->( $tool, { text => 'hello', message_thread_id => 9 } );
+  is( $calls[0]{message_thread_id}, 7, 'from the env, not from the model' );
+};
+
+subtest 'unbound telegram_reply takes an optional thread' => sub {
+  @calls = ();
+  local $ENV{RAIDER_HALL_TELEGRAM_BOT};
+  local $ENV{RAIDER_HALL_TELEGRAM_CHAT_ID};
+  local $ENV{RAIDER_HALL_TELEGRAM_THREAD_ID};
+  my $tool = tool_named( build_hall_tools_server( socket => '/nonexistent' ), 'telegram_reply' );
+  ok( $tool->input_schema->{properties}{message_thread_id}, 'offered' );
+  $tool->code->( $tool, { bot => 'ops', chat_id => -100, message_thread_id => 7, text => 'x' } );
+  is( $calls[0]{message_thread_id}, 7, 'passed on' );
+  $tool->code->( $tool, { bot => 'ops', chat_id => 42, text => 'x' } );
+  ok( !exists $calls[1]{message_thread_id}, 'and left out without one' );
+};
+
+subtest 'the hall sends message_thread_id to Telegram' => sub {
+  my $hall = Langertha::Raider::Hall->new( root => path( tempdir( CLEANUP => 1 ) ),
+    config => { telegram => { bots => { ops => { token => 'x' } } } } );
+  my @sent;
+  {
+    no warnings 'redefine';
+    local *Langertha::Raider::Hall::Telegram::send_message = sub { my ( $self, %args ) = @_; push @sent, \%args; { ok => 1 } };
+    $hall->protocol;
+    $hall->_handle_command( CaptureStream->new, { cmd => 'telegram_reply', bot => 'ops',
+      chat_id => -100, message_thread_id => 7, text => 'hi' } );
+  }
+  is( $sent[0]{message_thread_id}, 7, 'telegram_reply command passes the thread' );
+
+  my @requests;
+  my $tg = $hall->telegram;
+  $tg->_workers->{ops} = { token => 'x', ua => FakeUA->new( \@requests ), active => 0 };
+  $tg->send_message( bot => 'ops', chat_id => -100, message_thread_id => 7, text => 'hi' );
+  $tg->send_message( bot => 'ops', chat_id => 42, text => 'hi' );
+  my @forms = map { { URI->new( '?'.$_->content )->query_form } } @requests;
+  is( $forms[0]{message_thread_id}, 7, 'sendMessage into the topic' );
+  ok( !exists $forms[1]{message_thread_id}, 'not for a plain chat' );
+};
+
+{
+  package CaptureStream;
+  sub new { bless { lines => [] }, shift }
+  sub write { push @{ $_[0]{lines} }, $_[1]; 1 }
+}
+
+{
+  package FakeUA;
+  use Future;
+  sub new { bless { requests => $_[1] }, $_[0] }
+  sub do_request { my ( $self, %args ) = @_; push @{ $self->{requests} }, $args{request}; Future->done }
+}
 
 done_testing;

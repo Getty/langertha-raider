@@ -5,7 +5,9 @@ our $VERSION = '0.503';
 =head1 DESCRIPTION
 
 Registers the JSON line commands (spawn, ps, attach, kill, logs, status,
-telegram_reply) on a L<Langertha::Raider::Hall> control socket.
+session_reset, telegram_reply) on a L<Langertha::Raider::Hall> control
+socket. C<telegram_reply> takes an optional C<message_thread_id> to answer
+in a forum topic.
 
 =cut
 
@@ -69,6 +71,12 @@ sub setup_handlers {
     }) . "\n");
   });
 
+  $hall->_register_cmd(session_reset => sub {
+    my ($hall, $stream, $payload) = @_;
+    my $result = $hall->reset_session($payload->{binding});
+    $stream->write(JSON::MaybeXS->new->encode($result) . "\n");
+  });
+
   $hall->_register_cmd(telegram_reply => sub {
     my ($hall, $stream, $payload) = @_;
     my $bot = $payload->{bot} // '';
@@ -84,6 +92,8 @@ sub setup_handlers {
     else {
       $result = $hall->telegram->send_message(
         bot => $bot, chat_id => $chat_id, text => $text,
+        defined $payload->{message_thread_id}
+          ? ( message_thread_id => $payload->{message_thread_id} ) : (),
       );
       # Strip the Future before serialising.
       delete $result->{future};

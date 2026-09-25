@@ -28,7 +28,10 @@ When the raider was spawned for a Telegram message, the hall sets
 C<RAIDER_HALL_TELEGRAM_BOT> and C<RAIDER_HALL_TELEGRAM_CHAT_ID> (or pass
 C<< telegram => { bot => ..., chat_id => ... } >>). The tool is then bound to
 that chat: only C<text> is required, and a different C<bot> or C<chat_id>
-is refused.
+is refused. A message from a forum topic also sets
+C<RAIDER_HALL_TELEGRAM_THREAD_ID> (C<message_thread_id> in the hash), and
+the reply goes into that topic. Unbound, C<message_thread_id> is an
+optional argument.
 
 =item * C<hall_status()>
 
@@ -70,7 +73,12 @@ sub build_hall_tools_server {
     or die "build_hall_tools_server: socket param required";
   my $bound = $args{telegram}
     // ( $ENV{RAIDER_HALL_TELEGRAM_BOT} && defined $ENV{RAIDER_HALL_TELEGRAM_CHAT_ID}
-      ? { bot => $ENV{RAIDER_HALL_TELEGRAM_BOT}, chat_id => $ENV{RAIDER_HALL_TELEGRAM_CHAT_ID} }
+      ? {
+          bot => $ENV{RAIDER_HALL_TELEGRAM_BOT},
+          chat_id => $ENV{RAIDER_HALL_TELEGRAM_CHAT_ID},
+          defined $ENV{RAIDER_HALL_TELEGRAM_THREAD_ID}
+            ? ( message_thread_id => $ENV{RAIDER_HALL_TELEGRAM_THREAD_ID} ) : (),
+        }
       : undef );
 
   my $server = MCP::Server->new(name => 'raider-hall', version => '1.0');
@@ -86,6 +94,7 @@ sub build_hall_tools_server {
         $bound ? () : (
           bot     => { type => 'string',  description => 'Bot name as configured in .raider-hall.yml' },
           chat_id => { type => 'integer', description => 'Telegram chat id' },
+          message_thread_id => { type => 'integer', description => 'Forum topic to answer in (optional)' },
         ),
         text    => { type => 'string',  description => 'Message body (Markdown)' },
       },
@@ -102,6 +111,9 @@ sub build_hall_tools_server {
           $target{$key} = $bound->{$key};
         }
       }
+      # The forum topic comes with the target: bound, from the hall only.
+      my $thread = $bound ? $bound->{message_thread_id} : $in->{message_thread_id};
+      $target{message_thread_id} = $thread if defined $thread;
       my $r = _call($sock, 'telegram_reply', %target, text => $in->{text});
       return $tool->text_result("Error: $r->{error}", 1) if $r->{error};
       return $tool->text_result('sent');
