@@ -28,6 +28,27 @@ Revision history for Langertha-Raider
     - A raider whose engines (engine, compression_engine, engine_catalog)
       sit on different event loops fails at the start of raid_f and
       respond_f, naming the engine, instead of hanging.
+    - Raider fixes that landed in Langertha core before the extraction and
+      reach CPAN with this release:
+      - A raid paused by an interactive self-tool (raider_ask_user etc.)
+        in the middle of a parallel-tool batch no longer re-runs the calls
+        that completed before it or drops the self-tools queued after it:
+        respond_f resumes with only the calls after the pausing one, so
+        side effects fire once and every tool_use gets exactly one
+        tool_result (strict providers such as Anthropic rejected the
+        duplicates with a 400).
+      - session_history keeps tool_call and tool_result turns as
+        structured blocks, so history replayed into a later raid (and the
+        embedding text derived from it) no longer stringifies or drops
+        them. New clear_session_history empties session_history and its
+        embeddings together.
+      - A plugin_before_llm_call that returns a fresh conversation now
+        also updates what a paused raid resumes with, so respond_f keeps
+        every assistant and tool_result message from before the pause.
+      - Langertha::Raider::Result is always true in boolean context
+        (overload bool => 1), so `if (my $r = $raider->raid(...))` no
+        longer skips question, pause and abort results with empty text.
+        Stringification is unchanged.
     - Fix filesystem confinement to reject symlink escapes for read and
       write operations, with regression tests.
     - Fix WebTools sync wrappers to await IO::Async futures through the
