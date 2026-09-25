@@ -52,7 +52,9 @@ exit 0;
 PERL
 
 sub fake_hall {
+  my ( $yml ) = @_;
   my $tmp = path( tempdir( CLEANUP => 1 ) );
+  $tmp->child('.raider-hall.yml')->spew_utf8($yml) if defined $yml;
   my $bin = $tmp->child('fake-raider');
   $bin->spew_utf8( "#!$^X\n".$FAKE );
   $bin->chmod(0755);
@@ -175,6 +177,78 @@ subtest 'a killed raider is a clear failure, not raw text' => sub {
   is( $done->{status}, 'failed', 'failed' );
   like( $done->{error}, qr/^raider bjorn-\d+ ended without a result \(killed by signal 9\)$/,
     'error names the run and the signal' );
+};
+
+subtest 'the slot log ends each run with a readable result line' => sub {
+  my ( $hall, $tmp ) = fake_hall();
+  my $log = $tmp->child( '.raider-hall', 'logs', 'bjorn.log' );
+  my ($ok) = run_spawns( $hall, { name => 'bjorn', mission => "two\nlines" } );
+  my @lines = $log->lines_utf8({ chomp => 1 });
+  is( $lines[-1], '[hall] raider '.$ok->{id}.' completed: answer: two lines',
+    'status and response, whitespace folded onto one line, last in the log' );
+
+  my ($fail) = run_spawns( $hall, { name => 'bjorn', mission => 'killed' } );
+  @lines = $log->lines_utf8({ chomp => 1 });
+  is( $lines[-1], '[hall] raider '.$fail->{id}.' failed: '.$fail->{error},
+    'a failure line carries the error' );
+
+  my ($long) = run_spawns( $hall, { name => 'bjorn', mission => 'x' x 2000 } );
+  @lines = $log->lines_utf8({ chomp => 1 });
+  like( $lines[-1], qr/^\[hall\] raider \Q$long->{id}\E completed: answer: x+\.\.\.$/,
+    'a long response is cut' );
+  cmp_ok( length $lines[-1], '<', 400, 'to a short line' );
+  is( scalar( grep { /^\[hall\]/ } @lines ), 3, 'one result line per run' );
+};
+
+subtest 'run IDs stay unique within the same second' => sub {
+  my ( $hall, $tmp ) = fake_hall();
+  my $logs = $tmp->child( '.raider-hall', 'logs' );
+  $logs->mkpath;
+  my $now = time;
+  my %taken = map { ( "bjorn-$_" => 1 ) } $now .. $now + 5;
+  $logs->child("$_.events.jsonl")->spew_utf8("keep\n") for keys %taken;
+  my ($done) = run_spawns( $hall, { name => 'bjorn', mission => 'hello' } );
+  like( $done->{id}, qr/^bjorn-\d+\.\d+$/, 'a taken ID gets a counter suffix' );
+  ok( !$taken{ $done->{id} }, 'no existing ID reused' );
+  is( $done->{response}, 'answer: hello', 'the run reads its own events' );
+  is( [ grep { $_->slurp_utf8 ne "keep\n" } map { $logs->child("$_.events.jsonl") } keys %taken ],
+    [], 'earlier events files untouched' );
+
+  my @queued = run_spawns( $hall,
+    { name => '1ivar', mission => 'alpha' },
+    { name => '1ivar', mission => 'beta' } );
+  isnt( $queued[0]{id}, $queued[1]{id}, 'back-to-back queued runs get distinct IDs' );
+  is( Langertha::Raider::Hall::Raider->new( id => 'x', slot_name => 'x', base_name => 'x',
+      mission => 'm', log_path => $tmp->child('x.log'),
+      events_path => $logs->child( $queued[0]{id}.'.events.jsonl' ) )->run_finished->{response},
+    'answer: alpha', 'the first run keeps its own events file' );
+};
+
+subtest 'only the newest events files of a slot are kept' => sub {
+  my ( $hall, $tmp ) = fake_hall("logs:\n  keep_events: 2\n");
+  my $logs = $tmp->child( '.raider-hall', 'logs' );
+  $logs->mkpath;
+  my @foreign = map { $logs->child($_) }
+    'bjorn-x-100.events.jsonl', 'bjorn-5-100.events.jsonl', 'other-100.events.jsonl', 'bjorn.log.keep';
+  $_->spew_utf8("foreign\n") for @foreign;
+  $logs->child('bjorn-100.events.jsonl')->spew_utf8("old\n");
+  my @done = map { run_spawns( $hall, { name => 'bjorn', mission => "run$_" } ) } 1 .. 3;
+  my @left = sort map { $_->basename } grep { $_->basename =~ /^bjorn-\d+(?:\.\d+)?\.events\.jsonl$/ } $logs->children;
+  is( \@left, [ sort map { $_->{id}.'.events.jsonl' } @done[ 1, 2 ] ], 'the last two runs remain' );
+  ok( ( !grep { !$_->exists } @foreign ), 'other slots and other files untouched' );
+  ok( $logs->child('bjorn.log')->exists, 'the slot log stays' );
+};
+
+subtest 'events files are kept by default, keep_events 0 keeps all' => sub {
+  for my $yml ( undef, "logs:\n  keep_events: 0\n" ) {
+    my ( $hall, $tmp ) = fake_hall($yml);
+    my $logs = $tmp->child( '.raider-hall', 'logs' );
+    $logs->mkpath;
+    $logs->child("bjorn-$_.events.jsonl")->spew_utf8("old\n") for 100 .. 124;
+    run_spawns( $hall, { name => 'bjorn', mission => 'hello' } );
+    my $n = grep { $_->basename =~ /^bjorn-.*\.events\.jsonl$/ } $logs->children;
+    is( $n, defined $yml ? 26 : 20, defined $yml ? 'keep_events 0: nothing removed' : 'default: the last 20' );
+  }
 };
 
 {

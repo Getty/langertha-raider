@@ -46,6 +46,13 @@ to the human-readable F<.raider-hall/logs/SLOT.log>. When the process
 ends, C<raider.done> carries C<status> and C<response> or C<error> from
 the run's last C<run.finished> event. A run that ended without one
 (killed, crashed) is C<failed>, with an error saying so.
+The hall then appends one line to the slot log,
+C<[hall] raider ID STATUS: TEXT> with the response or error cut to 300
+characters, so C<raider hall logs> shows the outcome.
+
+Run IDs are C<SLOT-TIME>, with C<.2>, C<.3>, ... appended when a run of the
+same slot started in the same second. Only the newest L</keep_events>
+events files per slot are kept.
 
 =head1 CONFIG FILE
 
@@ -62,6 +69,7 @@ C<.raider-hall.yml> in the hall root:
       bots:
         ops: { token: '...', allowlist: [42], routing: { '*': lagertha } }
     acp: { port: 38421, host: 127.0.0.1 }
+    logs: { keep_events: 20 }
 
 C<engine> on a raider entry is optional. Without it the hall passes no
 C<--engine> and the spawned raider decides itself: the engine from its
@@ -480,16 +488,20 @@ sub _reap_raider {
   return unless $raider;
 
   my $slot = $raider->slot_name;
+  my $result = $self->_raider_result($raider, $status);
+  # Before the raider leaves the table: logs --follow stops once it is gone.
+  $self->_log_result($raider, $result);
   $self->_emit('raider.done', {
     id => $raider->id,
     slot => $slot,
     pid => $pid,
     exit_code => $status >> 8,
     signaled => ($status & 127) ? 1 : 0,
-    %{ $self->_raider_result($raider, $status) },
+    %$result,
   });
 
   delete $self->raiders->{$slot};
+  $self->_prune_events($slot);
 
   if ($slot =~ /^\d+(.+)$/) {
     my $base = $1;
@@ -522,6 +534,54 @@ sub _raider_result {
     status => 'failed',
     error  => 'raider '.$raider->id.' ended without a result ('.$how.')',
   };
+}
+
+# One human-readable line per finished run at the end of the slot log, so
+# logs and logs --follow show the outcome next to the raider's stderr. The
+# full response stays in raider.done and the events file.
+sub _log_result {
+  my ($self, $raider, $result) = @_;
+  my $text = $result->{status} eq 'completed' ? $result->{response} : $result->{error};
+  $text = join ' ', split ' ', $text // '';
+  $text = substr($text, 0, 300).'...' if length $text > 300;
+  $raider->log_path->append_utf8(
+    '[hall] raider '.$raider->id.' '.$result->{status}.': '.$text."\n");
+}
+
+=attr keep_events
+
+How many F<SLOT-TIME.events.jsonl> files the hall keeps per slot; older ones
+are removed when a run of that slot ends. From C<logs: { keep_events: N }>
+in F<.raider-hall.yml>, default 20; 0 keeps all of them. Slot logs
+(F<SLOT.log>) are not pruned.
+
+=cut
+
+has keep_events => (
+  is => 'ro',
+  lazy => 1,
+  builder => '_build_keep_events',
+);
+
+sub _build_keep_events {
+  my ($self) = @_;
+  my $logs = $self->config->{logs} // {};
+  return $logs->{keep_events} // 20;
+}
+
+sub _log_dir { $_[0]->root->child('.raider-hall', 'logs') }
+
+sub _prune_events {
+  my ($self, $slot) = @_;
+  my $keep = $self->keep_events;
+  my $dir = $self->_log_dir;
+  return unless $keep > 0 && -d $dir;
+  # SLOT-TIME or SLOT-TIME.N: the hyphen before TIME keeps SLOT-x-TIME of
+  # another slot out.
+  my @runs = sort { $a->[1] <=> $b->[1] || $a->[2] <=> $b->[2] }
+    map { $_->basename =~ /^\Q$slot\E-(\d+)(?:\.(\d+))?\.events\.jsonl$/ ? [ $_, $1, $2 // 1 ] : () }
+    $dir->children;
+  $_->[0]->remove for @runs[ 0 .. $#runs - $keep ];
 }
 
 sub _find_raider_by_pid {
@@ -601,14 +661,19 @@ sub _spawn_raider {
   # Mission is one single argv (bin/raider does join(' ', @ARGV)).
   push @cmd, '--', $mission;
 
-  my $log_dir = $self->root->child('.raider-hall', 'logs');
+  my $log_dir = $self->_log_dir;
   $log_dir->mkpath unless -d $log_dir;
 
   # stderr is the human-readable log, appended across runs of the slot;
-  # stdout is the event stream, a fresh file per run.
+  # stdout is the event stream, a fresh file per run. The ID is SLOT-TIME,
+  # SLOT-TIME.2 and up when that one is taken in the same second; touching
+  # the file reserves it before the child opens it.
   my $log_path = $log_dir->child("${slot}.log");
-  my $id = "$slot-" . time;
+  my $id = my $base_id = "$slot-" . time;
+  my $n = 1;
+  $id = $base_id.'.'.++$n while -e $log_dir->child("${id}.events.jsonl");
   my $events_path = $log_dir->child("${id}.events.jsonl");
+  $events_path->touch;
 
   my $lib_path = $self->_raider_lib_path($base_name);
   my $extra_perl5lib = join ':', grep { defined && length } ($lib_path,
