@@ -13,7 +13,6 @@ raiders:
     model:   gpt-4o-mini
     persona: caveman
     packs:   [git-guru, perl-hacker]
-    mcp:     []
 
   # Reviewer. Anthropic, slower + more thoughtful.
   lagertha:

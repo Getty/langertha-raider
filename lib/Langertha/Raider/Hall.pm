@@ -99,6 +99,13 @@ C<.raider-hall.yml> in the hall root:
     logs: { keep_events: 20, max_log_size: 1048576 }
     cancel_grace: 5
 
+C<persona> on a raider entry is a pack used as the raider's persona: the
+hall passes it as one more C<--pack>, after those in C<packs>, unless
+C<packs> already names it. The hall ignores C<mcp> and C<isolated> on a
+raider entry; the first run of such a raider notes that in its slot log.
+
+C<preferred_lib_target> sets the hall's L</lib_target>.
+
 C<engine> on a raider entry is optional. Without it the hall passes no
 C<--engine> and the spawned raider decides itself: the engine from its
 F<.raider.yml> first, then autodetection from the API keys in the
@@ -1085,15 +1092,19 @@ sub _spawn_raider {
   # No engine configured: leave it to raider (.raider.yml, then key autodetection).
   my $engine = $raider_config->{engine};
   my $model = $raider_config->{model};
-  my $packs = $raider_config->{packs} // [];
-  my $mcp = $raider_config->{mcp} // [];
-  my $isolated = $raider_config->{isolated} // 0;
+  my @packs = @{ $raider_config->{packs} // [] };
+  # The persona is one more pack.
+  my $persona = $raider_config->{persona};
+  push @packs, $persona
+    if defined $persona && length $persona && !grep { $_ eq $persona } @packs;
+  my $lib_target = $self->lib_target;
 
   my $raider_bin = $self->_raider_bin;
   my @cmd = ($^X, $raider_bin, '--stream-json');
   push @cmd, '--engine', $engine if $engine;
   push @cmd, '--model', $model if $model;
-  push @cmd, '--pack', $_ for @$packs;
+  push @cmd, '--pack', $_ for @packs;
+  push @cmd, '-o', 'preferred_lib_target='.$lib_target;
   push @cmd, '--root', $self->root->stringify;
   # A bound run resumes its binding's session; an unbound one gets a
   # fresh session from the raider itself.
@@ -1125,10 +1136,11 @@ sub _spawn_raider {
   my $events_path = $log_dir->child("${id}.events.jsonl");
   $events_path->touch;
   $log_path->append_utf8($self->_start_line($id));
+  $self->_note_ignored_keys($base_name, $raider_config, $log_path);
 
-  my $lib_path = $self->_raider_lib_path($base_name);
-  my $extra_perl5lib = join ':', grep { defined && length } ($lib_path,
-    ($self->config->{longhouse} ? $self->longhouse_lib_path->stringify : ()));
+  # perl_cpanm installs with --local-lib, so the modules land in lib/perl5.
+  my $extra_perl5lib = join ':', path($lib_target)->child('lib', 'perl5')->stringify,
+    ($self->config->{longhouse} ? $self->longhouse_lib_path->stringify : ());
 
   # The Telegram chat (and forum topic) this raider answers; telegram_reply
   # is bound to it. Never inherited from the hall's own env.
@@ -1214,12 +1226,41 @@ sub _raider_bin {
   die "Cannot find 'raider' binary (set RAIDER_HALL_RAIDER_BIN or put it in \$PATH)";
 }
 
-sub _raider_lib_path {
-  my ($self, $base_name) = @_;
-  if ($self->config->{longhouse}) {
-    return $self->longhouse_lib_path->stringify;
-  }
-  return $self->root->child('.raider-hall', 'raiders', $base_name, 'lib')->stringify;
+=attr lib_target
+
+The local::lib the hall's raiders install into with C<perl_cpanm>:
+C<preferred_lib_target> of the config, relative to the hall root, default
+F<.raider/lib>. Each raider gets it as C<-o preferred_lib_target=...>, which
+beats that key in a F<.raider.yml>, and its F<lib/perl5> on C<PERL5LIB>.
+
+=cut
+
+has lib_target => (
+  is => 'ro',
+  lazy => 1,
+  builder => '_build_lib_target',
+);
+
+sub _build_lib_target {
+  my ($self) = @_;
+  my $target = $self->config->{preferred_lib_target} // '.raider/lib';
+  return path($target)->absolute($self->root)->stringify;
+}
+
+# Raider entry keys the hall does not read. A config that still carries
+# one gets a note in the slot log, once per raider and hall process.
+has _ignored_keys_noted => (
+  is => 'ro',
+  default => sub { {} },
+);
+
+sub _note_ignored_keys {
+  my ($self, $base_name, $raider_config, $log_path) = @_;
+  return if $self->_ignored_keys_noted->{$base_name}++;
+  my @keys = grep { exists $raider_config->{$_} } qw( isolated mcp );
+  return unless @keys;
+  $log_path->append_utf8('[hall] raider '.$base_name.': '.join(', ', @keys)
+    ." in .raider-hall.yml ignored\n");
 }
 
 sub ps {

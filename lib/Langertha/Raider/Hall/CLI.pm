@@ -114,13 +114,10 @@ sub run_init {
   # No --engine: no engine key, the spawned raider decides itself.
   my %yml;
   $yml{longhouse} = 0;
-  $yml{preferred_lib_target} = '.raider-hall/lib';
   $yml{raiders}{$name} = {
     ($opt{engine} ? (engine => $opt{engine}) : ()),
     persona => $persona,
     packs => [],
-    mcp => [],
-    isolated => 0,
   };
 
   my $cfg_file = path($dir)->child('.raider-hall.yml');
@@ -139,7 +136,7 @@ sub run_add_raider {
   my %opt;
   local @ARGV = @args;
   Getopt::Long::GetOptions(\%opt,
-    'engine=s', 'persona=s', 'model=s', 'pack=s@', 'isolated', 'help');
+    'engine=s', 'persona=s', 'model=s', 'pack=s@', 'help');
   return print_add_raider_help() if $opt{help};
 
   my $name = shift @ARGV;
@@ -161,8 +158,6 @@ sub run_add_raider {
     persona  => $opt{persona} // 'caveman',
     ($opt{model} ? (model => $opt{model}) : ()),
     packs    => $opt{pack} // [],
-    mcp      => [],
-    isolated => $opt{isolated} ? 1 : 0,
   };
 
   $cfg_file->spew_utf8(YAML::PP->new->dump_string($yml));
@@ -178,10 +173,9 @@ Append a raider entry to .raider-hall.yml.
 
 Options:
   --engine NAME      Engine (default: none, the raider decides)
-  --persona NAME     Persona pack (default: caveman)
+  --persona NAME     A pack used as the raider's persona (default: caveman)
   --model NAME       Model override
   --pack NAME        Additional pack (repeatable)
-  --isolated         Run the raider in its own lib
 EOF
   exit 0;
 }
@@ -192,6 +186,11 @@ raider hall init [--name NAME] [--engine ENGINE] [--persona PERSONA]
 
 Bootstrap a new hall directory with a starter .raider-hall.yml.
 Prompts interactively if --name not provided.
+
+Options:
+  --name NAME        Name of the first raider
+  --engine NAME      Engine (default: none, the raider decides)
+  --persona NAME     A pack used as the raider's persona (default: caveman)
 EOF
   exit 0;
 }

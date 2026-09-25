@@ -54,6 +54,8 @@ subtest 'init: writes .raider-hall.yml with the given/default values' => sub {
   is( $yml->{longhouse}, 0, 'longhouse off by default' );
   ok( !exists $yml->{raiders}{Bjorn}{engine}, 'no engine: the raider decides itself' );
   is( $yml->{raiders}{Bjorn}{persona}, 'caveman', 'default persona' );
+  ok( !exists $yml->{raiders}{Bjorn}{$_}, 'no '.$_.' key' ) for qw( mcp isolated );
+  ok( !exists $yml->{preferred_lib_target}, 'no preferred_lib_target: the hall default applies' );
 };
 
 subtest 'init: --engine/--persona override the defaults' => sub {
@@ -83,12 +85,12 @@ subtest 'init: prompts on STDIN when --name is omitted' => sub {
 subtest 'add-raider: appends to an existing config, keeps the other raider' => sub {
   my $tmp = tempdir( CLEANUP => 1 );
   path($tmp)->child('.raider-hall.yml')->spew_utf8( YAML::PP->new->dump({
-    raiders => { Bjorn => { engine => 'anthropic', persona => 'caveman', packs => [], mcp => [], isolated => 0 } },
+    raiders => { Bjorn => { engine => 'anthropic', persona => 'caveman', packs => [] } },
   }) );
 
   my ( $rv, $out, $died ) = run_hall_cli_in( $tmp, undef, 'add-raider', 'Astrid',
     '--engine', 'openai', '--persona', 'scholar', '--model', 'gpt-4o-mini',
-    '--pack', 'git-guru', '--pack', 'polite', '--isolated' );
+    '--pack', 'git-guru', '--pack', 'polite' );
   is( $died, undef, 'lives' );
   like( $out, qr/Added raider 'Astrid'/, 'confirmation' );
 
@@ -97,7 +99,7 @@ subtest 'add-raider: appends to an existing config, keeps the other raider' => s
   is( $yml->{raiders}{Astrid}{persona}, 'scholar', 'persona' );
   is( $yml->{raiders}{Astrid}{model}, 'gpt-4o-mini', 'model' );
   is( $yml->{raiders}{Astrid}{packs}, ['git-guru', 'polite'], 'repeated --pack collected in order' );
-  is( $yml->{raiders}{Astrid}{isolated}, 1, 'isolated flag' );
+  ok( !exists $yml->{raiders}{Astrid}{$_}, 'no '.$_.' key' ) for qw( mcp isolated );
   ok( exists $yml->{raiders}{Bjorn}, 'existing raider preserved' );
 };
 

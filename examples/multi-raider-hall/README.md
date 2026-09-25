@@ -124,13 +124,15 @@ surfaces on the host via the bind-mount) and the output tells you to
 
 A few things worth knowing:
 
-- `longhouse: true` shares one `local::lib` across all raiders (fast
-  CPAN installs, one shared state). Default is per-raider libs.
+- `longhouse: true` adds `longhouse/lib` of the hall to every
+  raider's `PERL5LIB`.
 - `coalesce: true` on a cron entry drops a run if the previous one is
   still going. Default (off) falls through to 1name queueing — safer
   for idempotent jobs, louder for pile-ups.
-- `preferred_lib_target` in `.raider-hall.yml` overrides where
-  `perl_cpanm` installs by default.
+- `preferred_lib_target` in `.raider-hall.yml` is the `local::lib`
+  every raider of the hall installs into with `perl_cpanm` (default
+  `.raider/lib`); its `lib/perl5` is on each raider's `PERL5LIB`.
+- `persona:` on a raider is a pack, passed as one more `--pack`.
 - Event-bus subscribers (anyone who opens the unix socket and sends
   `{"type":"subscribe"}`) can filter by type prefix — `"raider."`
   gives you all raider lifecycle events without the cron/telegram
