@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T04:59:21Z
+claimed_by: worker-session
+class: standard
+completed: 2026-09-25T04:59:21Z
+created: 2026-09-25T04:17:51Z
+id: 70
+priority: medium
+started: 2026-09-25T04:59:21Z
+status: done
+tags:
+- sessions
+- cli
+title: 'Session-Nacharbeiten: Kurz-IDs, /clear im Journal, PerlTools-.gitignore, Journal-Schreibfehler,
+  Aufraeumen'
+updated: 2026-09-25T04:59:21Z
+---
+
+Aus #65-67: (1) README nutzt Kurz-IDs (resume 3f2a) - eindeutige Praefixe akzeptieren. (2) /clear im REPL wird nicht journalisiert, Resume holt geloeschte History zurueck -> Event (z.B. history.cleared) und beim Resume beachten. (3) PerlTools legt .raider/lib ohne .gitignore an -> SessionStore-Helper nutzen. (4) Fehlgeschlagener Journal-Write mitten im Lauf (Disk voll) croakt und bricht den Lauf -> Warnung, Lauf geht weiter (wie beim Anlegen). (5) Main::_config_error und Output::error_text zusammenfuehren; t/50 nutzt eigene Engine-Kopie statt t/lib.
