@@ -20,13 +20,14 @@ use Time::HiRes ();
 
 B<Internal module.> Its interface may change without notice.
 
-Runs one prompt through L<Langertha::Raider::CLI/run> and renders the
-outcome: the agent's answer plus a status line (elapsed seconds, history
-size against the context budget, token usage when tracing), or with a
-C<machine> (L<Langertha::Raider::CLI::Machine>) the run's document -- and,
-when that machine streams, the C<run.started>, C<run.state> and C<message>
-events around it. The same events, with the tool calls, go into a session
-journal when one is given.
+Runs one prompt through
+L<Langertha::Raider::Application/run_prompt>, which records the run in
+the session journal, and renders the outcome: the agent's answer plus a
+status line (elapsed seconds, history size against the context budget,
+token usage when tracing), or with a C<machine>
+(L<Langertha::Raider::CLI::Machine>) the run's document -- and, when that
+machine streams, the C<run.started>, C<run.state>, C<message> and tool
+events the application hands it. It also owns the signals of a run.
 
 =attr app
 
@@ -60,7 +61,7 @@ has err => (
   default => sub { \*STDERR },
 );
 
-# The run in progress: { machine, session, run, t0 }.
+# The run in progress: { machine, t0 }.
 has _current => (
   is       => 'rw',
   init_arg => undef,
@@ -75,13 +76,11 @@ Returns true when the run finished, false when it failed (the error is
 printed, or with C<machine> is the C<failed> document). An empty prompt runs
 nothing and counts as finished.
 
-With a C<session> (L<Langertha::Raider::Session>) the run is recorded in
-its journal as the session's next run (ADR 0015): C<run.started>, the user
-input as C<message>, every C<tool.call> and C<tool.result> with the whole
-result text, the final answer as C<message>, and C<run.finished> with the
-end state -- also when the run failed or was interrupted. A machine
-document then names the session in C<session> (C<id>, C<path>). A journal
-write that fails is a warning (L</record>); the run goes on.
+With a C<session> (L<Langertha::Raider::Session>) the application records
+the run in its journal (L<Langertha::Raider::Application/run_prompt>),
+also when it failed or was interrupted; a machine document then names the
+session in C<session> (C<id>, C<path>). A journal write that fails is a
+warning (L</journal_error>); the run goes on.
 
 With C<catch_signals>, a C<SIGINT> or C<SIGTERM> during the run ends it as
 C<interrupted>: see L</interrupt>.
@@ -94,41 +93,29 @@ sub run_prompt {
   my $app = $self->app;
   my $out = $self->output;
   my $machine = $o{machine};
-  my $session = $o{session};
   my $t0 = Time::HiRes::time();
-  $self->_current({
-    machine => $machine,
-    session => $session,
-    run     => $session ? $session->next_run : undef,
-    t0      => $t0,
-  });
+  $self->_current({ machine => $machine, t0 => $t0 });
 
   # Handled right in the signal handler: a die from it would be swallowed
   # by whichever eval the run happens to be in (LWP, the raid loop).
   local $SIG{INT}  = $o{catch_signals} ? sub { $self->interrupt(INT  => $machine, $self->elapsed_since($t0)) } : $SIG{INT};
   local $SIG{TERM} = $o{catch_signals} ? sub { $self->interrupt(TERM => $machine, $self->elapsed_since($t0)) } : $SIG{TERM};
 
-  $self->event('run.started', engine => $app->engine_name, $app->has_model ? ( model => $app->model ) : ());
-  $self->event('run.state', state => 'running');
-  $self->_journal('message', role => 'user', content => $text);
+  my $end = $app->run_prompt($text,
+    ( $o{session} ? ( session => $o{session} ) : () ),
+    on_event => sub { $self->event(@_) },
+  );
+  $self->_clear_current;
 
-  my $result;
-  my $ok = eval { $result = $app->run($text); 1 };
-  my $elapsed = $self->elapsed_since($t0);
-
-  unless ($ok) {
-    my $err = $@; chomp $err;
-    $out->say_error($err) unless $machine;
-    return $self->_finish(failed => error => $err, elapsed => $elapsed);
+  if ($end->{status} ne 'completed') {
+    $out->say_error($end->{error}) unless $machine;
+    return $self->_document($machine, $end);
   }
+  return $self->_document($machine, $end) if $machine;
+
+  $out->say_agent($end->{response});
 
   my $r = $app->raider;
-  $self->event('message', role => 'assistant', content => "$result");
-  my $completed = $self->_finish(completed => response => "$result", metrics => $r->metrics, elapsed => $elapsed);
-  return $completed if $machine;
-
-  $out->say_agent("$result");
-
   my $tok = $app->token_stats;
   my $tok_part = $tok
     ? sprintf(' | tokens %d in / %d out / %d total', $tok->{prompt}, $tok->{completion}, $tok->{total})
@@ -138,7 +125,7 @@ sub run_prompt {
   my $cap  = $r->max_context_tokens;
   my $pct  = $cap ? int(100 * $last / $cap) : 0;
   $out->say_meta(sprintf('%ds | history %d msgs, %d/%d tok (%d%%)%s',
-    $elapsed, $msgs, $last, $cap, $pct, $tok_part));
+    $end->{elapsed}, $msgs, $last, $cap, $pct, $tok_part));
   return 1;
 }
 
@@ -147,9 +134,10 @@ sub run_prompt {
     $runner->interrupt(TERM => $machine, $elapsed);
 
 Ends a run interrupted by the signal: ends the tool subprocesses still
-running (L</terminate_children>), prints a note, or with a C<machine>
-writes the C<interrupted> state change and document (with the C<signal>),
-then dies of that same signal through L</die_of_signal>.
+running (L</terminate_children>), ends the application's run as
+C<interrupted> (with the C<signal>), prints a note, or with a C<machine>
+writes the C<interrupted> document, then dies of that same signal through
+L</die_of_signal>.
 
 With a C<machine> it also works as a class method, which
 L<Langertha::Raider::CLI::Main> uses for a signal during startup, before
@@ -165,10 +153,11 @@ sub interrupt {
   local $SIG{TERM} = 'IGNORE';
   $self->terminate_children;
   if (ref $self && $self->_current) {
-    $self->_finish(interrupted => signal => $signal, elapsed => $elapsed);
+    $self->abandon($signal);
   }
   elsif ($machine) {
-    $self->_finish_machine($machine, interrupted => signal => $signal, elapsed => $elapsed);
+    $machine->event('run.state', state => 'interrupted');
+    $self->_document($machine, { status => 'interrupted', signal => $signal, elapsed => $elapsed });
   }
   unless ($machine) {
     $self->output->say_meta('interrupted (SIG'.$signal.')');
@@ -191,7 +180,16 @@ left during a run.
 sub abandon {
   my ( $self, $signal ) = @_;
   my $current = $self->_current or return;
-  $self->_finish(interrupted => signal => $signal, elapsed => $self->elapsed_since($current->{t0}));
+  # Still current, so the run.state of end_run reaches the stream.
+  my $end = $self->app->end_run(interrupted => signal => $signal);
+  $self->_clear_current;
+  my $machine = $current->{machine} or return;
+  unless ($end) {
+    # Interrupted before the application started the run.
+    $end = { status => 'interrupted', signal => $signal, elapsed => $self->elapsed_since($current->{t0}) };
+    $machine->event('run.state', state => 'interrupted');
+  }
+  $self->_document($machine, $end);
   return;
 }
 
@@ -199,32 +197,19 @@ sub abandon {
 
     $runner->event('tool.call', call => 'c1', name => 'bash', arguments => { ... });
 
-One event of the run in progress, handed to every consumer: the machine
-stream (L<Langertha::Raider::CLI::Machine/event>) and, for the event types
-it records, the session journal, with the run's C<run> id. The app's
-C<on_event> (tool calls and results) comes in here. Outside a run it does
-nothing.
+One event of the run in progress, as the application hands it on: into
+the machine stream (L<Langertha::Raider::CLI::Machine/event>), except the
+user's own input -- a stream C<message> is the agent's (ADR 0013).
+Outside a run it does nothing.
 
 =cut
-
-# The ADR 0015 event types the journal records from the shared events;
-# run.finished is written by _finish.
-my %JOURNAL_TYPE = map { $_ => 1 } qw( run.started message tool.call tool.result );
 
 sub event {
   my ( $self, $type, %payload ) = @_;
   my $current = $self->_current or return;
-  $current->{machine}->event($type, %payload) if $current->{machine};
-  $self->_journal($type, %payload) if $JOURNAL_TYPE{$type};
-  return;
-}
-
-# One event into the session journal of the run in progress, if any.
-sub _journal {
-  my ( $self, $type, %payload ) = @_;
-  my $current = $self->_current or return;
-  return unless $current->{session};
-  $self->_append($current, $type, run => $current->{run}, %payload);
+  my $machine = $current->{machine} or return;
+  return if $type eq 'message' && ($payload{role} // '') eq 'user';
+  $machine->event($type, %payload);
   return;
 }
 
@@ -232,29 +217,32 @@ sub _journal {
 
     $runner->record($session, 'history.cleared');
 
-Appends one event outside a run to the session journal. Like every
-journal write of the runner, a write that fails (a full disk) is a warning
-on L</err>, C<warning: session ID not fully saved: ...>, and returns false
--- it never stops the run; within a run only the first failure is
-reported.
+Appends one event outside a run to the session journal
+(L<Langertha::Raider::Application/record>). A write that fails is a
+warning (L</journal_error>) and returns false.
 
 =cut
 
 sub record {
   my ( $self, $session, $type, %fields ) = @_;
-  return $self->_append({ session => $session }, $type, %fields);
+  return $self->app->record($session, $type, %fields);
 }
 
-# Appends to the session of $current (a run, or just { session }); warns
-# once per $current when it fails.
-sub _append {
-  my ( $self, $current, $type, %fields ) = @_;
-  my $session = $current->{session};
-  return 1 if eval { $session->append($type, %fields); 1 };
-  my $error = $self->output->error_text($@);
-  return 0 if $current->{journal_failed}++;
-  print { $self->err } 'warning: session '.$session->id.' not fully saved: '.$error."\n";
-  return 0;
+=method journal_error
+
+    $runner->journal_error($session, $error);
+
+Reports a session journal that cannot be written on L</err>, C<warning:
+session ID not fully saved: ...>: the application's
+L<Langertha::Raider::Application/on_journal_error>, which reports only the
+first failure of a run.
+
+=cut
+
+sub journal_error {
+  my ( $self, $session, $error ) = @_;
+  print { $self->err } 'warning: session '.$session->id.' not fully saved: '.$self->output->error_text($error)."\n";
+  return;
 }
 
 =method die_of_signal
@@ -360,30 +348,16 @@ sub elapsed_since {
   return 0 + sprintf('%.3f', Time::HiRes::time() - $t0);
 }
 
-# The last state change and the document; true for a completed run.
-# Ends the run in progress: run.finished into the journal (with the run's
-# metrics when the raider has them), then the machine's last state change
-# and document, which names the session. True for a completed run.
-sub _finish {
-  my ( $self, $status, %fields ) = @_;
-  my $current = $self->_current;
-  $self->_clear_current;
-  if (my $session = $current->{session}) {
-    my $metrics = $fields{metrics} // eval { $self->app->raider->metrics };
-    $self->_append($current, 'run.finished', run => $current->{run}, status => $status,
-      ( map { defined $fields{$_} ? ( $_ => $fields{$_} ) : () } qw( error signal elapsed ) ),
-      $metrics ? ( metrics => $metrics ) : ());
-    $fields{session} = { id => $session->id, path => ''.$session->path };
+# The document of a run that ended ($end as from end_run, plus response
+# and metrics of a completed one) when there is a machine; true for a
+# completed run.
+sub _document {
+  my ( $self, $machine, $end ) = @_;
+  if ($machine) {
+    $machine->finish($machine->document($end->{status},
+      map { exists $end->{$_} ? ( $_ => $end->{$_} ) : () } qw( response metrics error signal elapsed session )));
   }
-  return $self->_finish_machine($current->{machine}, $status, %fields) if $current->{machine};
-  return $status eq 'completed' ? 1 : 0;
-}
-
-sub _finish_machine {
-  my ( $self, $machine, $status, %fields ) = @_;
-  $machine->event('run.state', state => $status);
-  $machine->finish($machine->document($status, %fields));
-  return $status eq 'completed' ? 1 : 0;
+  return $end->{status} eq 'completed' ? 1 : 0;
 }
 
 __PACKAGE__->meta->make_immutable;
@@ -395,6 +369,8 @@ __PACKAGE__->meta->make_immutable;
 =over
 
 =item * L<Langertha::Raider::CLI::Main>
+
+=item * L<Langertha::Raider::Application>
 
 =back
 

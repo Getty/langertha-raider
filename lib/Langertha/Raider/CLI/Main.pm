@@ -447,11 +447,10 @@ sub run {
   my $machine = $opt->{machine}
     ? $self->machine_class->new(%{ $opt->{machine} }, out => $self->output->out)
     : undef;
-  # The runner, made once the app exists, hands the tool events on to the
-  # stream and the session journal.
+  # The runner, made once the app exists, reports a session journal that
+  # cannot be written.
   my $runner;
-  $args{on_event} = sub { $runner->event(@_) if $runner }
-    if !$opt->{no_session} || ($machine && $machine->stream);
+  $args{on_journal_error} = sub { $runner->journal_error(@_) if $runner };
 
   # A machine consumer gets its interrupted document also for a signal
   # during startup (configuration, reading the prompt); the runner takes

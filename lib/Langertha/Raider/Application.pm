@@ -8,6 +8,8 @@ use Future::AsyncAwait;
 use Net::Async::MCP;
 use MCP::Run::Bash;
 use Path::Tiny;
+use Scalar::Util qw( weaken );
+use Time::HiRes ();
 use Langertha::Raider::HallTools qw( build_hall_tools_server );
 
 use Langertha::Raider::FileTools qw( build_file_tools_server );
@@ -45,7 +47,9 @@ packs (L<Langertha::Raider::Packs>, ADR 0012), compiles the mission (ADR
 (L<Langertha::Raider::PerlTools>) when granted, the Hall tools when
 spawned by a Hall -- and builds the L<Langertha::Raider> that runs the
 raids. It opens, creates and replays the sessions of the project
-(L</session_store>, ADR 0015). It prints nothing; presentation such as the live trace belongs to
+(L</session_store>, ADR 0015) and records every run in the session's
+journal (L</run_prompt>), handing the run's events on to the surface. It
+prints nothing; presentation such as the live trace belongs to
 the surface, see L<Langertha::Raider::CLI>.
 
 =cut
@@ -312,9 +316,10 @@ has max_iterations => (
 =attr on_event
 
 Optional code reference called as C<< $on_event->($type, %payload) >> for
-every C<tool.call> and C<tool.result> of a raid, through
-L<Langertha::Raider::Plugin::Events>. Set by the command line for
-C<--stream-json> and its siblings and for the session journal.
+every event of the application (L</event>): the run events of
+L</run_prompt> and every C<tool.call> and C<tool.result> of a raid, which
+come from L<Langertha::Raider::Plugin::Events>. A surface that follows
+one run passes its consumer to L</run_prompt> instead.
 
 =cut
 
@@ -322,6 +327,21 @@ has on_event => (
   is        => 'ro',
   isa       => 'CodeRef',
   predicate => 'has_on_event',
+);
+
+=attr on_journal_error
+
+Optional code reference called as C<< $on_journal_error->($session, $error) >>
+when an event cannot be written to a session journal (a full disk): once
+per run, and once per L</record>. The run goes on. Without it the error
+is a C<warn>.
+
+=cut
+
+has on_journal_error => (
+  is        => 'ro',
+  isa       => 'CodeRef',
+  predicate => 'has_on_journal_error',
 );
 
 =attr perl
@@ -889,10 +909,10 @@ sub _engine_args {
 # Langertha::Raider/plugins; a surface adds its own in front.
 sub _raider_plugins {
   my ($self) = @_;
-  my @plugins = ( '+Langertha::Raider::Plugin::Situation' );
-  # Last, so it reports the tool calls that actually run.
-  push @plugins, '+Langertha::Raider::Plugin::Events', { on_event => $self->on_event } if $self->has_on_event;
-  return @plugins;
+  weaken(my $app = $self);
+  # Events last, so it reports the tool calls that actually run.
+  return ( '+Langertha::Raider::Plugin::Situation',
+    '+Langertha::Raider::Plugin::Events', { on_event => sub { $app->event(@_) if $app } } );
 }
 
 sub _build_raider {
@@ -939,6 +959,171 @@ sub run {
   my $f = $self->raid_f(@messages);
   $self->loop->await($f);
   return $f->get;
+}
+
+=method run_prompt
+
+    my $outcome = $app->run_prompt($text,
+      session  => $session,                                   # optional
+      on_event => sub { my ( $type, %payload ) = @_; ... },   # optional
+    );
+
+Runs C<$text> as one run (L</run>) and records it, whichever surface
+asks: in the journal of the L<Langertha::Raider::Session> as the
+session's next run (ADR 0015) -- C<run.started>, the user input as
+C<message>, every C<tool.call> and C<tool.result> with the whole result
+text, the final answer as C<message>, and C<run.finished> with the end
+state and the raider's metrics, also when the run failed. A journal write
+that fails goes to L</on_journal_error>; the run goes on.
+
+Every event of the run goes to C<on_event> (and L</on_event>) through
+L</event>: the journal types and C<run.state> (C<running>, then the end
+state), as ADR 0013 names them.
+
+Returns the outcome as a hash reference: C<status> (C<completed> or
+C<failed>), C<elapsed> (seconds, to the millisecond), C<result> (the
+L<Langertha::Raider::Result>), C<response> (its text) and C<metrics> of a
+completed run, C<error> of a failed one, and C<session> (C<id>, C<path>)
+when there is one. An empty C<$text> runs nothing and returns nothing.
+
+=cut
+
+# The ADR 0015 event types the journal records from the events of a run;
+# run.finished is written by end_run.
+my %JOURNAL_TYPE = map { $_ => 1 } qw( run.started message tool.call tool.result );
+
+# The run in progress: { session, run, on_event, t0 }.
+has _run => (
+  is        => 'rw',
+  init_arg  => undef,
+  predicate => 'has_run',
+  clearer   => '_clear_run',
+);
+
+sub run_prompt {
+  my ( $self, $text, %o ) = @_;
+  return unless defined $text && length $text;
+  $self->begin_run(%o);
+  $self->event('message', role => 'user', content => $text);
+
+  my $result;
+  unless (eval { $result = $self->run($text); 1 }) {
+    my $error = $@;
+    chomp $error;
+    return $self->end_run(failed => error => $error);
+  }
+  $self->event('message', role => 'assistant', content => "$result");
+  my $metrics = $self->raider->metrics;
+  my $end = $self->end_run(completed => metrics => $metrics);
+  return { %$end, result => $result, response => "$result", metrics => $metrics };
+}
+
+=method begin_run
+
+    $app->begin_run(session => $session, on_event => $consumer);
+
+Starts a run as L</run_prompt> does, for a surface that drives L</run>
+itself: the run gets the next run id of C<session>, C<run.started> (engine
+and model) and C<run.state> C<running>. L</end_run> ends it.
+
+=cut
+
+sub begin_run {
+  my ( $self, %o ) = @_;
+  my $session = $o{session};
+  $self->_run({
+    session  => $session,
+    run      => $session ? $session->next_run : undef,
+    on_event => $o{on_event},
+    t0       => Time::HiRes::time(),
+  });
+  $self->event('run.started', engine => $self->engine_name, $self->has_model ? ( model => $self->model ) : ());
+  $self->event('run.state', state => 'running');
+  return;
+}
+
+=method end_run
+
+    my $end = $app->end_run(interrupted => signal => 'TERM');
+
+Ends the run in progress, if there is one: C<run.finished> with
+C<$status> and the given C<error> and C<signal> into the journal, with the
+given C<metrics> or else the raider's, then C<run.state> with C<$status>.
+Returns C<status>, C<elapsed>, the C<error> and C<signal> given and, with a
+session, C<session> (C<id>, C<path>) -- or nothing outside a run. A
+surface calls it for a run it ends itself, as the command line does for a
+signal.
+
+=cut
+
+sub end_run {
+  my ( $self, $status, %fields ) = @_;
+  my $run = $self->_run or return;
+  my $elapsed = 0 + sprintf('%.3f', Time::HiRes::time() - $run->{t0});
+  my %end = (
+    status  => $status,
+    ( map { defined $fields{$_} ? ( $_ => $fields{$_} ) : () } qw( error signal ) ),
+    elapsed => $elapsed,
+  );
+  if (my $session = $run->{session}) {
+    my $metrics = $fields{metrics} // eval { $self->raider->metrics };
+    $self->_append($run, 'run.finished', run => $run->{run}, %end, $metrics ? ( metrics => $metrics ) : ());
+    $end{session} = { id => $session->id, path => ''.$session->path };
+  }
+  $self->event('run.state', state => $status);
+  $self->_clear_run;
+  return \%end;
+}
+
+=method event
+
+    $app->event('tool.call', call => 'c1', name => 'bash', arguments => { ... });
+
+One event of the application, handed to every consumer: the session
+journal of the run in progress for the types it records (with the run's
+C<run> id), the C<on_event> of that run, and L</on_event>.
+
+=cut
+
+sub event {
+  my ( $self, $type, %payload ) = @_;
+  if (my $run = $self->_run) {
+    $self->_append($run, $type, run => $run->{run}, %payload) if $run->{session} && $JOURNAL_TYPE{$type};
+    $run->{on_event}->($type, %payload) if $run->{on_event};
+  }
+  $self->on_event->($type, %payload) if $self->has_on_event;
+  return;
+}
+
+=method record
+
+    $app->record($session, 'history.cleared');
+
+Appends one event outside a run to the session journal. A write that
+fails goes to L</on_journal_error> and returns false.
+
+=cut
+
+sub record {
+  my ( $self, $session, $type, %fields ) = @_;
+  return $self->_append({ session => $session }, $type, %fields);
+}
+
+# Appends to the session of $run (a run, or just { session }); reports
+# only the first failure of each $run.
+sub _append {
+  my ( $self, $run, $type, %fields ) = @_;
+  my $session = $run->{session};
+  return 1 if eval { $session->append($type, %fields); 1 };
+  my $error = $@;
+  return 0 if $run->{journal_failed}++;
+  if ($self->has_on_journal_error) {
+    $self->on_journal_error->($session, $error);
+  }
+  else {
+    warn 'session '.$session->id.' not fully saved: '.$error;
+  }
+  return 0;
 }
 
 =method raider
