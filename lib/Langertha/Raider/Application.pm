@@ -1,0 +1,1170 @@
+package Langertha::Raider::Application;
+# ABSTRACT: Internal application service that builds and runs a raider for a workspace
+our $VERSION = '0.503';
+use Moose;
+use namespace::autoclean;
+use IO::Async::Loop;
+use Future::AsyncAwait;
+use Net::Async::MCP;
+use MCP::Run::Bash;
+use Path::Tiny;
+use Langertha::Raider::HallTools qw( build_hall_tools_server );
+
+use Langertha::Raider::FileTools qw( build_file_tools_server );
+use Langertha::Raider::WebTools  qw( build_web_tools_server );
+use Langertha::Raider::PerlTools qw( build_perl_tools_server );
+use Langertha::Raider::Packs     qw( build_packs );
+use Langertha::Raider::Config;
+use Langertha::Raider::Detect;
+use Langertha::Raider::EngineResolver;
+use Langertha::Raider;
+
+=head1 SYNOPSIS
+
+    # Internal to Langertha-Raider -- no API promise.
+    my $app = Langertha::Raider::Application->new(
+      root           => '/path/to/project',
+      engine_options => { temperature => 0.2 },
+    );
+
+    my $result = $app->run('Explore the repo and summarize it.');
+    my $raider = $app->raider;                   # the Langertha::Raider
+
+=head1 DESCRIPTION
+
+B<Internal module.> Its interface may change without notice.
+
+The application service the surfaces share (ADR 0002): for one workspace
+(L</root>) it reads F<.raider.yml> (L<Langertha::Raider::Config>), picks
+the engine through L<Langertha::Raider::EngineResolver>, activates the
+packs (L<Langertha::Raider::Packs>, ADR 0012), compiles the mission (ADR
+0004, ADR 0014), mounts the tool servers -- files
+(L<Langertha::Raider::FileTools>), C<bash> (L<MCP::Run::Bash>), web
+(L<Langertha::Raider::WebTools>), the Perl tools
+(L<Langertha::Raider::PerlTools>) when granted, the Hall tools when
+spawned by a Hall -- and builds the L<Langertha::Raider> that runs the
+raids. It prints nothing; presentation such as the live trace belongs to
+the surface, see L<Langertha::Raider::CLI>.
+
+=cut
+
+=attr engine_name
+
+Langertha engine class shortcut (e.g. C<'anthropic'>, C<'openai'>,
+C<'deepseek'>, C<'groq'>, C<'mistral'>, C<'gemini'>, C<'ollama'>), passed as
+C<engine>. Defaults to C<engine:> in F<.raider.yml>, then to the first
+C<*_API_KEY> environment variable found, then to C<'anthropic'>.
+
+=cut
+
+has engine_name => (
+  is       => 'ro',
+  isa      => 'Str',
+  lazy     => 1,
+  builder  => '_build_engine_name',
+  init_arg => 'engine',
+);
+
+sub _build_engine_name { $_[0]->engine_resolver->engine_name }
+
+=attr engine_resolver
+
+The L<Langertha::Raider::EngineResolver> that picks engine, model and API
+key from the flags, the C<-o> options, F<.raider.yml> and the
+environment, and builds the engine.
+
+=cut
+
+has engine_resolver => (
+  is       => 'ro',
+  isa      => 'Langertha::Raider::EngineResolver',
+  init_arg => undef,
+  lazy     => 1,
+  builder  => '_build_engine_resolver',
+);
+
+sub engine_resolver_class { 'Langertha::Raider::EngineResolver' }
+
+# The resolver gets what was passed to the constructor (-e, -m, -k), so
+# its answers and those of the attributes here are the same.
+sub _build_engine_resolver {
+  my ($self) = @_;
+  my $explicit = $self->_explicit;
+  return $self->engine_resolver_class->new(
+    config         => $self->config,
+    engine_options => $self->engine_options,
+    ( $explicit->{engine}  ? ( engine  => $self->engine_name ) : () ),
+    ( $explicit->{model}   ? ( model   => $self->model )       : () ),
+    ( $explicit->{api_key} ? ( api_key => $self->api_key )     : () ),
+  );
+}
+
+=attr model
+
+Model identifier to pass to the engine. Defaults to C<model> in
+L</engine_options>, then C<model:> in F<.raider.yml>, then the per-engine
+cheap default. An explicit C<model> always wins; this is the model the
+engine is built with.
+
+=cut
+
+has model => (
+  is        => 'ro',
+  isa       => 'Str',
+  lazy      => 1,
+  predicate => 'has_explicit_model',
+  builder   => '_build_model',
+);
+
+sub _build_model { $_[0]->engine_resolver->model }
+
+sub has_model {
+  my ($self) = @_;
+  return 1 if $self->has_explicit_model;
+  return length($self->model) ? 1 : 0;
+}
+
+=attr api_key_env
+
+Name of the environment variable used for the current engine's API key
+(for display / debugging). Returns undef for engines that don't use an API
+key (e.g. ollama).
+
+=cut
+
+sub api_key_env { $_[0]->engine_resolver->api_key_env }
+
+=attr api_key
+
+API key for the engine. Defaults to C<api_key> in L</engine_options>, then
+C<api_key:> in F<.raider.yml>, then an engine-appropriate environment
+variable. An explicit C<api_key> always wins.
+
+=cut
+
+has api_key => (
+  is      => 'ro',
+  isa     => 'Str',
+  lazy    => 1,
+  builder => '_build_api_key',
+);
+
+=attr mission
+
+System prompt of the Raider, compiled from separate items (ADR 0004,
+ADR 0014): the instructions (a generic assistant persona plus
+F<.raider.md>), the tool description, the loaded skills and the active
+packs. A C<mission> passed to the constructor (C<-M>) replaces the
+instructions item only, also across L</reload_mission>; the other items
+still apply. With L</bare> the skills, F<.raider.md> and all packs not
+switched on by C<--pack> or C</pack> are left out.
+
+=cut
+
+has mission => (
+  is       => 'ro',
+  isa      => 'Str',
+  lazy     => 1,
+  init_arg => undef,
+  builder  => '_build_mission',
+);
+
+has _explicit_mission => (
+  is        => 'ro',
+  isa       => 'Str',
+  init_arg  => 'mission',
+  predicate => '_has_explicit_mission',
+);
+
+=attr bare
+
+C<--bare>: an isolated context. No F<.raider.md>, no skills, no pack
+detection, and no packs from C<packs:> or C<enabled_by_default>;
+C<--pack NAME> and C</pack NAME> still switch a pack on explicitly. What
+remains is the instructions (the default persona, or the C<-M> text) and
+the tool description.
+
+=cut
+
+has bare => (
+  is      => 'ro',
+  isa     => 'Bool',
+  default => 0,
+);
+
+sub _build_mission {
+  my ($self) = @_;
+  my @items = ( $self->_instructions_text, $self->_tools_text );
+
+  my @skills = $self->_load_skill_texts;
+  push @items, "Loaded skills (domain knowledge the user enabled for this session):\n\n"
+    .join("\n\n", @skills)."\n" if @skills;
+
+  my @pack_texts = $self->packs->skill_texts;
+  push @items, "Active packs:\n\n".join("\n\n", @pack_texts)."\n" if @pack_texts;
+
+  return join "\n\n---\n", @items;
+}
+
+# The instructions item: the -M text, or the default persona with
+# .raider.md.
+sub _instructions_text {
+  my ($self) = @_;
+  return $self->_explicit_mission if $self->_has_explicit_mission;
+  my $base = $self->_persona_text;
+  return $base if $self->bare;
+  my $custom_file = path($self->root)->child('.raider.md');
+  if (-f $custom_file) {
+    my $custom = eval { $custom_file->slurp_utf8 };
+    if (defined $custom && length $custom) {
+      $base .= "\n\n---\nUser's custom instructions (from $custom_file):\n\n$custom\n";
+    }
+  }
+  return $base;
+}
+
+# The tool description item. Hand-written until ADR 0005 derives it from
+# the active tool set; -M never replaces it.
+sub _tools_text {
+  my ($self) = @_;
+  return 'Working directory: '.$self->root."\n\n".<<'EOM';
+Tools (MCP):
+  - list_files(path)
+  - read_file(path)
+  - write_file(path, content)
+  - edit_file(path, old_string, new_string)
+  - bash(command, [working_directory], [timeout])
+  - web_search(query, [limit])
+  - web_fetch(url, [as_html])
+EOM
+}
+
+sub _persona_text { <<'EOM' }
+You are Langertha, viking shield-maiden. Autonomous CLI agent on user's
+local machine. CLI name: "raider". Just CLI. No pause, no abort, no ask
+to stop. You do things.
+
+Name, persona, tone are defaults. User can rename you, rewrite your
+background, or change persona entirely via C<.raider.md> in working dir.
+If present, its content appended below as user's custom instructions.
+User's custom instructions override this default where they conflict.
+
+How you work:
+  - User turn = task. Pursue with tools until done. Unlimited iterations.
+  - Read before write. No guessing file contents.
+  - After write_file / edit_file: verify. Re-read, or run check (perl -c,
+    tests, etc.).
+  - Small targeted edits > full rewrites.
+  - bash is full shell, not sandbox. Use freely.
+  - Skip irreversible ops (rm -rf, git reset --hard, force pushes) unless
+    user explicit ask.
+
+You have no yield / ask / abort tool. Task done: plain text reply. CLI
+loops back to user.
+EOM
+
+=attr root
+
+Working directory for tool operations. Defaults to the current process cwd.
+File tools are confined to this directory, including realpath checks for
+symlink escapes; bash commands inherit it as their default working directory.
+
+=cut
+
+has root => (
+  is      => 'ro',
+  isa     => 'Str',
+  default => sub { Path::Tiny->cwd->stringify },
+);
+
+=attr allowed_commands
+
+Optional arrayref restricting which bash commands may run (first word match).
+When undef, any command is allowed.
+
+=cut
+
+has allowed_commands => (
+  is        => 'ro',
+  isa       => 'ArrayRef[Str]',
+  predicate => 'has_allowed_commands',
+);
+
+=attr max_iterations
+
+Maximum tool-calling iterations per raid. Defaults to 10_000 — effectively
+unlimited, so a raid only ends when the model itself stops emitting tool
+calls. The conversation history is preserved between raids, so the next user
+message in the REPL simply continues the same thread.
+
+Set this to a smaller number if you want a hard safety cap.
+
+=cut
+
+has max_iterations => (
+  is      => 'ro',
+  isa     => 'Int',
+  default => 10_000,
+);
+
+=attr on_event
+
+Optional code reference called as C<< $on_event->($type, %payload) >> for
+every C<tool.call> and C<tool.result> of a raid, through
+L<Langertha::Raider::Plugin::Events>. Set by the command line for
+C<--stream-json> and its siblings and for the session journal.
+
+=cut
+
+has on_event => (
+  is        => 'ro',
+  isa       => 'CodeRef',
+  predicate => 'has_on_event',
+);
+
+=attr perl
+
+Enable the PerlTools MCP server (perl_eval, perl_check, perl_cpanm).
+Off by default; set via C<--perl> CLI flag or C<perl: true> in F<.raider.yml>.
+Without either, the tools also come with the C<perl> pack, which is
+detected in a Perl workspace; see L</perl_tools_enabled>.
+
+=cut
+
+has perl => (
+  is      => 'ro',
+  isa     => 'Bool',
+  default => 0,
+);
+
+=method perl_tools_enabled
+
+Whether the PerlTools server is mounted: C<--perl> turns it on; else an
+explicit C<perl:> (in F<.raider.yml> or C<-o perl=>) decides either way;
+else it is on when an active pack requests the C<perl> tools (the bundled
+C<perl> pack, detected by F<cpanfile>, F<dist.ini>, F<Makefile.PL> or
+F<lib/**/*.pm>). Granting a pack's request here stands in for the local
+tool policy of ADR 0005, which does not exist yet; C<perl: false> is the
+local denial.
+
+=cut
+
+sub perl_tools_enabled { $_[0]->perl_tools_grant->{enabled} }
+
+=method perl_tools_grant
+
+    my $grant = $app->perl_tools_grant;
+    # { enabled => 1, reason => 'pack perl (detected)' }
+
+L</perl_tools_enabled> with the reason: C<--perl>, C<perl: true> or
+C<perl: false> with where it was set (C<.raider.yml> or C<-o>), the active
+packs requesting the tools with their activation source, or
+C<not requested>.
+
+=cut
+
+sub perl_tools_grant {
+  my ($self) = @_;
+  return { enabled => 1, reason => '--perl' } if $self->perl;
+  my $yml = $self->_load_yml_options->{perl};
+  if (defined $yml) {
+    my $where = exists $self->_cli_app_options->{perl} ? '-o' : '.raider.yml';
+    return { enabled => $yml ? 1 : 0, reason => 'perl: '.( $yml ? 'true' : 'false' ).' ('.$where.')' };
+  }
+  my $packs = $self->packs;
+  my @by = map { 'pack '.$_.' ('.$packs->sources->{$_}{source}.')' }
+    grep { grep { $_ eq 'perl' } @{ $packs->packs_by_name->{$_}->tools } }
+    @{ $packs->enabled_pack_names };
+  return @by ? { enabled => 1, reason => join(', ', @by) } : { enabled => 0, reason => 'not requested' };
+}
+
+=attr preferred_lib_target
+
+Override the default local::lib target for perl_cpanm. When unset,
+defaults to F<.raider/lib/> for standalone raiders. Can be set via
+C<preferred_lib_target> in F<.raider.yml>.
+
+=cut
+
+has preferred_lib_target => (
+  is        => 'ro',
+  isa       => 'Str',
+  predicate => 'has_preferred_lib_target',
+);
+
+=attr pack_names
+
+Optional list of pack names supplied by the CLI, usually from repeatable
+C<--pack NAME>. When present, these override the C<packs:> list in
+F<.raider.yml>.
+
+=cut
+
+has pack_names => (
+  is        => 'ro',
+  isa       => 'ArrayRef[Str]',
+  predicate => 'has_pack_names',
+);
+
+=attr no_pack_names
+
+Pack names switched off from the command line (repeatable C<--no-pack
+NAME>). They win over C<--pack>, C<packs:>, the bundled defaults and
+detection.
+
+=cut
+
+has no_pack_names => (
+  is      => 'ro',
+  isa     => 'ArrayRef[Str]',
+  default => sub { [] },
+);
+
+=attr detect
+
+Pack detection from the command line: C<0> for C<--no-detect>, C<1> for
+C<--detect>. When not given, C<detect:> in F<.raider.yml> decides; the
+default is on.
+
+=cut
+
+has detect => (
+  is        => 'ro',
+  isa       => 'Bool',
+  predicate => 'has_detect_flag',
+);
+
+=attr packs
+
+L<Langertha::Raider::Packs::Collection> of the installed packs. Defaults
+come from the bundled C<share/packs/> plus C<$RAIDER_PACK_DIRS>. Which are
+enabled, highest priority first (ADR 0012); with L</bare> only
+C<--pack NAME> applies:
+
+=over
+
+=item 1. C<--no-pack NAME> switches a pack off; C<--pack NAME> (or
+C<-o packs=a,b>) enables the listed ones exclusively; C<--no-detect> /
+C<--detect> switch detection off or on.
+
+=item 2. C<packs:> in F<.raider.yml> (C<[caveman, git-guru]>) enables the
+listed ones exclusively when no flag named packs; C<detect: false> and
+C<no_detect: [NAME]> switch detection off entirely or per pack.
+
+=item 3. Packs whose detection rule matches L</root> are added.
+
+=back
+
+Without explicit packs the bundled defaults (C<enabled_by_default>) are
+on.
+
+Detection rules come from a pack's F<pack.yml> (C<detect:>, the pack
+default) and from C<detect:> in F<.raider.yml>, which replaces the pack
+default per pack name. Each rule is evaluated against L</root> with
+L<Langertha::Raider::Detect> when L</packs> is built and on
+L</redetect_packs> (C</reload>), never per model call. A detected pack is
+added to the enabled ones; in an exclusive group it gives way to an
+explicit pack and replaces a bundled default. The outcome per pack is in
+L<Langertha::Raider::Packs::Collection/activation_report>. An invalid rule
+croaks.
+
+Detection only decides which packs are active, it grants nothing (ADR
+0005). Rules from the project's F<.raider.yml> are evaluated right away:
+the workspace trust decision of ADR 0004, which is meant to gate them, does
+not exist yet.
+
+=cut
+
+has packs => (
+  is      => 'ro',
+  isa     => 'Langertha::Raider::Packs::Collection',
+  lazy    => 1,
+  builder => '_build_packs',
+);
+
+sub detect_class { 'Langertha::Raider::Detect' }
+
+sub _build_packs {
+  my ($self) = @_;
+  # --bare: only --pack counts, not packs:, defaults or detection.
+  my ( $list, $source, $reason ) = !$self->bare ? $self->_explicit_packs
+    : $self->has_pack_names ? ( $self->pack_names, flag => '--pack' )
+    :                         ( [] );
+
+  my $collection = build_packs(root => $self->root);
+
+  if ($list && ref $list eq 'ARRAY' && ( @$list || $self->bare )) {
+    # Explicit packs — enable exactly those
+    for my $name (@{$collection->all_pack_names}) {
+      $collection->disable($name);
+    }
+    for my $name (@$list) {
+      $collection->enable($name, $source, $reason);
+    }
+  }
+  $collection->disable($_, flag => '--no-pack') for @{$self->no_pack_names};
+  $self->_detect_packs($collection);
+
+  return $collection;
+}
+
+# The explicit pack list with its source: --pack, then -o packs=, then
+# packs: in .raider.yml.
+sub _explicit_packs {
+  my ($self) = @_;
+  return ( $self->pack_names, flag => '--pack' ) if $self->has_pack_names;
+  my $opt = $self->_cli_app_options->{packs};
+  return ( $opt, flag => '-o packs' ) if defined $opt;
+  return ( $self->config->options($self->engine_name)->{packs}, config => '.raider.yml packs:' );
+}
+
+=method detection_state
+
+    my ( $on, $why ) = $app->detection_state;
+
+Whether pack detection runs, and what decided it: C<--detect>,
+C<--no-detect>, C<detect: false> or C<default>.
+
+=cut
+
+sub detection_state {
+  my ($self) = @_;
+  return ( 0, '--bare' ) if $self->bare;
+  return ( $self->detect ? ( 1, '--detect' ) : ( 0, '--no-detect' ) ) if $self->has_detect_flag;
+  return ( 0, 'detect: false' ) unless $self->_detect_settings->{enabled};
+  return ( 1, 'default' );
+}
+
+# detect: and no_detect: from .raider.yml, -o on top.
+sub _detect_settings {
+  my ($self) = @_;
+  my $yml = $self->_load_yml_options;
+  return $self->config->normalize_detect($yml->{detect}, $yml->{no_detect});
+}
+
+sub _detect_packs {
+  my ($self, $collection) = @_;
+  my %detections;
+  $collection->detections(\%detections);
+  my ( $enabled ) = $self->detection_state;
+  return unless $enabled;
+
+  my $settings = $self->_detect_settings;
+  my %rules;
+  for my $name (@{$collection->all_pack_names}) {
+    my $pack = $collection->packs_by_name->{$name};
+    next unless $pack->has_detect;
+    $rules{$name} = [ 'pack default', $pack->detect, $pack->path.'/pack.yml detect' ];
+  }
+  $rules{$_} = [ '.raider.yml detect:', $settings->{rules}{$_}, 'detect.'.$_ ] for keys %{$settings->{rules}};
+
+  my %no_pack = map { $_ => 1 } @{$self->no_pack_names};
+  my $detect = $self->detect_class->new(root => $self->root);
+  for my $name (sort keys %rules) {
+    my ( $from, $rule, $label ) = @{$rules{$name}};
+    $self->detect_class->validate_rule($rule, $label);
+    my $record = sub {
+      my ( $result, $reason, $notes ) = @_;
+      $detections{$name} = { rule_from => $from, result => $result, reason => $reason, notes => $notes // [] };
+    };
+    my $skip = !$collection->packs_by_name->{$name} ? 'unknown pack'
+             : $no_pack{$name}                     ? '--no-pack'
+             : $settings->{off}{$name}             ? $settings->{off}{$name}
+             : $collection->is_active($name)       ? 'already active'
+             :                                        undef;
+    if ($skip) {
+      $record->(skipped => $skip);
+      next;
+    }
+    my $result = $detect->evaluate($rule, $label);
+    unless ($result->{matched}) {
+      $record->('not matched', $result->{reason}, $result->{notes});
+      next;
+    }
+    if (my $holder = $collection->enable_detected($name, $result->{reason})) {
+      my $kind = $collection->sources->{$holder}{source} eq 'detected' ? 'detected' : 'explicit';
+      $record->(skipped => $kind.' '.$holder.' holds exclusive group '.$collection->packs_by_name->{$name}->exclusive_group);
+      next;
+    }
+    $record->(matched => $result->{reason});
+  }
+  return;
+}
+
+=method redetect_packs
+
+    my @detected = $app->redetect_packs;
+
+Drops the packs that were enabled by detection, evaluates the rules again
+against L</root> and returns the names of the packs detected now. Packs
+enabled any other way stay as they are. C</reload> calls it.
+
+=cut
+
+sub redetect_packs {
+  my ($self) = @_;
+  my $collection = $self->packs;
+  for my $name (@{ [ @{$collection->active_pack_names} ] }) {
+    $collection->disable($name) if ($collection->sources->{$name}{source} // '') eq 'detected';
+  }
+  $self->_detect_packs($collection);
+  return grep { ($collection->sources->{$_}{source} // '') eq 'detected' } @{$collection->active_pack_names};
+}
+
+=attr max_context_tokens
+
+Trigger history auto-compression once the last prompt exceeds
+C<context_compress_threshold * max_context_tokens>. Defaults to 40_000, which
+keeps the running session comfortably under typical per-minute rate limits
+(Anthropic org default: 50k input tokens/min on Haiku).
+
+=cut
+
+has max_context_tokens => (
+  is      => 'ro',
+  isa     => 'Int',
+  default => 40_000,
+);
+
+=attr context_compress_threshold
+
+Fraction of L</max_context_tokens> at which compression kicks in. Defaults to
+C<0.7>.
+
+=cut
+
+has context_compress_threshold => (
+  is      => 'ro',
+  isa     => 'Num',
+  default => 0.7,
+);
+
+=attr skill_sources
+
+ArrayRef of skill-source specs to load and append to the mission. Each spec
+is a hashref:
+
+    { type => 'claude', path => '.claude/skills' }  # Claude Code SKILL.md tree
+    { type => 'dir',    path => 'my-skills', glob => '*.md' }
+
+Defaults to the C<skills> entries of F<.raider.yml> (see
+L<Langertha::Raider::Config>) followed by L</cli_skill_sources>. Passing
+C<skill_sources> explicitly replaces both. With L</bare> there are none.
+
+=cut
+
+has skill_sources => (
+  is      => 'ro',
+  isa     => 'ArrayRef[HashRef]',
+  lazy    => 1,
+  builder => '_build_skill_sources',
+);
+
+=attr cli_skill_sources
+
+ArrayRef of skill-source specs from the command line (C<--claude>,
+C<--openai>, C<--skills DIR>). They are added to the F<.raider.yml> skills,
+duplicates dropped.
+
+=cut
+
+has cli_skill_sources => (
+  is        => 'ro',
+  isa       => 'ArrayRef[HashRef]',
+  predicate => 'has_cli_skill_sources',
+);
+
+=attr config
+
+The L<Langertha::Raider::Config> for F<.raider.yml> in L</root>.
+
+=cut
+
+has config => (
+  is         => 'ro',
+  isa        => 'Langertha::Raider::Config',
+  lazy_build => 1,
+);
+
+sub _build_config {
+  my ($self) = @_;
+  return Langertha::Raider::Config->new(root => $self->root);
+}
+
+# Which settings were passed to the constructor (the command-line flags), for
+# explain_config. Lazy attributes cannot tell that apart once built.
+has _explicit => (
+  is       => 'ro',
+  isa      => 'HashRef',
+  init_arg => undef,
+  default  => sub { {} },
+);
+
+sub BUILD {
+  my ($self, $args) = @_;
+  $self->_explicit->{$_} = 1 for grep { exists $args->{$_} } qw( engine model api_key perl );
+}
+
+sub _build_skill_sources {
+  my ($self) = @_;
+  return [] if $self->bare;
+  return [ $self->config->skill_specs(
+    $self->engine_name,
+    @{ $self->_cli_app_options->{skills} // [] },
+    $self->has_cli_skill_sources ? @{$self->cli_skill_sources} : (),
+  ) ];
+}
+
+sub _load_skill_texts {
+  my ($self) = @_;
+  my @out;
+  for my $spec (@{$self->skill_sources}) {
+    my $type = $spec->{type} // 'dir';
+    my $rel  = $spec->{path};
+    next unless defined $rel && length $rel;
+    my $base = Path::Tiny::path($rel);
+    $base = Path::Tiny::path($self->root)->child($rel) unless $base->is_absolute;
+    next unless $type eq 'file' || -d $base;
+
+    my @files;
+    if ($type eq 'file') {
+      # Single markdown file — $base is that file, not a directory.
+      my $f = Path::Tiny::path($rel);
+      $f = Path::Tiny::path($self->root)->child($rel) unless $f->is_absolute;
+      next unless -f $f;
+      @files = ($f);
+    }
+    elsif ($type eq 'claude') {
+      # Claude layout: $base/<skill>/SKILL.md
+      for my $dir ($base->children) {
+        next unless -d $dir;
+        my $f = $dir->child('SKILL.md');
+        push @files, $f if -f $f;
+      }
+    }
+    else {
+      my $glob = $spec->{glob} // '*.md';
+      push @files, $base->children(qr/\Q$glob\E$/);
+      # Fallback: recurse if nothing matched at the top level
+      if (!@files) {
+        @files = grep { -f $_ && /\.md$/ } $base->children;
+      }
+    }
+
+    for my $f (sort @files) {
+      my $name = $type eq 'claude' ? $f->parent->basename : $f->basename;
+      my $body = eval { $f->slurp_utf8 } // next;
+      # Strip YAML frontmatter if present.
+      $body =~ s/\A---\s*\n.*?\n---\s*\n//s;
+      push @out, "### Skill: $name\n\n$body";
+    }
+  }
+  return @out;
+}
+
+=attr engine_options
+
+HashRef of the C<-o KEY=VALUE> options. Engine attributes (e.g.
+C<temperature>, C<response_size>, C<seed>) are forwarded to the engine
+constructor, merged on top of values loaded from C<.raider.yml> in the
+working directory. Raider's own keys (see
+L<Langertha::Raider::Config/is_app_key>) configure raider like their
+F<.raider.yml> counterparts and override them; C<packs> and C<skills> take
+a comma-separated list.
+
+=cut
+
+has engine_options => (
+  is      => 'ro',
+  isa     => 'HashRef',
+  default => sub { {} },
+);
+
+# The -o pairs that configure raider itself, the list keys split on commas
+# as they would read from .raider.yml.
+sub _cli_app_options {
+  my ($self) = @_;
+  my $opts = $self->engine_options;
+  my %app;
+  for my $key (grep { $self->config->is_app_key($_) } keys %$opts) {
+    my $value = $opts->{$key};
+    $value = [ split /,/, $value ] if ($key eq 'packs' || $key eq 'skills') && !ref $value;
+    $app{$key} = $value;
+  }
+  return \%app;
+}
+
+sub _cli_engine_options { $_[0]->engine_resolver->cli_engine_options }
+
+sub _load_yml_options {
+  my ($self) = @_;
+  my %app = %{ $self->_cli_app_options };
+  delete $app{skills};
+  return { %{ $self->config->options($self->engine_name) }, %app };
+}
+
+sub _engine_yml_options { $_[0]->engine_resolver->engine_yml_options }
+
+has loop => (
+  is      => 'ro',
+  isa     => 'IO::Async::Loop',
+  lazy    => 1,
+  default => sub { IO::Async::Loop->new },
+);
+
+has _engine => (is => 'ro', lazy => 1, builder => '_build_engine');
+has _raider => (is => 'ro', lazy => 1, builder => '_build_raider');
+has _mcps   => (is => 'ro', lazy => 1, builder => '_build_mcps');
+
+sub _build_api_key { $_[0]->engine_resolver->api_key }
+
+sub _engine_class { $_[0]->engine_resolver->engine_class }
+
+sub _build_mcps {
+  my ($self) = @_;
+
+  my $yml = $self->_load_yml_options;
+
+  my $files = build_file_tools_server(root => $self->root);
+
+  my $bash = MCP::Run::Bash->new(
+    tool_name         => 'bash',
+    tool_description  => 'Run a shell command with bash -c. Returns exit code, stdout, and stderr. Use this for ls, grep, find, git, cat, running tests, any shell pipeline — anything you would type at a terminal.',
+    working_directory => $self->root,
+    ($self->has_allowed_commands ? (allowed_commands => $self->allowed_commands) : ()),
+    timeout => 120,
+  );
+
+  my $web = build_web_tools_server(loop => $self->loop);
+
+  my @clients;
+  for my $server ($files, $bash, $web) {
+    my $client = Net::Async::MCP->new(server => $server);
+    $self->loop->add($client);
+    push @clients, $client;
+  }
+
+  if ($self->perl_tools_enabled) {
+    my $lib_target = $self->has_preferred_lib_target
+      ? $self->preferred_lib_target
+      : ($yml->{preferred_lib_target} // undef);
+    my $perl = build_perl_tools_server(
+      root       => $self->root,
+      loop       => $self->loop,
+      lib_target => $lib_target,
+    );
+    my $client = Net::Async::MCP->new(server => $perl);
+    $self->loop->add($client);
+    push @clients, $client;
+  }
+
+  # Hall-side tools: when we were spawned by raider-hall, expose
+  # telegram_reply / hall_status / hall_spawn so the agent can talk back.
+  if ($ENV{RAIDER_HALL_SOCKET} && -S $ENV{RAIDER_HALL_SOCKET}) {
+    my $hall_srv = build_hall_tools_server(
+      socket => $ENV{RAIDER_HALL_SOCKET},
+    );
+    my $client = Net::Async::MCP->new(server => $hall_srv);
+    $self->loop->add($client);
+    push @clients, $client;
+  }
+
+  return \@clients;
+}
+
+sub _build_engine {
+  my ($self) = @_;
+  return $self->engine_resolver->build_engine(mcp_servers => $self->_mcps);
+}
+
+# Engine constructor arguments (Langertha::Raider::EngineResolver/engine_args).
+sub _engine_args {
+  my ($self) = @_;
+  return $self->engine_resolver->engine_args(mcp_servers => $self->_mcps);
+}
+
+# The plugins of the raider, as name + {args} pairs for
+# Langertha::Raider/plugins; a surface adds its own in front.
+sub _raider_plugins {
+  my ($self) = @_;
+  my @plugins = ( '+Langertha::Raider::Plugin::Situation' );
+  # Last, so it reports the tool calls that actually run.
+  push @plugins, '+Langertha::Raider::Plugin::Events', { on_event => $self->on_event } if $self->has_on_event;
+  return @plugins;
+}
+
+sub _build_raider {
+  my ($self) = @_;
+  my @plugins = $self->_raider_plugins;
+  return Langertha::Raider->new(
+    engine                     => $self->_engine,
+    mission                    => $self->mission,
+    max_iterations             => $self->max_iterations,
+    max_context_tokens         => $self->max_context_tokens,
+    context_compress_threshold => $self->context_compress_threshold,
+    (@plugins ? (plugins => \@plugins) : ()),
+  );
+}
+
+=method raid_f
+
+    my $result = await $app->raid_f($prompt);
+
+Async variant: drives one raid iteration and returns the
+L<Langertha::Raider::Result>.
+
+=cut
+
+async sub raid_f {
+  my ($self, @messages) = @_;
+  for my $mcp (@{$self->_mcps}) {
+    await $mcp->initialize;
+  }
+  return await $self->_raider->raid_f(@messages);
+}
+
+=method run
+
+    my $result = $app->run($prompt);
+
+Synchronous convenience wrapper around L</raid_f>. Runs the I/O loop until the
+raid completes and returns the result (which stringifies to the final text).
+
+=cut
+
+sub run {
+  my ($self, @messages) = @_;
+  my $f = $self->raid_f(@messages);
+  $self->loop->await($f);
+  return $f->get;
+}
+
+=method raider
+
+Returns the underlying L<Langertha::Raider> instance (lazily built).
+
+=cut
+
+sub raider { $_[0]->_raider }
+
+=method loaded_skill_names
+
+Returns a list of skill names currently discoverable from the configured
+L</skill_sources>. Intended for banner/status display.
+
+=cut
+
+sub loaded_skill_names {
+  my ($self) = @_;
+  my @names;
+  for my $spec (@{$self->skill_sources}) {
+    my $type = $spec->{type} // 'dir';
+    my $rel  = $spec->{path};
+    next unless defined $rel && length $rel;
+    my $base = Path::Tiny::path($rel);
+    $base = Path::Tiny::path($self->root)->child($rel) unless $base->is_absolute;
+    if ($type eq 'file') {
+      push @names, $base->basename if -f $base;
+      next;
+    }
+    next unless -d $base;
+    if ($type eq 'claude') {
+      for my $dir (sort $base->children) {
+        next unless -d $dir;
+        push @names, $dir->basename if -f $dir->child('SKILL.md');
+      }
+    }
+    else {
+      for my $f (sort $base->children) {
+        push @names, $f->basename if -f $f && $f =~ /\.md$/;
+      }
+    }
+  }
+  return @names;
+}
+
+=method reload_mission
+
+Rebuilds the mission (e.g. after C<.raider.md> has been edited) and swaps it
+into the underlying L<Langertha::Raider>. An explicit L</mission> is kept.
+
+=cut
+
+sub reload_mission {
+  my ($self) = @_;
+  my $new = $self->_build_mission;
+  # Hot-swap on the running raider, history and metrics stay.
+  $self->_raider->_set_mission($new);
+  return $new;
+}
+
+=method mission_source
+
+Where the instructions item of L</mission> comes from: C<-M> for a
+mission passed to the constructor, C<.raider.md> when that file customizes
+the default persona (never with L</bare>), C<default> otherwise.
+
+=cut
+
+sub mission_source {
+  my ($self) = @_;
+  return '-M' if $self->_has_explicit_mission;
+  return !$self->bare && -f Path::Tiny::path($self->root)->child('.raider.md') ? '.raider.md' : 'default';
+}
+
+=method explain_config
+
+    my $report = $app->explain_config;
+
+Where each effective setting came from, command-line flags included. The
+shape of L<Langertha::Raider::Config/explain>, with C<source> (and
+C<shadowed>) naming a flag (C<-e>, C<-m>, C<-k>, C<-o>, C<--pack>,
+C<--perl>, C<--claude/--openai/--skills>), a F<.raider.yml> layer
+(C<.raider.yml>, C<.raider.yml default:>, C<.raider.yml openai:>), an
+environment variable (C<env OPENAI_API_KEY>) or C<default>. API key values
+are never included. Builds no engine.
+
+C<detection> says whether pack detection runs (C<on>, or C<off> with what
+switched it off) and C<packs> is the
+L<Langertha::Raider::Packs::Collection/activation_report>: each pack with
+its source (C<flag>, C<config>, C<default>, C<detected>, C<manual>) and,
+for detection rules, the clause that matched or failed. C<perl_tools> is
+L</perl_tools_grant>: whether the Perl tools are mounted, and why.
+
+C<instructions> is L</mission_source> and C<bare> is L</bare>.
+
+=cut
+
+sub explain_config {
+  my ($self) = @_;
+  my $engine   = $self->engine_name;
+  my $report   = $self->config->explain($engine);
+  my $explicit = $self->_explicit;
+  my $app_opts = $self->_cli_app_options;
+  my $opts     = { %{ $self->_cli_engine_options }, %$app_opts };
+
+  # .raider.yml values as candidates: [ source, value, shadowed ]
+  my ( %yml, @yml_skills );
+  for my $v (@{ $report->{values} }) {
+    my $candidate = [
+      $self->_yml_source($v->{source}),
+      $v->{value},
+      [ map { $self->_yml_source($_) } @{ $v->{shadowed} } ],
+    ];
+    if ($v->{merged}) {
+      push @yml_skills, { %$v, source => $candidate->[0], shadowed => [] };
+      next;
+    }
+    $yml{ $v->{key} } = { applies_to => $v->{applies_to}, candidate => $candidate };
+  }
+  my %from_yml = map { $_ => $yml{$_}{candidate} } keys %yml;
+
+  my $env_var = $self->engine_resolver->env_var_for_engine($engine);
+  my $env_key = defined $env_var && length($ENV{$env_var} // '') ? $env_var : undef;
+  my $default_model = $self->engine_resolver->default_model_for_engine($engine);
+  my $yml_key = $from_yml{api_key};
+
+  my @values = (
+    $self->_explain_entry(engine => 'raider', [
+      $explicit->{engine} ? [ '-e', $engine ] : undef,
+      defined $opts->{engine} ? [ '-o', $opts->{engine} ] : undef,
+      $from_yml{engine},
+    ], [ $env_key ? 'env '.$env_key : 'default', $engine ]),
+    $self->_explain_entry(model => 'engine', [
+      $explicit->{model} ? [ '-m', $self->model ] : undef,
+      defined $opts->{model} ? [ '-o', $opts->{model} ] : undef,
+      $from_yml{model},
+    ], defined $default_model ? [ 'default', $default_model ] : undef),
+    $self->_explain_entry(api_key => 'engine', [
+      $explicit->{api_key} ? [ '-k', '(set)' ] : undef,
+      defined $opts->{api_key} ? [ '-o', '(set)' ] : undef,
+      $yml_key ? [ $yml_key->[0], '(set)', $yml_key->[2] ] : undef,
+    ], $env_key ? [ 'env '.$env_key, '(set)' ] : undef),
+  );
+
+  my %flag = (
+    ( $self->has_pack_names ? ( packs => [ '--pack', $self->pack_names ] ) : () ),
+    ( $explicit->{perl} && $self->perl ? ( perl => [ '--perl', 1 ] ) : () ),
+    ( $self->has_detect_flag
+      ? ( detect => [ $self->detect ? '--detect' : '--no-detect', $self->detect ? 1 : 0 ] ) : () ),
+  );
+  my %key = map { $_ => 1 } keys %$opts, keys %yml, keys %flag;
+  delete @key{qw( engine model api_key skills )};
+  for my $key (sort keys %key) {
+    my $applies_to = $self->config->is_app_key($key) ? 'raider' : 'engine';
+    push @values, $self->_explain_entry($key, $applies_to, [
+      $flag{$key} // ( exists $opts->{$key} ? [ '-o', $opts->{$key} ] : undef ),
+      $from_yml{$key},
+    ]);
+  }
+
+  push @values, @yml_skills;
+  push @values, {
+    key        => 'skills',
+    value      => $app_opts->{skills},
+    source     => '-o',
+    shadowed   => [],
+    merged     => 1,
+    applies_to => 'raider',
+  } if $app_opts->{skills};
+  push @values, {
+    key        => 'skills',
+    value      => $self->cli_skill_sources,
+    source     => '--claude/--openai/--skills',
+    shadowed   => [],
+    merged     => 1,
+    applies_to => 'raider',
+  } if $self->has_cli_skill_sources;
+
+  my ( $detecting, $why ) = $self->detection_state;
+  return {
+    %$report,
+    values       => \@values,
+    detection    => $detecting ? 'on' : 'off ('.$why.')',
+    instructions => $self->mission_source,
+    bare         => $self->bare ? 1 : 0,
+    packs        => $self->packs->activation_report,
+    perl_tools   => $self->perl_tools_grant,
+  };
+}
+
+sub _yml_source {
+  my ($self, $layer) = @_;
+  return $layer eq 'top' ? '.raider.yml' : '.raider.yml '.$layer.':';
+}
+
+# One explain entry from candidates [ source, value, shadowed ], highest
+# priority first; the fallback counts only when no candidate is set.
+sub _explain_entry {
+  my ($self, $key, $applies_to, $candidates, $fallback) = @_;
+  my @have = grep { defined } @$candidates;
+  @have = ($fallback) if !@have && $fallback;
+  return unless @have;
+  my ($win, @rest) = @have;
+  return {
+    key        => $key,
+    value      => $win->[1],
+    source     => $win->[0],
+    shadowed   => [ @{ $win->[2] // [] }, map { ( $_->[0], @{ $_->[2] // [] } ) } @rest ],
+    applies_to => $applies_to,
+  };
+}
+
+
+__PACKAGE__->meta->make_immutable;
+
+1;
+
+=seealso
+
+=over
+
+=item * L<Langertha::Raider>
+
+=item * L<Langertha::Raider::CLI>
+
+=item * L<Langertha::Raider::EngineResolver>
+
+=back
+
+=cut

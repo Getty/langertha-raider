@@ -23,7 +23,7 @@ use Module::Runtime ();
 
 B<Internal module.> Its interface may change without notice.
 
-The provider choice of L<Langertha::Raider::CLI>: which engine
+The provider choice of L<Langertha::Raider::Application>: which engine
 (flag, C<-o engine=>, C<engine:> in F<.raider.yml>, the first C<*_API_KEY>
 in the environment, C<anthropic>), which model and API key it is built
 with, and the constructor arguments of the L<Langertha> engine class --
@@ -312,7 +312,7 @@ __PACKAGE__->meta->make_immutable;
 
 =over
 
-=item * L<Langertha::Raider::CLI>
+=item * L<Langertha::Raider::Application>
 
 =item * L<Langertha::Raider::Config>
 
