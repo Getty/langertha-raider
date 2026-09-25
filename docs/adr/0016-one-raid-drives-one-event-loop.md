@@ -21,12 +21,13 @@ the other loop never finishes and the raid hangs. The hang was reproduced with a
 ## Decision
 
 - **A raid drives exactly one IO::Async loop.** Every engine a raider may use (`engine`,
-  `compression_engine`, every `engine_catalog` engine) must resolve to the same loop, each
-  resolved as `async_loop // IO::Async::Loop->new`.
+  `compression_engine`, every `engine_catalog` engine, and `embedding_engine` unless
+  `no_session_embeddings` is set) must resolve to the same loop, each resolved as
+  `async_loop // IO::Async::Loop->new` (embedding engine added 2026-09-26, karr #24).
 - `Langertha::Raider::_check_engine_loops` checks this at the start of `raid_f` and
   `respond_f`. If an engine resolves to a different loop than `engine`, it croaks and names
-  that engine (`compression_engine`, `engine_catalog '<name>'`). The rule is documented in
-  the `raid_f` POD.
+  that engine (`compression_engine`, `engine_catalog '<name>'`, `embedding_engine`). The
+  rule is documented in the `raid_f` POD.
 - **Rejected: binding the inline MCP to each active engine's loop.** The core ticket
   suggested this. It cannot fix the hang, because one `->get` still drives only one loop,
   and the reproduced hang did not involve MCP at all.
@@ -41,8 +42,11 @@ the other loop never finishes and the raid hangs. The hang was reproduced with a
   first request.
 - The inline MCP is added to `$self->engine`'s loop. Since every engine shares that loop,
   this binding is correct by construction.
-- Not covered: user-supplied `mcp_catalog` clients that sit on another loop, and the
-  `embedding_engine`, which is called synchronously.
+- The `embedding_engine` is part of the check: session-history embeddings run in the
+  background through `simple_embedding_f` on the raid's loop, so an embedding engine on
+  another loop would leave them pending forever (karr #24). An auto-detected embedding
+  engine is `engine` itself.
+- Not covered: user-supplied `mcp_catalog` clients that sit on another loop.
 
 ## Source
 

@@ -204,6 +204,14 @@ Revision history for Langertha-Raider
       (plugin_instances, plugin_args, plugin_pipeline_tool_call_f) instead
       of their private names; this needs a Langertha release that ships
       them (core k226).
+    - Session-history embeddings no longer block the event loop: each
+      message is embedded in the background through simple_embedding_f,
+      a failed embedding is logged and skipped, and the search tool ranks
+      only what is embedded so far (falling back to text match if the
+      query itself cannot be embedded). no_session_embeddings is no longer
+      needed as a deadlock workaround. An embedding_engine on a different
+      event loop than engine is refused at the start of the raid, and an
+      embedding engine without simple_embedding_f gets no embeddings.
     - New Langertha::Raider->cancel stops a raid at its next safe point and
       is safe in a signal handler; the raid returns a Result of type
       cancelled (is_cancelled), and a tool call it cut off is reported as
