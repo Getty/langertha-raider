@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-09-25T22:49:25Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-25T22:49:25Z
+created: 2026-09-25T22:29:07Z
+id: 84
+priority: low
+started: 2026-09-25T22:37:19Z
+status: done
+tags:
+- tests
+title: 'Tests: isolate_home() in allen Tests, die bin/raider oder die CLI starten'
+updated: 2026-09-25T22:49:25Z
+---
+
+Aus #82: Test::Raider::Env::isolate_home() existiert und ist in den Pack-/Mission-Tests aktiv. Hall-, ACP-, Interrupt- und Session-Tests starten die CLI weiterhin mit echtem HOME (~/.raider/packs, ~/.raider/sessions koennten reinspielen). Einzeilig nachziehen.
