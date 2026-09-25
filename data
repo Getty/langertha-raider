@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-25T02:55:48Z
+claimed_by: worker-cli3
+class: standard
+completed: 2026-09-25T02:55:48Z
+created: 2026-09-25T02:38:30Z
+id: 61
+priority: low
+started: 2026-09-25T02:38:47Z
+status: done
+tags:
+- cli
+- json
+title: Signal waehrend Startup ohne Dokument; Tool-Subprozesse bei Abbruch nicht aufgeraeumt;
+  Session-Embedding-Call bei jedem Lauf
+updated: 2026-09-25T02:55:53Z
+---
+
+Aus #56: (1) Signal vor run.started (Config, MCP-Setup) beendet raider ohne Dokument. (2) Tool-Subprozesse (MCP bash u.a.) werden bei Abbruch nicht aufgeraeumt. (3) Der synchrone Session-History-Embedding-HTTP-Call laeuft bei jedem Lauf (siehe #24).
+
+Punkt 3 (Embedding-Call) bleibt bei #24. Upstream-Ticket auf p5-mcp-run-Board angelegt (Signal-Weiterleitung bei belegtem Handler).
