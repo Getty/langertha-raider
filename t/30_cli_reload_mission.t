@@ -1,6 +1,9 @@
 use strict;
 use warnings;
 use Test2::V0;
+use lib 't/lib';
+use Test::Raider::Env qw( isolate_home );
+isolate_home();
 use File::Temp qw( tempdir );
 use Path::Tiny;
 use Langertha::Raider::CLI;

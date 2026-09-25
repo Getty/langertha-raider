@@ -5,7 +5,8 @@ use File::Temp qw( tempdir );
 use Path::Tiny;
 use YAML::PP ();
 use lib 't/lib';
-use Test::Raider::Env qw( clear_engine_env );
+use Test::Raider::Env qw( clear_engine_env isolate_home );
+isolate_home();
 use Langertha::Raider::CLI;
 use Langertha::Raider::Hall;
 

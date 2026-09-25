@@ -3,6 +3,8 @@ use warnings;
 use Path::Tiny;
 use lib 't/lib';
 use Test::More;
+use Test::Raider::Env qw( isolate_home );
+isolate_home();
 use Langertha::Raider::CLI;  # populates $INC for pack discovery
 use Langertha::Raider::Packs;
 

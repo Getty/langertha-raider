@@ -1,11 +1,12 @@
 package Test::Raider::Env;
-# ABSTRACT: Clear engine-reaching env vars before a raider subprocess
+# ABSTRACT: Keep tests off real engines and the real home directory
 
 use strict;
 use warnings;
 use Exporter 'import';
+use File::Temp qw( tempdir );
 
-our @EXPORT_OK = qw( clear_engine_env );
+our @EXPORT_OK = qw( clear_engine_env isolate_home );
 
 # Envs the installed Langertha engines read for a base URL or token but
 # that don't end in _API_KEY, so the regex below doesn't catch them
@@ -40,6 +41,24 @@ sub clear_engine_env {
   delete @ENV{ grep { /_API_KEY$/ } keys %ENV };
   delete @ENV{ @EXTRA_ENGINE_ENV };
   return;
+}
+
+=func isolate_home
+
+    use Test::Raider::Env qw( isolate_home );
+    my $home = isolate_home();
+
+Points C<$ENV{HOME}> at a fresh temporary directory (removed at exit) and
+returns it, so nothing the test builds reads the developer's real
+F<~/.raider/> (packs in F<~/.raider/packs/>, see
+L<Langertha::Raider::Packs/build_packs>). Call it once at the top of any
+test that loads packs.
+
+=cut
+
+sub isolate_home {
+  $ENV{HOME} = tempdir(CLEANUP => 1);
+  return $ENV{HOME};
 }
 
 1;

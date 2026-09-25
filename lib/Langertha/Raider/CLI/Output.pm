@@ -148,7 +148,9 @@ sub render_inline_code {
 Prints a report of L<Langertha::Raider::CLI/explain_config>: one line per
 setting with its value, source, what it overrides and whether it applies to
 the engine or to raider; the instructions source (C<-M>, C<.raider.md>,
-C<default>) with C<(bare)> under C<--bare>.
+C<default>) with C<(bare)> under C<--bare>; each pack with its state, the
+kind of place it was found in (C<project>, C<home>, C<shipped>, C<env>)
+and why it is on or off; the pack directories that were skipped, and why.
 
 =cut
 
@@ -174,10 +176,14 @@ sub config_report {
   if (my $packs = $report->{packs}) {
     $self->emit($self->c(meta => 'packs:  '), $self->c(meta => '(detection '.$report->{detection}.')'), "\n");
     for my $p (@$packs) {
-      $self->emit(sprintf("  %s %-8s  %s\n", $self->c(title => sprintf('%-20s', $p->{name})),
-        $p->{active} ? 'active' : 'inactive', $self->c(meta => $self->pack_reason($p, rule => 1))));
+      $self->emit(sprintf("  %s %-8s  %-7s  %s\n", $self->c(title => sprintf('%-20s', $p->{name})),
+        $p->{active} ? 'active' : 'inactive', $p->{origin} // '',
+        $self->c(meta => $self->pack_reason($p, rule => 1))));
       $self->emit('    ', $self->c(warn => 'note: '.$_), "\n") for @{ $p->{detection}{notes} // [] };
     }
+  }
+  for my $s (@{ $report->{skipped_packs} // [] }) {
+    $self->emit('  ', $self->c(warn => 'skipped pack '.$s->{name}.' ('.$s->{origin}.' '.$s->{path}.'): '.$s->{reason}), "\n");
   }
   if (my $perl = $report->{perl_tools}) {
     $self->emit($self->c(meta => 'perl tools: '), $perl->{enabled} ? 'on' : 'off',

@@ -1,6 +1,9 @@
 use strict;
 use warnings;
 use Test::More;
+use lib 't/lib';
+use Test::Raider::Env qw( isolate_home );
+isolate_home();
 use File::Temp qw( tempdir );
 use Path::Tiny;
 use YAML::PP ();

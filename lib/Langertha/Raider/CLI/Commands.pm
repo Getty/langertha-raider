@@ -299,6 +299,9 @@ sub cmd_packs {
     $out->emit('  '.$active.' '.$name.' ', $out->c(meta => '('.$info->{exclusive_group}.')'),
       ( length($why{$name} // '') ? ( ' ', $out->c(meta => $why{$name}) ) : () ), "\n");
   }
+  for my $s (@{$collection->skipped_packs}) {
+    $out->emit('  ', $out->c(warn => 'skipped pack '.$s->{name}.' ('.$s->{origin}.' '.$s->{path}.'): '.$s->{reason}), "\n");
+  }
   return;
 }
 

@@ -483,8 +483,10 @@ has detect => (
 
 =attr packs
 
-L<Langertha::Raider::Packs::Collection> of the installed packs. Defaults
-come from the bundled C<share/packs/> plus C<$RAIDER_PACK_DIRS>. Which are
+L<Langertha::Raider::Packs::Collection> of the installed packs: those in
+F<< L</root>/.raider/packs/ >>, F<~/.raider/packs/>, the bundled
+C<share/packs/> and C<$RAIDER_PACK_DIRS>, the first place winning for a
+name (L<Langertha::Raider::Packs/build_packs>). Which are
 enabled, highest priority first (ADR 0012); with L</bare> only
 C<--pack NAME> applies:
 
@@ -516,9 +518,9 @@ L<Langertha::Raider::Packs::Collection/activation_report>. An invalid rule
 croaks.
 
 Detection only decides which packs are active, it grants nothing (ADR
-0005). Rules from the project's F<.raider.yml> are evaluated right away:
-the workspace trust decision of ADR 0004, which is meant to gate them, does
-not exist yet.
+0005). Rules from the project's F<.raider.yml> are evaluated and packs
+from its F<.raider/packs/> are loaded right away: the workspace trust
+decision of ADR 0004, which is meant to gate both, does not exist yet.
 
 =cut
 
@@ -1413,8 +1415,10 @@ are never included. Builds no engine.
 C<detection> says whether pack detection runs (C<on>, or C<off> with what
 switched it off) and C<packs> is the
 L<Langertha::Raider::Packs::Collection/activation_report>: each pack with
-its source (C<flag>, C<config>, C<default>, C<detected>, C<manual>) and,
-for detection rules, the clause that matched or failed. C<perl_tools> is
+its source (C<flag>, C<config>, C<default>, C<detected>, C<manual>), its
+C<origin> (C<project>, C<home>, C<shipped>, C<env>) and, for detection
+rules, the clause that matched or failed. C<skipped_packs> is
+L<Langertha::Raider::Packs::Collection/skipped_packs>. C<perl_tools> is
 L</perl_tools_grant>: whether the Perl tools are mounted, and why.
 
 C<instructions> is L</mission_source> and C<bare> is L</bare>.
@@ -1506,12 +1510,13 @@ sub explain_config {
   my ( $detecting, $why ) = $self->detection_state;
   return {
     %$report,
-    values       => \@values,
-    detection    => $detecting ? 'on' : 'off ('.$why.')',
-    instructions => $self->mission_source,
-    bare         => $self->bare ? 1 : 0,
-    packs        => $self->packs->activation_report,
-    perl_tools   => $self->perl_tools_grant,
+    values        => \@values,
+    detection     => $detecting ? 'on' : 'off ('.$why.')',
+    instructions  => $self->mission_source,
+    bare          => $self->bare ? 1 : 0,
+    packs         => $self->packs->activation_report,
+    skipped_packs => $self->packs->skipped_packs,
+    perl_tools    => $self->perl_tools_grant,
   };
 }
 

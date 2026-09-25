@@ -2,6 +2,9 @@ use strict;
 use warnings;
 use utf8;
 use Test2::V0;
+use lib 't/lib';
+use Test::Raider::Env qw( isolate_home );
+isolate_home();
 use Encode qw( decode_utf8 );
 use File::Temp qw( tempdir );
 use Path::Tiny;
@@ -251,10 +254,10 @@ subtest 'raider config explain and /packs show source and clause' => sub {
   $out->config_report($report);
   my $text = $read->();
   like($text, qr/^packs:  \(detection on\)$/m, 'packs section');
-  like($text, qr/^  det-rust\s+active\s+detected: must file=Cargo\.toml \(Cargo\.toml\) \[rule: pack default\]$/m,
+  like($text, qr/^  det-rust\s+active\s+env\s+detected: must file=Cargo\.toml \(Cargo\.toml\) \[rule: pack default\]$/m,
     'detected line');
-  like($text, qr/^  git-guru\s+active\s+config: \.raider\.yml packs:$/m, 'config line');
-  like($text, qr/^  det-formal\s+inactive\s+not matched: must file=FORMAL: no match \[rule: pack default\]$/m,
+  like($text, qr/^  git-guru\s+active\s+shipped\s+config: \.raider\.yml packs:$/m, 'config line');
+  like($text, qr/^  det-formal\s+inactive\s+env\s+not matched: must file=FORMAL: no match \[rule: pack default\]$/m,
     'not detected line');
 
   like(app($ws, detect => 0)->explain_config->{detection}, 'off (--no-detect)', 'off by flag');

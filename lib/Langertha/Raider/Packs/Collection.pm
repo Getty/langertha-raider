@@ -71,11 +71,18 @@ Packs switched off explicitly (C<--no-pack>): C<< { NAME => { source, reason } }
 Outcome of each detection rule: C<< { NAME => { rule_from, result, reason, notes } } >>,
 C<result> being C<matched>, C<not matched> or C<skipped>.
 
+=attr skipped_packs
+
+Pack directories that could not be loaded, in search order:
+C<< [ { name, origin, path, reason } ] >> (see
+L<Langertha::Raider::Packs/build_packs>).
+
 =cut
 
-has sources      => (is => 'ro', isa => 'HashRef', default => sub { {} });
-has switched_off => (is => 'ro', isa => 'HashRef', default => sub { {} });
-has detections   => (is => 'rw', isa => 'HashRef', default => sub { {} });
+has sources       => (is => 'ro', isa => 'HashRef', default => sub { {} });
+has switched_off  => (is => 'ro', isa => 'HashRef', default => sub { {} });
+has detections    => (is => 'rw', isa => 'HashRef', default => sub { {} });
+has skipped_packs => (is => 'ro', isa => 'ArrayRef[HashRef]', default => sub { [] });
 
 has _init_defaults => (
   is      => 'ro',
@@ -195,9 +202,10 @@ sub enable_detected {
 
 One entry per pack that is enabled, was switched off explicitly or has a
 detection outcome, sorted by name; rules for packs that are not installed
-come last:
+come last. C<origin> is L<Langertha::Raider::Packs::Pack/origin>:
 
-    { name => 'perl', exclusive_group => 'power', active => 1,
+    { name => 'perl', exclusive_group => 'power', origin => 'shipped',
+      active => 1,
       source => 'detected', reason => 'must file=cpanfile (cpanfile)',
       detection => { rule_from => 'pack default', result => 'matched',
                      reason => '...', notes => [] } }
@@ -212,9 +220,11 @@ sub activation_report {
     my $why       = $active ? $self->sources->{$name} : $self->switched_off->{$name};
     my $detection = $self->detections->{$name};
     next unless $active || $why || $detection;
+    my $pack = $self->packs_by_name->{$name};
     push @report, {
       name            => $name,
-      exclusive_group => $self->packs_by_name->{$name}->exclusive_group,
+      exclusive_group => $pack->exclusive_group,
+      origin          => $pack->origin,
       active          => $active,
       ( $why       ? ( source => $why->{source}, reason => $why->{reason} ) : () ),
       ( $detection ? ( detection => $detection ) : () ),
@@ -288,7 +298,7 @@ sub is_active { $_[0]->_is_enabled($_[1]) }
 =method pack_info
 
     my $info = $collection->pack_info('caveman');
-    # { name, exclusive_group, is_active, has_skill_text, path }
+    # { name, exclusive_group, is_active, has_skill_text, path, origin }
 
 =cut
 
@@ -301,6 +311,7 @@ sub pack_info {
     is_active       => $self->_is_enabled($name) ? JSON::MaybeXS::true : JSON::MaybeXS::false,
     has_skill_text  => $pack->has_skill_text ? JSON::MaybeXS::true : JSON::MaybeXS::false,
     path            => $pack->path,
+    origin          => $pack->origin,
   };
 }
 
