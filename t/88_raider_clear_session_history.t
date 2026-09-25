@@ -33,12 +33,19 @@ use Langertha::Raider;
 {
   package MockEmbeddingEngine;
   use Moose;
+  use Future;
   my @VOCAB = qw( aardvark zebra narwhal tusk berlin weather time );
 
   sub simple_embedding {
     my ( $self, $text ) = @_;
     my $lc_text = lc $text;
     return [ map { scalar( () = $lc_text =~ /\Q$_\E/g ) } @VOCAB ];
+  }
+
+  # What raider calls: an already-completed Future, so the slot fills at once.
+  sub simple_embedding_f {
+    my ( $self, $text ) = @_;
+    return Future->call(sub { Future->done($self->simple_embedding($text)) });
   }
 
   __PACKAGE__->meta->make_immutable;
@@ -126,7 +133,7 @@ subtest 'clear_session_history on a fresh raider is a no-op' => sub {
 # --- After clear, pushing new messages restores correct search results ---
 #
 # The previous failure mode (#99/#105): spliced the public ArrayRef,
-# _session_embeddings stayed stale, _query_session_history silently
+# _session_embeddings stayed stale, _query_session_history_f silently
 # degraded to the text fallback and the embedding route was never usable
 # again. clear_session_history fixes that by clearing both sides, so a
 # fresh push re-aligns the arrays and semantic search resumes.
@@ -153,7 +160,7 @@ subtest 'after clear, new pushes restore aligned embedding search' => sub {
       scalar @{ $raider->_session_embeddings },
     'arrays are aligned after clear + push' );
 
-  my $text = $raider->_query_session_history({ search => 'narwhal tusk' });
+  my $text = $raider->_query_session_history_f({ search => 'narwhal tusk' })->get;
   like( $text, qr/narwhal tusk/, 'embedding search returns the new message' );
   unlike( $text, qr/berlin weather/,
     'embedding search does not return the cleared message' );

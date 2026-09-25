@@ -10,6 +10,7 @@ requires 'IO::Async';
 requires 'IO::Prompt::Tiny';
 requires 'IPC::Run';
 requires 'JSON::MaybeXS';
+requires 'Log::Any';
 requires 'Langertha', '0.503';
 requires 'MCP::Run::Bash', '0.106';
 requires 'MCP::Server';

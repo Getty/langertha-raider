@@ -85,7 +85,7 @@ subtest 'self-tool definitions - disabled' => sub {
   is(scalar @$defs, 0, 'no self-tools when raider_mcp not set');
 };
 
-# --- Test: _execute_self_tool ---
+# --- Test: _execute_self_tool_f ---
 
 subtest 'execute ask_user with callback' => sub {
   my $raider = Langertha::Raider->new(
@@ -97,10 +97,10 @@ subtest 'execute ask_user with callback' => sub {
     },
   );
 
-  my $result = $raider->_execute_self_tool('raider_ask_user', {
+  my $result = $raider->_execute_self_tool_f('raider_ask_user', {
     question => 'What color?',
     options  => ['red', 'blue'],
-  });
+  })->get;
 
   is($result->{type}, 'result', 'ask_user with callback returns result');
   is($result->{content}[0]{text}, 'I choose red', 'callback answer used');
@@ -112,10 +112,10 @@ subtest 'execute ask_user without callback' => sub {
     raider_mcp => 1,
   );
 
-  my $result = $raider->_execute_self_tool('raider_ask_user', {
+  my $result = $raider->_execute_self_tool_f('raider_ask_user', {
     question => 'What color?',
     options  => ['red', 'blue'],
-  });
+  })->get;
 
   is($result->{type}, 'question', 'ask_user without callback returns question');
   is($result->{question}, 'What color?', 'question text preserved');
@@ -128,9 +128,9 @@ subtest 'execute abort' => sub {
     raider_mcp => 1,
   );
 
-  my $result = $raider->_execute_self_tool('raider_abort', {
+  my $result = $raider->_execute_self_tool_f('raider_abort', {
     reason => 'Cannot continue',
-  });
+  })->get;
 
   is($result->{type}, 'abort', 'abort returns abort type');
   is($result->{reason}, 'Cannot continue', 'abort reason preserved');
@@ -144,9 +144,9 @@ subtest 'execute pause with callback' => sub {
     on_pause   => sub { $paused_reason = $_[0] },
   );
 
-  my $result = $raider->_execute_self_tool('raider_pause', {
+  my $result = $raider->_execute_self_tool_f('raider_pause', {
     reason => 'Taking a break',
-  });
+  })->get;
 
   is($result->{type}, 'result', 'pause with callback returns result');
   is($paused_reason, 'Taking a break', 'on_pause callback invoked');
@@ -158,9 +158,9 @@ subtest 'execute pause without callback' => sub {
     raider_mcp => 1,
   );
 
-  my $result = $raider->_execute_self_tool('raider_pause', {
+  my $result = $raider->_execute_self_tool_f('raider_pause', {
     reason => 'Thinking',
-  });
+  })->get;
 
   is($result->{type}, 'pause', 'pause without callback returns pause');
   is($result->{reason}, 'Thinking', 'reason preserved');
@@ -172,10 +172,10 @@ subtest 'execute wait' => sub {
     raider_mcp => 1,
   );
 
-  my $result = $raider->_execute_self_tool('raider_wait', {
+  my $result = $raider->_execute_self_tool_f('raider_wait', {
     seconds => 5,
     reason  => 'Rate limiting',
-  });
+  })->get;
 
   is($result->{type}, 'wait', 'wait returns wait type');
   is($result->{seconds}, 5, 'seconds preserved');
@@ -191,10 +191,10 @@ subtest 'execute wait_for with callback' => sub {
     },
   );
 
-  my $result = $raider->_execute_self_tool('raider_wait_for', {
+  my $result = $raider->_execute_self_tool_f('raider_wait_for', {
     condition => 'file_exists',
     args      => { path => '/tmp/test' },
-  });
+  })->get;
 
   is($result->{type}, 'result', 'wait_for returns result');
   like($result->{content}[0]{text}, qr/file_exists/, 'condition included');
@@ -207,9 +207,9 @@ subtest 'execute wait_for without callback dies' => sub {
   );
 
   eval {
-    $raider->_execute_self_tool('raider_wait_for', {
+    $raider->_execute_self_tool_f('raider_wait_for', {
       condition => 'something',
-    });
+    })->get;
   };
   like($@, qr/No on_wait_for callback/, 'dies without callback');
 };
@@ -231,22 +231,22 @@ subtest 'session history query' => sub {
     { role => 'user', content => 'And about Python' },
   );
 
-  my $result = $raider->_execute_self_tool('raider_session_history', {});
+  my $result = $raider->_execute_self_tool_f('raider_session_history', {})->get;
   is($result->{type}, 'result', 'returns result');
   like($result->{content}[0]{text}, qr/Hello world/, 'contains first message');
   like($result->{content}[0]{text}, qr/Perl/, 'contains Perl message');
 
   # Test text filter
-  $result = $raider->_execute_self_tool('raider_session_history', {
+  $result = $raider->_execute_self_tool_f('raider_session_history', {
     query => 'Perl',
-  });
+  })->get;
   like($result->{content}[0]{text}, qr/Perl/, 'query filter works');
   unlike($result->{content}[0]{text}, qr/Hello world/, 'query filter excludes non-matching');
 
   # Test last_n
-  $result = $raider->_execute_self_tool('raider_session_history', {
+  $result = $raider->_execute_self_tool_f('raider_session_history', {
     last_n => 2,
-  });
+  })->get;
   like($result->{content}[0]{text}, qr/Perl is a programming/, 'last_n returns recent');
   like($result->{content}[0]{text}, qr/Python/, 'last_n returns most recent');
 };
@@ -334,7 +334,7 @@ subtest 'session history rendering across wire formats' => sub {
   my $text;
   {
     local $SIG{__WARN__} = sub { push @warnings, $_[0] };
-    $text = $raider->_query_session_history({});
+    $text = $raider->_query_session_history_f({})->get;
   }
 
   is(scalar @warnings, 0, 'no warnings while rendering mixed-wire history')
@@ -377,8 +377,8 @@ subtest 'session history query filters on rendered payload' => sub {
   my ( $hamburg, $kiel );
   {
     local $SIG{__WARN__} = sub { push @warnings, $_[0] };
-    $hamburg = $raider->_query_session_history({ query => 'Hamburg' });
-    $kiel    = $raider->_query_session_history({ query => 'Kiel: windy' });
+    $hamburg = $raider->_query_session_history_f({ query => 'Hamburg' })->get;
+    $kiel    = $raider->_query_session_history_f({ query => 'Kiel: windy' })->get;
   }
   is(scalar @warnings, 0, 'no warnings while filtering mixed-wire history')
     or diag("warnings: @warnings");
@@ -409,7 +409,7 @@ subtest 'register_session_history_tool renders identically' => sub {
   is(scalar @warnings, 0, 'no warnings from the MCP-registered renderer')
     or diag("warnings: @warnings");
 
-  is($result->{content}[0]{text}, $raider->_query_session_history({}),
+  is($result->{content}[0]{text}, $raider->_query_session_history_f({})->get,
     'both history readers share one renderer');
 };
 
@@ -418,13 +418,13 @@ subtest 'empty session history' => sub {
     engine     => MockEngine->new,
     raider_mcp => 1,
   );
-  is($raider->_query_session_history({}), 'No messages in session history.',
+  is($raider->_query_session_history_f({})->get, 'No messages in session history.',
     'empty history keeps its placeholder');
 };
 
 # --- Test: session-history embeddings (karr #99) ---
 #
-# _query_session_history looks the vector of history element $i up as
+# _query_session_history_f looks the vector of history element $i up as
 # _session_embeddings->[$i], so the two arrays must stay 1:1: a message
 # without embeddable text still needs its slot, filled with undef. A missing
 # slot shifts every later vector onto the wrong message and the similarity
@@ -435,6 +435,7 @@ subtest 'empty session history' => sub {
 {
   package MockEmbeddingEngine;
   use Moose;
+  use Future;
 
   # Deterministic bag-of-words vector over a fixed vocabulary — similar
   # enough to real embeddings to prove the search lands on the right
@@ -451,6 +452,12 @@ subtest 'empty session history' => sub {
       if $self->has_die_on && index($text, $self->die_on) >= 0;
     my $lc_text = lc $text;
     return [ map { scalar( () = $lc_text =~ /\Q$_\E/g ) } @VOCAB ];
+  }
+
+  # What raider calls: an already-completed Future, so the slot fills at once.
+  sub simple_embedding_f {
+    my ( $self, $text ) = @_;
+    return Future->call(sub { Future->done($self->simple_embedding($text)) });
   }
 
   __PACKAGE__->meta->make_immutable;
@@ -512,7 +519,7 @@ subtest 'session embedding search returns the matching message' => sub {
   );
   $raider->_push_session_history(embedding_probe_history());
 
-  my $text = $raider->_query_session_history({ search => 'narwhal tusk' });
+  my $text = $raider->_query_session_history_f({ search => 'narwhal tusk' })->get;
   my ( $top ) = split /\n\n/, $text;
   like($top, qr/Narwhal tusk measurements/, 'top hit is the message that matches');
   unlike($top, qr/zebra/, 'not the message a drifted index would have returned');
@@ -531,7 +538,7 @@ subtest 'drifted embeddings degrade to text search instead of lying' => sub {
   push @{$raider->session_history},
     { role => 'assistant', content => 'Berlin weather note' };
 
-  my $text = $raider->_query_session_history({ search => 'narwhal tusk' });
+  my $text = $raider->_query_session_history_f({ search => 'narwhal tusk' })->get;
   my @hits = split /\n\n/, $text;
   is(scalar @hits, 1, 'falls back to the text search when the arrays drifted');
   like($hits[0], qr/Narwhal tusk measurements/, 'and still finds the right message');
@@ -605,36 +612,36 @@ subtest 'manage MCPs' => sub {
   ok(!exists $raider->_active_catalog_mcps->{email}, 'email not auto-activated');
 
   # List
-  my $result = $raider->_execute_self_tool('raider_manage_mcps', {
+  my $result = $raider->_execute_self_tool_f('raider_manage_mcps', {
     action => 'list',
-  });
+  })->get;
   like($result->{content}[0]{text}, qr/database \[ACTIVE\]/, 'list shows active');
   like($result->{content}[0]{text}, qr/email \[inactive\]/, 'list shows inactive');
 
   # Activate
-  $result = $raider->_execute_self_tool('raider_manage_mcps', {
+  $result = $raider->_execute_self_tool_f('raider_manage_mcps', {
     action => 'activate',
     name   => 'email',
-  });
+  })->get;
   like($result->{content}[0]{text}, qr/Activated/, 'activate succeeds');
   ok(exists $raider->_active_catalog_mcps->{email}, 'email now active');
   ok($raider->_tools_dirty, 'tools marked dirty after activate');
   $raider->_tools_dirty(0);
 
   # Deactivate
-  $result = $raider->_execute_self_tool('raider_manage_mcps', {
+  $result = $raider->_execute_self_tool_f('raider_manage_mcps', {
     action => 'deactivate',
     name   => 'database',
-  });
+  })->get;
   like($result->{content}[0]{text}, qr/Deactivated/, 'deactivate succeeds');
   ok(!exists $raider->_active_catalog_mcps->{database}, 'database now inactive');
   ok($raider->_tools_dirty, 'tools marked dirty after deactivate');
 
   # Error cases
-  $result = $raider->_execute_self_tool('raider_manage_mcps', {
+  $result = $raider->_execute_self_tool_f('raider_manage_mcps', {
     action => 'activate',
     name   => 'nonexistent',
-  });
+  })->get;
   like($result->{content}[0]{text}, qr/not found/, 'activate non-existent fails gracefully');
 };
 
@@ -704,7 +711,7 @@ subtest 'cosine similarity' => sub {
 # tool_use left without a tool_result is a 400 on strict providers like Anthropic.
 #
 # These drive the real raid_f -> respond_f loop offline through a scripted engine,
-# so they exercise the continuation math the isolated _execute_self_tool tests
+# so they exercise the continuation math the isolated _execute_self_tool_f tests
 # above never reach.
 
 {

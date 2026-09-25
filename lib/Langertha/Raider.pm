@@ -9,6 +9,7 @@ use Carp qw( croak );
 use Module::Runtime qw( use_module );
 use Scalar::Util qw( blessed refaddr weaken );
 use JSON::MaybeXS qw( JSON );
+use Log::Any qw( $log );
 use MCP::Server;
 use Net::Async::MCP;
 use IO::Async::Handle;
@@ -728,6 +729,11 @@ Optional engine with L<Langertha::Role::Embedding> for semantic history search.
 When not set, auto-detects if the main C<engine> supports embeddings.
 Set L</no_session_embeddings> to disable auto-detection.
 
+Each C<session_history> entry is embedded in the background through
+C<simple_embedding_f>, so the raid never waits for it. Like every engine of
+the raider, the embedding engine must run on the same event loop as
+C<engine> (see L</raid_f>).
+
 =cut
 
 has no_session_embeddings => (
@@ -737,9 +743,11 @@ has no_session_embeddings => (
 
 =attr no_session_embeddings
 
-When true, disables automatic embedding computation for session history
-entries. Useful when the engine supports embeddings but calling it would
-cause issues (e.g. self-referencing proxy deadlock).
+When true, no session history entry is embedded, and the C<search> of
+C<raider_session_history> falls back to a plain text match. Use it when the
+engine supports embeddings but they are not wanted, e.g. to save the extra
+request per message. With it set, C<embedding_engine> is also left out of
+the event-loop check of L</raid_f>.
 
 =cut
 
@@ -747,6 +755,15 @@ has _session_embeddings => (
   is => 'ro',
   isa => 'ArrayRef',
   default => sub { [] },
+);
+
+# The in-flight simple_embedding_f futures of _embed_session_slot, keyed by
+# refaddr. Held here so none is lost to GC mid-request; each removes itself
+# when ready, clear_session_history cancels the rest.
+has _pending_embeddings => (
+  is => 'ro',
+  isa => 'HashRef',
+  default => sub { {} },
 );
 
 sub BUILD {
@@ -780,6 +797,11 @@ sub clear_session_history {
   my ( $self ) = @_;
   splice @{$self->session_history};
   splice @{$self->_session_embeddings};
+  # Their vectors would belong to entries that are gone: stop the requests.
+  my $pending = $self->_pending_embeddings;
+  my @inflight = values %$pending;
+  %$pending = ();
+  $_->cancel for grep { !$_->is_ready } @inflight;
   return $self;
 }
 
@@ -790,7 +812,8 @@ sub clear_session_history {
 Empties C<session_history> and the matching C<_session_embeddings> array
 in lock-step, so the 1:1 invariant both readers of C<session_history> rely
 on is preserved. Use this instead of splicing C<session_history> directly,
-which leaves C<_session_embeddings> stale.
+which leaves C<_session_embeddings> stale. Embedding requests still in
+flight for the cleared entries are cancelled.
 
 =cut
 
@@ -1393,7 +1416,7 @@ sub _self_tool_definitions {
   return \@tools;
 }
 
-sub _execute_self_tool {
+async sub _execute_self_tool_f {
   my ( $self, $name, $input ) = @_;
   my $short = $name;
   $short =~ s/^raider_//;
@@ -1433,7 +1456,7 @@ sub _execute_self_tool {
   }
 
   if ($short eq 'session_history') {
-    return { type => 'result', content => [{ type => 'text', text => $self->_query_session_history($input) }] };
+    return { type => 'result', content => [{ type => 'text', text => await $self->_query_session_history_f($input) }] };
   }
 
   if ($short eq 'manage_mcps') {
@@ -1447,23 +1470,39 @@ sub _execute_self_tool {
   die "Unknown self-tool: $name";
 }
 
-sub _query_session_history {
+async sub _query_session_history_f {
   my ( $self, $args ) = @_;
-  my @hist = @{$self->session_history};
+  my $search = $args->{search};
 
   # Semantic search via embeddings. The vector of history element $i is
   # _session_embeddings->[$i], so a length mismatch means the two arrays drifted
   # apart (session_history is a public ArrayRef, code outside _push_session_history
   # can splice it) — searching a drifted index would answer with the wrong
-  # message, so degrade to the text search instead of lying.
-  if (my $search = $args->{search}) {
-    my $engine = $self->_get_embedding_engine;
-    $engine = undef unless @{$self->_session_embeddings} == @hist;
-    if ($engine) {
-      my $query_vec = $engine->simple_embedding($search);
+  # message, so degrade to the text search instead of lying. A failed query
+  # embedding degrades the same way.
+  my $query_vec;
+  my $engine = $search ? $self->_get_embedding_engine : undef;
+  if ($engine && @{$self->_session_embeddings} == @{$self->session_history}) {
+    ( $query_vec ) = await Future->call(sub { $engine->simple_embedding_f($search) })
+      ->else(sub {
+        $log->warnf('[%s] session history search embedding failed, using text match: %s',
+          __PACKAGE__, $_[0]);
+        return Future->done;
+      });
+  }
+
+  # Read after the await: the history may have changed meanwhile, and more
+  # background embeddings may have landed.
+  my @hist  = @{$self->session_history};
+  my $slots = $self->_session_embeddings;
+
+  if ($search) {
+    # A slot whose embedding is still in flight (or failed) is undef and simply
+    # not scored: the search ranks what is embedded now and never waits.
+    if ($query_vec && @$slots == @hist) {
       my @scored;
       for my $i (0..$#hist) {
-        my $emb = $self->_session_embeddings->[$i];
+        my $emb = $slots->[$i];
         next unless $emb;
         my $sim = _cosine_similarity($query_vec, $emb);
         push @scored, { idx => $i, score => $sim };
@@ -1567,37 +1606,65 @@ sub _push_session_history {
   my ( $self, @msgs ) = @_;
   push @{$self->session_history}, @msgs;
 
-  # This computes the embeddings SYNCHRONOUSLY: simple_embedding is a blocking
-  # LWP request (Role::Embedding), run once per message inline in the async raid
-  # loop. It stalls the IO::Async reactor and deadlocks outright when the engine
-  # URL points back at a proxy served by that same reactor — the reason
-  # no_session_embeddings exists. Moving it off the loop-critical path is k172
-  # (it is not the fire-and-forget the old comment here claimed).
+  # The embeddings are computed in the background (simple_embedding_f on the
+  # raid's loop, k24): the raid never waits for them, so a slow embedding
+  # endpoint, or one served by this same reactor, cannot stall it.
   #
-  # _query_session_history looks the vector of history element $i up as
-  # _session_embeddings->[$i], so this must push EXACTLY one slot per message — a
-  # message with no embeddable text gets undef, never nothing. Skipping a slot
-  # shifts every later vector onto the wrong message and the similarity search
-  # silently answers with that one.
-  my $engine = $self->_get_embedding_engine;
-  unless ($engine) {
-    push @{$self->_session_embeddings}, (undef) x scalar @msgs;
-    return;
-  }
+  # _query_session_history_f looks the vector of history element $i up as
+  # _session_embeddings->[$i], so this reserves EXACTLY one slot per message,
+  # right now and synchronously — undef until its embedding lands, and for good
+  # when a message has no embeddable text or its embedding fails. Skipping a
+  # slot shifts every later vector onto the wrong message and the similarity
+  # search silently answers with that one.
+  my $slots = $self->_session_embeddings;
+  my $first = @$slots;
+  push @$slots, (undef) x scalar @msgs;
 
-  for my $msg (@msgs) {
+  my $engine = $self->_get_embedding_engine or return;
+  for my $n (0..$#msgs) {
     # The rendered payload, not the raw {content}: an element's shape follows
     # the engine's tool_wire_format, so {content} is an ArrayRef of blocks on
     # anthropic and absent entirely on gemini ({parts}) and on responses
     # envelope items. It is also the text the grep fallback in
-    # _query_session_history matches, so both search modes see one history
+    # _query_session_history_f matches, so both search modes see one history
     # element the same way.
-    my $text = _render_history_payload($msg);
-    my $vec;
-    $vec = eval { $engine->simple_embedding($text) } if length $text;
-    push @{$self->_session_embeddings}, $vec;
+    my $text = _render_history_payload($msgs[$n]);
+    $self->_embed_session_slot($engine, $first + $n, $msgs[$n], $text) if length $text;
   }
 
+  return;
+}
+
+# Fires the embedding of one history entry and fills slot $i when it lands.
+# By then the history may have been cleared, spliced or refilled, so the vector
+# is stored only while slot $i still belongs to the very same entry ($msg is
+# held by this closure, so its address cannot be reused meanwhile). A failure
+# is logged and leaves the slot undef; it never reaches the raid.
+sub _embed_session_slot {
+  my ( $self, $engine, $i, $msg, $text ) = @_;
+  weaken( my $weak = $self );
+  my $f = Future->call(sub { $engine->simple_embedding_f($text) });
+  $f->on_done(sub {
+    my ( $vec ) = @_;
+    my $raider = $weak or return;
+    return unless $i < @{$raider->_session_embeddings};
+    my $entry = $raider->session_history->[$i];
+    my $same = ref $msg
+      ? ref $entry && refaddr($entry) == refaddr($msg)
+      : defined $entry && !ref $entry && $entry eq $msg;
+    $raider->_session_embeddings->[$i] = $vec if $same;
+  });
+  $f->on_fail(sub {
+    $log->warnf('[%s] session history embedding failed: %s', __PACKAGE__, $_[0]);
+  });
+  return if $f->is_ready;
+
+  my $key = refaddr $f;
+  $self->_pending_embeddings->{$key} = $f;
+  $f->on_ready(sub {
+    my $raider = $weak or return;
+    delete $raider->_pending_embeddings->{$key};
+  });
   return;
 }
 
@@ -1719,6 +1786,9 @@ sub _check_engine_loops {
   my @engines = ( [ engine => $self->engine ] );
   push @engines, [ compression_engine => $self->compression_engine ]
     if $self->has_compression_engine;
+  # Its futures complete only while the raid's loop runs.
+  push @engines, [ embedding_engine => $self->embedding_engine ]
+    if $self->has_embedding_engine && !$self->no_session_embeddings;
   for my $name (sort keys %{$self->engine_catalog}) {
     my $engine = $self->engine_catalog->{$name}{engine} // next;
     push @engines, [ "engine_catalog '$name'" => $engine ];
@@ -2057,7 +2127,7 @@ async sub _run_raid_loop {
 
       # Check for virtual self-tools
       if ($name =~ /^raider_/ && $self->has_raider_mcp) {
-        my $self_result = $self->_execute_self_tool($name, $input);
+        my $self_result = await $self->_execute_self_tool_f($name, $input);
 
         # Handle interactive self-tool results
         if ($self_result->{type} eq 'question' || $self_result->{type} eq 'pause') {
@@ -2255,7 +2325,7 @@ async sub _respond_f {
     my ( $name, $input ) = $engine->extract_tool_call($tc);
 
     if ($name =~ /^raider_/ && $self->has_raider_mcp) {
-      my $self_result = $self->_execute_self_tool($name, $input);
+      my $self_result = await $self->_execute_self_tool_f($name, $input);
 
       # Another interactive self-tool in the batch: pause the raid again, saving
       # the results gathered so far plus the calls still queued after this one.
@@ -2369,8 +2439,9 @@ provides C<type>, C<is_final>, C<is_question>, C<is_pause>, C<is_abort>
 for programmatic handling of interactive self-tools, and C<is_cancelled>
 for a raid stopped by L</cancel>.
 
-All engines of a raider (C<engine>, C<compression_engine> and every
-C<engine_catalog> engine) must run on the same event loop, since one raid
+All engines of a raider (C<engine>, C<compression_engine>, every
+C<engine_catalog> engine, and C<embedding_engine> unless
+C<no_session_embeddings> is set) must run on the same event loop, since one raid
 is driven by one loop. An engine without a loop (the synchronous fallback)
 counts as the process-wide C<< IO::Async::Loop->new >>. C<raid_f> and
 C<respond_f> fail right away, naming the engine, when one runs on another loop.
