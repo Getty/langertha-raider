@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-25T04:17:42Z
+claimed_by: worker-session
+class: standard
+completed: 2026-09-25T04:17:42Z
+created: 2026-09-25T03:14:32Z
+depends_on:
+- 1
+id: 66
+priority: high
+started: 2026-09-25T04:17:42Z
+status: done
+tags:
+- sessions
+- cli
+title: 'Session 2: CLI schreibt Journal (One-Shot und REPL)'
+updated: 2026-09-25T04:17:42Z
+---
+
+ADR 0015, nach Session 1. Jeder One-Shot/REPL-Lauf schreibt in eine Projekt-Session: run.started, message (user/assistant), tool.call/tool.result (voller Inhalt, call-id), run.finished; Quelle Plugin::Events bzw. gemeinsame Event-Erzeugung mit --stream-*. Neue Session pro Aufruf (Fortsetzen kommt in Session 3). --no-session schaltet ab. Keine Secrets. Pfad der Session in stderr/Banner/Dokument (session-Feld im --json-Dokument, additiv). Interrupt schreibt run.finished interrupted.
