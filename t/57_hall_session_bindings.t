@@ -164,7 +164,7 @@ subtest 'an explicit binding wins over the slot, a lost journal is replaced' => 
   is( $hall->session_bindings->{'cron:nightly'}, $fresh->{session}, 'which the binding now names' );
 };
 
-subtest 'a second concurrent run on the same binding fails loudly' => sub {
+subtest 'a mission for a busy binding waits for it (ADR 0003: new input is queued)' => sub {
   my ( $hall, $tmp ) = fake_hall();
   my @events;
   no warnings 'redefine';
@@ -181,32 +181,76 @@ subtest 'a second concurrent run on the same binding fails loudly' => sub {
   is( $info->{binding}, $binding, 'and the binding' );
   is( ( $hall->ps )[0]{session}, $info->{session}, 'ps names it too' );
 
-  # Wait until the first raider holds the lock.
-  my $lock = store_of($tmp)->dir->child( $info->{session}.'.lock' );
-  my $deadline = time + 20;
-  $hall->loop->loop_once(0.05)
-    until ( grep { $_->{content} eq 'hold' } grep { $_->{type} eq 'message' }
-      @{ store_of($tmp)->read( $info->{session} )->events } ) || time > $deadline;
-
   my $second = $hall->spawn( name => 'bjorn', mission => 'late', binding => $binding );
-  $deadline = time + 20;
-  $hall->loop->loop_once(0.1)
-    until ( grep { $_->[0] eq 'raider.done' && $_->[1]{id} eq $second->{id} } @events ) || time > $deadline;
-  path( $ENV{FAKE_RELEASE} )->touch;
-  $hall->loop->loop_once(0.1) until !%{ $hall->raiders } || time > $deadline + 20;
+  is( $second, { queued => 1, slot => 'bjorn', binding => $binding, queue_depth => 1 },
+    'queued on the binding' );
+  my ($queued) = grep { $_->[0] eq 'raider.queued' } @events;
+  is( $queued->[1]{binding}, $binding, 'raider.queued names the binding' );
+  my $file = $tmp->child( '.raider-hall', 'state', 'binding_queues.json' );
+  is( JSON::MaybeXS->new->decode( $file->slurp_utf8 )->{$binding}[0]{mission}, 'late',
+    'persisted in the hall directory' );
 
-  my %done = map { $_->[1]{id} => $_->[1] } grep { $_->[0] eq 'raider.done' } @events;
-  my $late = $done{ $second->{id} };
-  is( $late->{status}, 'failed', 'the colliding run failed' );
-  is( $late->{exit_code}, 4, 'raider exited 4' );
-  is( $late->{session}, $info->{session}, 'raider.done names the session' );
-  is( $late->{error},
-    'session '.$info->{session}.' of '.$binding.' is in use by another run; mission not run',
-    'with a clear message' );
-  is( $done{ $first->{id} }{status}, 'completed', 'the first run finished normally' );
+  my $other = $hall->spawn( name => 'bjorn', mission => 'elsewhere', binding => 'telegram:ops:43' );
+  ok( $other->{id}, 'another binding of the same name runs at once' );
+  my $plain = $hall->spawn( name => 'bjorn', mission => 'unbound' );
+  ok( $plain->{id}, 'so does an unbound plain-name run' );
+  is( scalar keys %{ $hall->raiders }, 3, 'three in parallel' );
+
+  path( $ENV{FAKE_RELEASE} )->touch;
+  my $deadline = time + 40;
+  $hall->loop->loop_once(0.1)
+    until ( !%{ $hall->raiders } && 4 == grep { $_->[0] eq 'raider.done' } @events ) || time > $deadline;
+
+  my @done = map { $_->[1] } grep { $_->[0] eq 'raider.done' } @events;
+  is( [ grep { $_->{status} ne 'completed' } @done ], [], 'every run completed, none hit the lock' );
+  my ($late) = grep { ( $_->{response} // '' ) eq 'answer: late' } @done;
+  is( $late->{session}, $info->{session}, 'the queued mission ran in the binding\'s session' );
   is( [ map { $_->{content} } grep { $_->{type} eq 'message' }
       @{ store_of($tmp)->read( $info->{session} )->events } ],
-    ['hold'], 'the journal was not touched by the second run' );
+    [ 'hold', 'late' ], 'after the first one' );
+  is( JSON::MaybeXS->new->decode( $file->slurp_utf8 ), {}, 'queue drained' );
+};
+
+subtest 'a session held outside the hall still fails loudly (exit 4)' => sub {
+  my ( $hall, $tmp ) = fake_hall();
+  my $binding = 'telegram:ops:42';
+  my $id = $hall->session_for($binding);
+  my $held = store_of($tmp)->open($id);
+  my ($late) = run_spawns( $hall, 1, { name => 'bjorn', mission => 'late', binding => $binding } );
+  is( $late->{status}, 'failed', 'the colliding run failed' );
+  is( $late->{exit_code}, 4, 'raider exited 4' );
+  is( $late->{session}, $id, 'raider.done names the session' );
+  is( $late->{error},
+    'session '.$id.' of '.$binding.' is in use by another run; mission not run',
+    'with a clear message' );
+  $held->release;
+  is( [ grep { $_->{type} eq 'message' } @{ store_of($tmp)->read($id)->events } ], [],
+    'the journal was not touched' );
+};
+
+subtest 'a binding queue survives a hall restart' => sub {
+  my ( $hall, $tmp ) = fake_hall();
+  $hall->raiders->{busy} = Langertha::Raider::Hall::Raider->new(
+    id => 'bjorn-1', pid => 2**22 + 12345, slot_name => 'bjorn', base_name => 'bjorn',
+    mission => 'm', log_path => $tmp->child('x.log'),
+    session_id => $hall->session_for('cron:nightly'), binding => 'cron:nightly' );
+  ok( $hall->spawn( name => 'bjorn', mission => 'next', binding => 'cron:nightly' )->{queued}, 'queued' );
+
+  my $restarted = Langertha::Raider::Hall->new( root => $tmp );
+  no warnings 'redefine';
+  my @done;
+  my $orig = \&Langertha::Raider::Hall::_emit;
+  local *Langertha::Raider::Hall::_emit = sub {
+    my ( $self, $type, $data ) = @_;
+    push @done, { %$data } if $type eq 'raider.done';
+    $self->$orig( $type, $data );
+  };
+  $restarted->_drain_binding_queues;
+  my $deadline = time + 30;
+  $restarted->loop->loop_once(0.1) until ( @done && !%{ $restarted->raiders } ) || time > $deadline;
+  is( $done[0]{response}, 'answer: next', 'the waiting mission ran after the restart' );
+  is( $done[0]{session}, $hall->session_bindings->{'cron:nightly'}, 'on its binding' );
+  is( $restarted->binding_queues, {}, 'and left the queue' );
 };
 
 subtest 'the queue keeps the binding of a waiting mission' => sub {
@@ -276,8 +320,10 @@ subtest 'an ACP session keeps one raider session across prompts' => sub {
   is( scalar @ids, 2, 'both prompts ran with --session' );
   is( $ids[0], $ids[1], 'the same session' );
   is( $hall->session_bindings->{'acp:acp-1'}, $ids[0], 'bound as acp:SESSION' );
+  $hall->binding_queues->{'acp:acp-1'} = [ { name => 'bjorn', mission => 'p3', binding => 'acp:acp-1' } ];
   $acp->_forget_session('acp-1');
   ok( !exists $hall->session_bindings->{'acp:acp-1'}, 'the binding ends with the ACP session' );
+  ok( !exists $hall->binding_queues->{'acp:acp-1'}, 'so do its waiting prompts' );
   ok( store_of($tmp)->exists( $ids[0] ), 'the journal stays' );
 };
 

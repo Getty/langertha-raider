@@ -68,10 +68,12 @@ cron job, an ACP session, a numbered slot; see L</session_bindings> --
 is started with C<--session ID> and continues its binding's session; a
 plain-name run gets a fresh session. C<raider.spawned>, C<ps> and
 C<attach> name the C<session> and C<binding> of a bound run,
-C<raider.done> names the C<session> of every run that has one. A second
-run on a binding whose session is still open fails at once, as
-C<raider.done> with status C<failed> and an error naming the session and
-binding; its mission is not run.
+C<raider.done> names the C<session> of every run that has one. A mission
+for a binding that already has a running raider waits in that binding's
+queue and starts when the run ends (see L</binding_queues>). Only when the
+session is held by a writer outside the hall does a bound run fail at
+once, as C<raider.done> with status C<failed> and an error naming the
+session and binding; its mission is not run.
 
 C<raider hall logs ID> shows the part of the slot log from that run's start
 line to its result line, and works for ended runs too: the slot is taken
@@ -342,6 +344,85 @@ has singleton_queues => (
   default => sub { {} },
 );
 
+=attr binding_queues
+
+The missions waiting for a busy binding (ADR 0003: one writer per session,
+new input is queued), as a map from binding key to a FIFO list of spawn
+arguments; kept in F<.raider-hall/state/binding_queues.json>. A mission
+whose binding already has a running raider waits here and starts when
+that run ends, in the binding's session -- two quick Telegram messages to
+one chat run one after the other. A hall start runs what a previous hall
+left waiting. Missions without a binding never wait here.
+
+=cut
+
+has binding_queues => (
+  is => 'ro',
+  isa => 'HashRef',
+  lazy => 1,
+  builder => '_build_binding_queues',
+);
+
+sub _binding_queues_file { $_[0]->state_dir->child('binding_queues.json') }
+
+sub _build_binding_queues {
+  my ($self) = @_;
+  my $file = $self->_binding_queues_file;
+  return {} unless -f $file;
+  my $queues = eval { JSON::MaybeXS->new->decode($file->slurp_utf8) };
+  return ref $queues eq 'HASH' ? $queues : {};
+}
+
+sub _persist_binding_queues {
+  my ($self) = @_;
+  $self->_binding_queues_file->spew_utf8(
+    JSON::MaybeXS->new(canonical => 1)->encode($self->binding_queues));
+}
+
+sub _binding_busy {
+  my ($self, $binding) = @_;
+  return scalar grep { $_->has_binding && $_->binding eq $binding } values %{$self->raiders};
+}
+
+sub _queue_on_binding {
+  my ($self, $binding, $entry) = @_;
+  my $queue = $self->binding_queues->{$binding} //= [];
+  push @$queue, $entry;
+  $self->_persist_binding_queues;
+  $self->_emit('raider.queued', {
+    slot => $entry->{name},
+    binding => $binding,
+    queue_depth => scalar @$queue,
+  });
+  return { queued => 1, slot => $entry->{name}, binding => $binding, queue_depth => scalar @$queue };
+}
+
+# Start the next mission waiting for a binding, once nothing runs on it.
+sub _drain_binding_queue {
+  my ($self, $binding) = @_;
+  return if $self->_binding_busy($binding);
+  my $queues = $self->binding_queues;
+  my $queue = $queues->{$binding} or return;
+  my $next = shift @$queue;
+  delete $queues->{$binding} unless @$queue;
+  $self->_persist_binding_queues;
+  return unless $next;
+  return $self->spawn(%$next);
+}
+
+sub _drop_binding_queue {
+  my ($self, $binding) = @_;
+  return unless delete $self->binding_queues->{$binding};
+  $self->_persist_binding_queues;
+  return;
+}
+
+sub _drain_binding_queues {
+  my ($self) = @_;
+  $self->_drain_binding_queue($_) for sort keys %{$self->binding_queues};
+  return;
+}
+
 has cron_scheduler => (
   is => 'ro',
   lazy => 1,
@@ -422,6 +503,7 @@ sub run {
   $self->_setup_cron;
   $self->_setup_telegram;
   $self->_setup_acp;
+  $self->_drain_binding_queues;
 
   $self->_emit('hall.started', { root => $self->root->stringify });
 
@@ -660,6 +742,8 @@ sub _reap_raider {
       $self->_spawn_next_in_queue($slot, $base, $next);
     }
   }
+
+  $self->_drain_binding_queue($raider->binding) if $raider->has_binding;
 }
 
 # The run's outcome for raider.done: status plus response or error, taken
@@ -810,6 +894,13 @@ sub _spawn_next_in_queue {
     $binding = $mission->{binding};
     $mission = $mission->{mission};
   }
+  return $self->_queue_on_binding($binding, {
+    name => $slot,
+    mission => $mission,
+    attach => $attach,
+    $telegram ? ( telegram => $telegram ) : (),
+    binding => $binding,
+  }) if defined $binding && $self->_binding_busy($binding);
   $self->_spawn_raider($slot, $base_name, $mission, $attach, $telegram, $binding);
 }
 
@@ -839,6 +930,16 @@ sub spawn {
     });
     return { queued => 1, slot => $slot };
   }
+
+  # One writer per session: a mission for a binding that is running waits
+  # for it. Parallel runs of a plain name need their own bindings.
+  return $self->_queue_on_binding($binding, {
+    name => $name,
+    mission => $mission,
+    attach => $attach,
+    $telegram ? ( telegram => $telegram ) : (),
+    binding => $binding,
+  }) if defined $binding && $self->_binding_busy($binding);
 
   return $self->_spawn_raider($slot // $name, $base_name // $name, $mission, $attach, $telegram, $binding);
 }

@@ -215,7 +215,10 @@ sub _binding_of { 'acp:'.$_[1] }
 sub _forget_session {
   my ($self, $session_id) = @_;
   delete $self->_sessions->{$session_id};
-  $self->hall->unbind_session($self->_binding_of($session_id)) if $self->hall;
+  my $hall = $self->hall or return;
+  # Prompts still waiting for the session have no client left to answer.
+  $hall->_drop_binding_queue($self->_binding_of($session_id));
+  $hall->unbind_session($self->_binding_of($session_id));
   return;
 }
 
@@ -245,7 +248,8 @@ sub _session_prompt {
     return $self->_reply_err($stream, $id, -32000, "spawn failed: $spawn->{error}");
   }
 
-  # Queued (1name busy) — report and return an intermediate stop reason.
+  # Queued (1name or the session busy) — report and return an intermediate
+  # stop reason.
   if ($spawn->{queued}) {
     return $self->_reply($stream, $id, { stopReason => 'queued' });
   }
