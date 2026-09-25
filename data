@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-25T04:59:17Z
+claimed_by: worker-session
+class: standard
+completed: 2026-09-25T04:59:17Z
+created: 2026-09-25T03:14:45Z
+id: 69
+priority: low
+started: 2026-09-25T04:17:56Z
+status: done
+tags:
+- sessions
+- cli
+title: 'Session 5: session fork und Aufraeumen'
+updated: 2026-09-25T04:59:17Z
+---
+
+Nach Session 3. raider session fork ID (neue Session mit Verweis auf Ursprung, kopiert history-Projektion, eigener Journal-Verlauf; Handoff: kein Workspace-Wechsel). raider session rm ID (explizit, mit Lock-Pruefung). Kein automatisches Loeschen.
