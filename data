@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-25T02:38:21Z
+claimed_by: worker-hall2
+class: standard
+completed: 2026-09-25T02:38:21Z
+created: 2026-09-25T02:29:24Z
+id: 59
+priority: medium
+started: 2026-09-25T02:38:21Z
+status: done
+tags:
+- hall
+title: 'Hall-Logs: Antwort fehlt im Slot-Log, Events-Dateien ohne Aufraeumen, Run-IDs
+  nicht eindeutig'
+updated: 2026-09-25T02:38:21Z
+---
+
+Aus #57: (1) hall logs/--follow zeigt nur stderr, die Antwort steht nur noch in raider.done -> beim Laufende eine Zusammenfassungszeile ins Slot-Log oder logs zeigt das Ergebnis. (2) .raider-hall/logs/<ID>.events.jsonl sammeln sich ohne Aufraeumen (auch Slot-Logs wachsen unbegrenzt) -> Rotation/Aufbewahrung. (3) Run-ID slot-time nicht eindeutig; gleiche Sekunde ueberschreibt Events-Datei -> eindeutige IDs.
