@@ -5,7 +5,8 @@ our $VERSION = '0.503';
 =head1 DESCRIPTION
 
 Data object the L<Langertha::Raider::Hall> keeps per running raider, keyed by run ID:
-id, pid, slot and base name, log path, events path and mission.
+id, pid, slot and base name, log path, events path, mission and, for a
+bound run, its session and binding.
 
 =cut
 
@@ -28,6 +29,21 @@ Optional; without it L</run_finished> has nothing to read.
 =cut
 
 has events_path => (is => 'ro', isa => 'Path::Tiny', predicate => 'has_events_path');
+
+=attr session_id
+
+The session the hall started a bound run with (C<--session ID>).
+Unset for an unbound run, which picks its own session.
+
+=attr binding
+
+The binding key of a bound run (C<telegram:ops:42>, C<cron:nightly>,
+C<slot:1bjorn>, ...); see L<Langertha::Raider::Hall/session_bindings>.
+
+=cut
+
+has session_id => (is => 'ro', isa => 'Str', predicate => 'has_session_id');
+has binding => (is => 'ro', isa => 'Str', predicate => 'has_binding');
 
 =method run_finished
 

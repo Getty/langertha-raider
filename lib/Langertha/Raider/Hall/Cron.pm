@@ -6,6 +6,8 @@ our $VERSION = '0.503';
 
 Arms an L<IO::Async::Timer::Absolute> per configured cron entry of a
 L<Langertha::Raider::Hall> and spawns the named raider when it fires.
+Every job runs in a session of its own, bound as C<cron:ID>, which each
+occurrence continues.
 
 =cut
 
@@ -69,27 +71,32 @@ sub _arm {
 
   my $timer = IO::Async::Timer::Absolute->new(
     time => $when,
-    on_expire => sub {
-      my $t = $self->_jobs->{$id};
-      return unless $t;  # cancelled
-      if ($t->{coalesce} && $t->{running}) {
-        $self->hall->_emit('cron.coalesced', { id => $id, name => $t->{name} });
-      } else {
-        $t->{running} = 1;
-        my $res = eval { $self->hall->spawn(name => $t->{name}, mission => $t->{mission}) };
-        $self->hall->_emit('cron.fired', {
-          id => $id, name => $t->{name},
-          ($res && $res->{id} ? (raider_id => $res->{id}) : ()),
-        });
-        # Clear running once the spawn returned a handle; 1name queueing
-        # owns overlap protection when coalesce is off.
-        $t->{running} = 0;
-      }
-      $self->_arm($id);  # re-schedule next occurrence
-    },
+    on_expire => sub { $self->_fire($id) },
   );
   $job->{timer} = $timer;
   $self->hall->loop->add($timer);
+}
+
+# One occurrence of a job: spawn its raider on the job's own session
+# binding (cron:ID), then re-arm for the next one.
+sub _fire {
+  my ($self, $id) = @_;
+  my $t = $self->_jobs->{$id};
+  return unless $t;  # cancelled
+  if ($t->{coalesce} && $t->{running}) {
+    $self->hall->_emit('cron.coalesced', { id => $id, name => $t->{name} });
+  } else {
+    $t->{running} = 1;
+    my $res = eval { $self->hall->spawn(name => $t->{name}, mission => $t->{mission}, binding => 'cron:'.$id) };
+    $self->hall->_emit('cron.fired', {
+      id => $id, name => $t->{name},
+      ($res && $res->{id} ? (raider_id => $res->{id}) : ()),
+    });
+    # Clear running once the spawn returned a handle; 1name queueing
+    # owns overlap protection when coalesce is off.
+    $t->{running} = 0;
+  }
+  $self->_arm($id);  # re-schedule next occurrence
 }
 
 sub start {

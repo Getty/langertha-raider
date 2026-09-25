@@ -33,7 +33,9 @@ C<.raider-hall.yml> is used.
 
 =item * C<session/prompt> — spawn the raider with the user turn's text
 content, stream C<session/update> notifications from the hall event bus,
-return C<{ stopReason }> when the raider finishes.
+return C<{ stopReason }> when the raider finishes. All prompts of an ACP
+session run in one raider session, bound as C<acp:SESSION> until the
+client disconnects (see L<Langertha::Raider::Hall/session_bindings>).
 
 =item * C<session/cancel> — send the raider a TERM.
 
@@ -127,7 +129,7 @@ sub _handle_client {
       # Clean up any sessions bound to this stream.
       for my $sid (keys %{$self->_sessions}) {
         my $s = $self->_sessions->{$sid};
-        delete $self->_sessions->{$sid}
+        $self->_forget_session($sid)
           if $s && $s->{stream} && $s->{stream} == $stream;
       }
     },
@@ -206,6 +208,17 @@ sub _session_new {
   $self->_reply($stream, $id, { sessionId => $session_id });
 }
 
+# The hall session binding of an ACP session: its prompts continue one
+# raider session; it ends with the ACP session, the journal stays.
+sub _binding_of { 'acp:'.$_[1] }
+
+sub _forget_session {
+  my ($self, $session_id) = @_;
+  delete $self->_sessions->{$session_id};
+  $self->hall->unbind_session($self->_binding_of($session_id)) if $self->hall;
+  return;
+}
+
 sub _session_prompt {
   my ($self, $stream, $id, $params) = @_;
 
@@ -226,6 +239,7 @@ sub _session_prompt {
   my $spawn = $self->hall->spawn(
     name => $session->{raider_name},
     mission => $text,
+    binding => $self->_binding_of($session_id),
   );
   if ($spawn->{error}) {
     return $self->_reply_err($stream, $id, -32000, "spawn failed: $spawn->{error}");

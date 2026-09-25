@@ -62,6 +62,17 @@ same slot started in the same second. Only the newest L</keep_events>
 events files per slot are kept. A slot log larger than L</max_log_size> is
 moved to F<SLOT.log.1> when the next run of the slot starts.
 
+Every run is recorded in a session journal (ADR 0015) under
+F<.raider/sessions/> of the hall root. A bound run -- a Telegram chat, a
+cron job, an ACP session, a numbered slot; see L</session_bindings> --
+is started with C<--session ID> and continues its binding's session; a
+plain-name run gets a fresh session. C<raider.spawned>, C<ps> and
+C<attach> name the C<session> and C<binding> of a bound run,
+C<raider.done> names the C<session> of every run that has one. A second
+run on a binding whose session is still open fails at once, as
+C<raider.done> with status C<failed> and an error naming the session and
+binding; its mission is not run.
+
 C<raider hall logs ID> shows the part of the slot log from that run's start
 line to its result line, and works for ended runs too: the slot is taken
 from the ID; see L</logs>.
@@ -118,6 +129,7 @@ use Langertha::Raider::Hall::MCP;
 use Langertha::Raider::Hall::Protocol;
 use Langertha::Raider::Hall::Raider;
 use Langertha::Raider::Hall::Telegram;
+use Langertha::Raider::SessionStore;
 
 has root => (
   is => 'ro',
@@ -203,6 +215,127 @@ has raiders => (
   is => 'ro',
   default => sub { {} },
 );
+
+=attr session_store
+
+The L<Langertha::Raider::SessionStore> of the hall's runs: the hall root
+is their project, so journals live in F<.raider/sessions/> under it --
+where a spawned raider, started with C<--root> on the hall root, keeps
+them too.
+
+=cut
+
+sub session_store_class { 'Langertha::Raider::SessionStore' }
+
+has session_store => (
+  is => 'ro',
+  lazy => 1,
+  builder => '_build_session_store',
+);
+
+sub _build_session_store {
+  my ($self) = @_;
+  return $self->session_store_class->new(root => $self->root->stringify);
+}
+
+=attr session_bindings
+
+The map from binding key to session id (ADR 0015, Hall bindings), kept in
+F<.raider-hall/state/sessions.json>. Keys:
+
+=over
+
+=item * C<telegram:BOT:CHAT_ID>, C<telegram:BOT:CHAT_ID:THREAD> -- a
+Telegram chat (or forum topic): the conversation continues across
+messages;
+
+=item * C<cron:ID> -- a cron job, its own session per job;
+
+=item * C<acp:SESSION> -- an ACP session, for as long as its connection
+lasts;
+
+=item * C<slot:1NAME> -- a numbered slot, continued by each queued
+mission that has no binding of its own.
+
+=back
+
+A run of a plain name (C<bjorn>) without such a binding is not bound: the
+raider starts a fresh session of its own.
+
+=cut
+
+has session_bindings => (
+  is => 'ro',
+  isa => 'HashRef',
+  lazy => 1,
+  builder => '_build_session_bindings',
+);
+
+sub _session_bindings_file { $_[0]->state_dir->child('sessions.json') }
+
+sub _build_session_bindings {
+  my ($self) = @_;
+  my $file = $self->_session_bindings_file;
+  return {} unless -f $file;
+  my $map = eval { JSON::MaybeXS->new->decode($file->slurp_utf8) };
+  return ref $map eq 'HASH' ? $map : {};
+}
+
+sub _persist_session_bindings {
+  my ($self) = @_;
+  $self->_session_bindings_file->spew_utf8(
+    JSON::MaybeXS->new(canonical => 1)->encode($self->session_bindings));
+}
+
+=method session_for
+
+    my $id = $hall->session_for('telegram:ops:42');
+
+The session id bound to a binding key. A key without a session -- or
+whose journal is gone -- gets a new session: the hall creates the journal
+(C<session.created> naming the hall root) and records the binding, so the
+raider it starts can resume it with C<--session ID>.
+
+=cut
+
+sub session_for {
+  my ($self, $binding) = @_;
+  my $bindings = $self->session_bindings;
+  my $store = $self->session_store;
+  my $id = $bindings->{$binding};
+  return $id if defined $id && $store->exists($id);
+  my $session = $store->create;
+  $id = $session->id;
+  $session->release;
+  $bindings->{$binding} = $id;
+  $self->_persist_session_bindings;
+  $self->_emit('session.bound', { binding => $binding, session => $id });
+  return $id;
+}
+
+=method unbind_session
+
+    $hall->unbind_session('acp:acp-1f2e3d4c');
+
+Forgets a binding. The journal stays.
+
+=cut
+
+sub unbind_session {
+  my ($self, $binding) = @_;
+  return unless defined delete $self->session_bindings->{$binding};
+  $self->_persist_session_bindings;
+  return;
+}
+
+# The binding of a run: the one it was spawned with, else its numbered
+# slot; a plain-name run has none.
+sub _binding_key {
+  my ($self, $slot, $binding) = @_;
+  return $binding if defined $binding;
+  return 'slot:'.$slot if $slot =~ /^\d+[a-z]/;
+  return;
+}
 
 has singleton_queues => (
   is => 'ro',
@@ -501,6 +634,7 @@ sub _reap_raider {
 
   my $slot = $raider->slot_name;
   my $result = $self->_raider_result($raider, $status);
+  $result->{session} = $raider->session_id if $raider->has_session_id;
   # Before the raider leaves the table: logs --follow stops once it is gone.
   $self->_log_result($raider, $result);
   $self->_emit('raider.done', {
@@ -510,6 +644,7 @@ sub _reap_raider {
     exit_code => $status >> 8,
     signaled => ($status & 127) ? 1 : 0,
     %$result,
+    $raider->has_binding ? ( binding => $raider->binding ) : (),
   });
 
   delete $self->raiders->{$raider->id};
@@ -537,6 +672,8 @@ sub _result_of {
     status => $doc->{status} // 'failed',
     defined $doc->{response} ? ( response => $doc->{response} ) : (),
     defined $doc->{error}    ? ( error    => $doc->{error} )    : (),
+    ref $doc->{session} eq 'HASH' && defined $doc->{session}{id}
+      ? ( session => $doc->{session}{id} ) : (),
   };
 }
 
@@ -544,6 +681,14 @@ sub _raider_result {
   my ($self, $raider, $status) = @_;
   if (my $doc = $raider->run_finished) {
     return $self->_result_of($doc);
+  }
+  # Exit 4: the session is held by another writer; raider ran nothing.
+  if (!($status & 127) && ($status >> 8) == 4 && $raider->has_session_id) {
+    return {
+      status => 'failed',
+      error  => 'session '.$raider->session_id.' of '.$raider->binding
+        .' is in use by another run; mission not run',
+    };
   }
   my $how = ($status & 127) ? 'killed by signal '.($status & 127)
                             : 'exit code '.($status >> 8);
@@ -658,13 +803,14 @@ sub _find_raider_by_pid {
 
 sub _spawn_next_in_queue {
   my ($self, $slot, $base_name, $mission) = @_;
-  my ($attach, $telegram);
+  my ($attach, $telegram, $binding);
   if (ref $mission eq 'HASH') {
     $attach = $mission->{attach};
     $telegram = $mission->{telegram};
+    $binding = $mission->{binding};
     $mission = $mission->{mission};
   }
-  $self->_spawn_raider($slot, $base_name, $mission, $attach, $telegram);
+  $self->_spawn_raider($slot, $base_name, $mission, $attach, $telegram, $binding);
 }
 
 sub spawn {
@@ -673,6 +819,7 @@ sub spawn {
   my $mission = $args{mission} // '';
   my $attach = $args{attach} // 0;
   my $telegram = $args{telegram};
+  my $binding = $args{binding};
 
   my ($slot, $base_name) = $self->_parse_name($name);
 
@@ -683,6 +830,7 @@ sub spawn {
       mission => $mission,
       attach => $attach,
       $telegram ? ( telegram => $telegram ) : (),
+      defined $binding ? ( binding => $binding ) : (),
     };
     $self->_persist_queue($slot);
     $self->_emit('raider.queued', {
@@ -692,7 +840,7 @@ sub spawn {
     return { queued => 1, slot => $slot };
   }
 
-  return $self->_spawn_raider($slot // $name, $base_name // $name, $mission, $attach, $telegram);
+  return $self->_spawn_raider($slot // $name, $base_name // $name, $mission, $attach, $telegram, $binding);
 }
 
 sub _parse_name {
@@ -704,7 +852,7 @@ sub _parse_name {
 }
 
 sub _spawn_raider {
-  my ($self, $slot, $base_name, $mission, $attach, $telegram) = @_;
+  my ($self, $slot, $base_name, $mission, $attach, $telegram, $binding) = @_;
 
   my $raider_config = $self->config->{raiders}{$base_name} // {};
   # No engine configured: leave it to raider (.raider.yml, then key autodetection).
@@ -720,6 +868,19 @@ sub _spawn_raider {
   push @cmd, '--model', $model if $model;
   push @cmd, '--pack', $_ for @$packs;
   push @cmd, '--root', $self->root->stringify;
+  # A bound run resumes its binding's session; an unbound one gets a
+  # fresh session from the raider itself.
+  $binding = $self->_binding_key($slot, $binding);
+  my $session_id;
+  if (defined $binding) {
+    $session_id = eval { $self->session_for($binding) };
+    unless (defined $session_id) {
+      my $error = $@ =~ s/\s+\z//r;
+      $self->_emit('hall.session_error', { binding => $binding, error => $error });
+      undef $binding;
+    }
+  }
+  push @cmd, '--session', $session_id if defined $session_id;
   # Mission is one single argv (bin/raider does join(' ', @ARGV)).
   push @cmd, '--', $mission;
 
@@ -785,6 +946,7 @@ sub _spawn_raider {
     log_path => $log_path,
     events_path => $events_path,
     mission => $mission,
+    defined $session_id ? ( session_id => $session_id, binding => $binding ) : (),
   });
   $self->raiders->{$id} = $raider;
 
@@ -793,9 +955,17 @@ sub _spawn_raider {
     pid => $process->pid,
     slot => $slot,
     base_name => $base_name,
+    $self->_session_fields($raider),
   });
 
-  return { id => $id, pid => $process->pid, slot => $slot };
+  return { id => $id, pid => $process->pid, slot => $slot, $self->_session_fields($raider) };
+}
+
+# session and binding of a bound run, for events and replies.
+sub _session_fields {
+  my ($self, $raider) = @_;
+  return () unless $raider->has_session_id;
+  return ( session => $raider->session_id, binding => $raider->binding );
 }
 
 sub _raider_bin {
@@ -833,6 +1003,7 @@ sub ps {
       base_name => $r->base_name,
       mission => $r->mission,
       id => $r->id,
+      $self->_session_fields($r),
     };
   }
   return @list;
@@ -848,6 +1019,7 @@ sub attach {
       pid => $r->pid,
       log_path => $r->log_path->stringify,
       $r->has_events_path ? ( events_path => $r->events_path->stringify ) : (),
+      $self->_session_fields($r),
     };
   }
   return { error => 'raider not found' };

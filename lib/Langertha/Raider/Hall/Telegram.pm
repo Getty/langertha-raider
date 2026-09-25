@@ -21,6 +21,11 @@ B<and> its chat is either the private chat with that sender or listed in
 C<allowed_chats>. An empty or missing C<allowlist> accepts nobody. Rejected
 messages emit a C<telegram.rejected> event and are neither stored nor routed.
 
+A routed message runs in the session bound to its chat --
+C<telegram:BOT:CHAT_ID>, with C<:THREAD> for a forum topic -- so the
+conversation continues across messages (see
+L<Langertha::Raider::Hall/session_bindings>).
+
 =cut
 
 use Moose;
@@ -198,10 +203,13 @@ sub _handle_update {
   $self->_save_history($bot_name, $chat_id, $update);
 
   if ($target_raider) {
+    # One session per chat (per forum topic), continued by every message.
+    my $thread = $msg->{message_thread_id};
     $self->hall->spawn(
       name => $target_raider,
       mission => $text,
       telegram => { bot => $bot_name, chat_id => $chat_id },
+      binding => join(':', 'telegram', $bot_name, $chat_id, defined $thread ? $thread : ()),
     );
   }
 }
