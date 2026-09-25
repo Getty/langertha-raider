@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T06:10:10Z
+claimed_by: worker-hall3
+class: standard
+completed: 2026-09-25T06:10:10Z
+created: 2026-09-25T05:44:53Z
+id: 78
+priority: medium
+started: 2026-09-25T06:00:34Z
+status: done
+tags:
+- hall
+- config
+title: 'EngineResolver: engine_names/api_key_env_vars; hall init/add-raider ohne festes
+  engine: anthropic'
+updated: 2026-09-25T06:10:10Z
+---
+
+Aus #75: (1) EngineResolver fehlt engine_names bzw. api_key_env_vars; Hall/CLI.pm fuehrt Engine-Namensliste doppelt. Nach #76 (Application-Umbau) ergaenzen und Hall/CLI.pm darauf umstellen. (2) hall init/add-raider schreiben fest engine: anthropic -> widerspricht Hall-POD (engine optional, raider entscheidet, #30). Nur schreiben, wenn explizit angegeben.
