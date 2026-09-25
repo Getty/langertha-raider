@@ -103,7 +103,7 @@ subtest 'events: fields, seq, framing in every encoding' => sub {
 subtest 'Events plugin: tool.call and tool.result' => sub {
   my @got;
   my $plugin = Langertha::Raider->new(engine => Test::Raider::SeqEngine::Engine->new, plugins => [ '+Langertha::Raider::Plugin::Events' =>
-    { on_event => sub { push @got, [ @_ ] } } ])->_plugin_instances->[0];
+    { on_event => sub { push @got, [ @_ ] } } ])->plugin_instances->[0];
   my @tc = $plugin->plugin_before_tool_call('bash', { command => 'ls' })->get;
   is(\@tc, [ 'bash', { command => 'ls' } ], 'the call passes through');
   my $result = { content => [ { type => 'text', text => 'abc' }, { type => 'text', text => 'defg' } ] };

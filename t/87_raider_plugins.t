@@ -51,7 +51,7 @@ subtest 'plugins attribute defaults to empty' => sub {
   );
 
   is_deeply($raider->plugins, [], 'plugins defaults to empty');
-  is_deeply($raider->_plugin_instances, [], 'no plugin instances');
+  is_deeply($raider->plugin_instances, [], 'no plugin instances');
 };
 
 # --- Test: base Plugin class hooks are passthrough ---
@@ -102,7 +102,7 @@ subtest 'plugins instantiated with raider back-reference' => sub {
     plugins    => ['TestPlugin::NoOp'],
   );
 
-  my $instances = $raider->_plugin_instances;
+  my $instances = $raider->plugin_instances;
   is(scalar @$instances, 1, 'one plugin instance');
   isa_ok($instances->[0], 'TestPlugin::NoOp');
   isa_ok($instances->[0], 'Langertha::Plugin');
@@ -118,7 +118,7 @@ subtest 'plugin namespace resolution' => sub {
     raider_mcp => 1,
     plugins    => ['TestPlugin::NoOp'],
   );
-  isa_ok($raider->_plugin_instances->[0], 'TestPlugin::NoOp');
+  isa_ok($raider->plugin_instances->[0], 'TestPlugin::NoOp');
 
   # +FullName bypass
   $raider = Langertha::Raider->new(
@@ -126,7 +126,7 @@ subtest 'plugin namespace resolution' => sub {
     raider_mcp => 1,
     plugins    => ['+TestPlugin::NoOp'],
   );
-  isa_ok($raider->_plugin_instances->[0], 'TestPlugin::NoOp');
+  isa_ok($raider->plugin_instances->[0], 'TestPlugin::NoOp');
 };
 
 subtest 'unknown plugin dies with useful error' => sub {
@@ -135,7 +135,7 @@ subtest 'unknown plugin dies with useful error' => sub {
     raider_mcp => 1,
     plugins    => ['NonExistentPlugin'],
   );
-  eval { $raider->_plugin_instances };
+  eval { $raider->plugin_instances };
   like($@, qr/Plugin 'NonExistentPlugin' not found/, 'useful error');
   like($@, qr/Langertha::Plugin::NonExistentPlugin/, 'shows tried names');
   like($@, qr/LangerthaX::Plugin::NonExistentPlugin/, 'shows LangerthaX fallback');
@@ -194,7 +194,7 @@ subtest 'single plugin modifies messages' => sub {
     plugins    => ['TestPlugin::Alpha'],
   );
 
-  my $instances = $raider->_plugin_instances;
+  my $instances = $raider->plugin_instances;
   is(scalar @$instances, 1, 'one instance');
 
   my $msgs = [{ role => 'user', content => 'hello' }];
@@ -209,7 +209,7 @@ subtest 'multiple plugins chain in order' => sub {
     plugins    => ['TestPlugin::Alpha', 'TestPlugin::Beta'],
   );
 
-  my $instances = $raider->_plugin_instances;
+  my $instances = $raider->plugin_instances;
   is(scalar @$instances, 2, 'two instances');
 
   # Simulate what Raider does: iterate plugins
@@ -252,12 +252,12 @@ subtest 'plugin_before_tool_call can skip tool' => sub {
   );
 
   # Allowed
-  my @result = $raider->_plugin_pipeline_tool_call('safe_tool', { x => 1 })->get;
+  my @result = $raider->plugin_pipeline_tool_call_f('safe_tool', { x => 1 })->get;
   is(scalar @result, 2, 'allowed tool passes');
   is($result[0], 'safe_tool', 'name unchanged');
 
   # Blocked
-  @result = $raider->_plugin_pipeline_tool_call('dangerous_tool', { x => 1 })->get;
+  @result = $raider->plugin_pipeline_tool_call_f('dangerous_tool', { x => 1 })->get;
   is(scalar @result, 0, 'blocked tool returns empty');
 };
 
@@ -291,7 +291,7 @@ subtest 'plugin self-tools are registered' => sub {
     plugins    => ['TestPlugin::WithTool'],
   );
 
-  my $tools = $raider->_plugin_instances->[0]->self_tools;
+  my $tools = $raider->plugin_instances->[0]->self_tools;
   is(scalar @$tools, 1, 'one tool');
   is($tools->[0]{name}, 'my_custom_tool', 'tool name correct');
 };
@@ -378,22 +378,22 @@ subtest 'pre-instantiated plugin objects' => sub {
     plugins    => [$plugin],
   );
 
-  is(scalar @{$raider2->_plugin_instances}, 1, 'one instance');
-  is($raider2->_plugin_instances->[0], $plugin, 'same object');
+  is(scalar @{$raider2->plugin_instances}, 1, 'one instance');
+  is($raider2->plugin_instances->[0], $plugin, 'same object');
 };
 
-# --- Test: _plugin_args passed to constructors ---
+# --- Test: plugin_args passed to constructors ---
 
-subtest '_plugin_args forwarded to plugin constructors' => sub {
+subtest 'plugin_args forwarded to plugin constructors' => sub {
   my $raider = Langertha::Raider->new(
     engine       => MockEngine->new,
     raider_mcp   => 1,
     plugins      => ['TestPlugin::Configurable'],
-    _plugin_args => { my_option => 'from_args' },
+    plugin_args => { my_option => 'from_args' },
   );
 
-  my $plugin = $raider->_plugin_instances->[0];
-  is($plugin->my_option, 'from_args', 'my_option forwarded via _plugin_args');
+  my $plugin = $raider->plugin_instances->[0];
+  is($plugin->my_option, 'from_args', 'my_option forwarded via plugin_args');
 };
 
 # --- Test: host attribute and raider convenience ---
@@ -405,7 +405,7 @@ subtest 'host attribute and raider convenience' => sub {
     plugins    => ['TestPlugin::Alpha'],
   );
 
-  my $plugin = $raider->_plugin_instances->[0];
+  my $plugin = $raider->plugin_instances->[0];
   is($plugin->host, $raider, 'host is set');
   is($plugin->raider, $raider, 'raider returns host when host is Raider');
 
@@ -463,7 +463,7 @@ subtest 'event system: provides_events and requires_events' => sub {
     plugins    => ['TestPlugin::EventProvider', 'TestPlugin::EventConsumer'],
   );
 
-  is(scalar @{$raider->_plugin_instances}, 2, 'both loaded');
+  is(scalar @{$raider->plugin_instances}, 2, 'both loaded');
 };
 
 subtest 'event system: missing required event dies' => sub {
@@ -472,7 +472,7 @@ subtest 'event system: missing required event dies' => sub {
     raider_mcp => 1,
     plugins    => ['TestPlugin::EventNeedsMissing'],
   );
-  eval { $raider->_plugin_instances };
+  eval { $raider->plugin_instances };
   like($@, qr/requires event 'nonexistent_event'/, 'dies with useful error');
   like($@, qr/provides_events/, 'mentions provides_events');
 };
@@ -488,7 +488,7 @@ subtest 'fire_event_f dispatches to on_ methods' => sub {
   is(scalar @results, 1, 'one handler responded');
   is($results[0], 'ack', 'got ack from consumer');
 
-  my $consumer = $raider->_plugin_instances->[1];
+  my $consumer = $raider->plugin_instances->[1];
   is(scalar @{$consumer->event_log}, 1, 'event received');
   is($consumer->event_log->[0]{key}, 'value', 'data passed through');
 };
@@ -541,8 +541,8 @@ subtest 'multiple event consumers all receive event' => sub {
   is($results[0], 'ack', 'first consumer');
   is($results[1], 'ack2', 'second consumer');
 
-  my $c1 = $raider->_plugin_instances->[1];
-  my $c2 = $raider->_plugin_instances->[2];
+  my $c1 = $raider->plugin_instances->[1];
+  my $c2 = $raider->plugin_instances->[2];
   is(scalar @{$c1->event_log}, 1, 'consumer 1 got event');
   is(scalar @{$c2->event_log}, 1, 'consumer 2 got event');
   is($c1->event_log->[0]{x}, 42, 'data correct in consumer 1');

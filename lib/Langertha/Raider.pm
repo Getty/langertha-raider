@@ -1687,7 +1687,7 @@ async sub _initialize_inline_mcp_f {
   # Collect inline tools + plugin tools
   my @all_inline;
   push @all_inline, @{$self->tools};
-  for my $plugin (@{$self->_plugin_instances}) {
+  for my $plugin (@{$self->plugin_instances}) {
     my $tools = $plugin->self_tools;
     push @all_inline, @$tools if $tools && @$tools;
   }
@@ -1777,7 +1777,7 @@ async sub _raid_f {
   }
 
   # Plugin hook: transform input messages before raid
-  for my $plugin (@{$self->_plugin_instances}) {
+  for my $plugin (@{$self->plugin_instances}) {
     @messages = @{await $plugin->plugin_before_raid(\@messages)};
   }
 
@@ -1809,7 +1809,7 @@ async sub _raid_f {
   push @conversation, @user_msgs;
 
   # Plugin hook: transform assembled conversation
-  for my $plugin (@{$self->_plugin_instances}) {
+  for my $plugin (@{$self->plugin_instances}) {
     @conversation = @{await $plugin->plugin_build_conversation(\@conversation)};
   }
 
@@ -1894,7 +1894,7 @@ async sub _run_raid_loop {
     }
 
     # Plugin hook: transform conversation before each LLM call
-    for my $plugin (@{$self->_plugin_instances}) {
+    for my $plugin (@{$self->plugin_instances}) {
       $conversation = await $plugin->plugin_before_llm_call($conversation, $iteration);
     }
     # A plugin may return a fresh arrayref. Keep the continuation state pointing
@@ -1928,7 +1928,7 @@ async sub _run_raid_loop {
     my $data = $engine->parse_response($response);
 
     # Plugin hook: inspect/transform LLM response
-    for my $plugin (@{$self->_plugin_instances}) {
+    for my $plugin (@{$self->plugin_instances}) {
       $data = await $plugin->plugin_after_llm_response($data, $iteration);
     }
 
@@ -2006,7 +2006,7 @@ async sub _run_raid_loop {
       my $result = Langertha::Raider::Result->new(type => 'final', text => $text);
 
       # Plugin hook: transform final result before return
-      for my $plugin (@{$self->_plugin_instances}) {
+      for my $plugin (@{$self->plugin_instances}) {
         $result = await $plugin->plugin_after_raid($result);
       }
 
@@ -2041,7 +2041,7 @@ async sub _run_raid_loop {
       my ( $name, $input ) = $engine->extract_tool_call($tc);
 
       # Plugin hook: inspect/transform before tool execution
-      my @plugin_tc = await $self->_plugin_pipeline_tool_call($name, $input);
+      my @plugin_tc = await $self->plugin_pipeline_tool_call_f($name, $input);
       unless (@plugin_tc) {
         # Plugin returned empty list — skip this tool call
         my $skip_result = {
@@ -2134,7 +2134,7 @@ async sub _run_raid_loop {
         my $result = $self_result;
 
         # Plugin hook: transform tool result
-        for my $plugin (@{$self->_plugin_instances}) {
+        for my $plugin (@{$self->plugin_instances}) {
           $result = await $plugin->plugin_after_tool_call($name, $input, $result);
         }
 
@@ -2171,7 +2171,7 @@ async sub _run_raid_loop {
       $result = $self->_cancelled_tool_result($name) if $self->_cut_off($call_f, $result);
 
       # Plugin hook: transform tool result
-      for my $plugin (@{$self->_plugin_instances}) {
+      for my $plugin (@{$self->plugin_instances}) {
         $result = await $plugin->plugin_after_tool_call($name, $input, $result);
       }
 
@@ -2304,7 +2304,7 @@ async sub _respond_f {
       }
 
       # type eq 'result' — normal self-tool result
-      for my $plugin (@{$self->_plugin_instances}) {
+      for my $plugin (@{$self->plugin_instances}) {
         $self_result = await $plugin->plugin_after_tool_call($name, $input, $self_result);
       }
       push @results, { tool_call => $tc, result => $self_result };
@@ -2325,7 +2325,7 @@ async sub _respond_f {
     my $result = await $self->_until_cancelled($call_f);
     $result = $self->_cancelled_tool_result($name) if $self->_cut_off($call_f, $result);
 
-    for my $plugin (@{$self->_plugin_instances}) {
+    for my $plugin (@{$self->plugin_instances}) {
       $result = await $plugin->plugin_after_tool_call($name, $input, $result);
     }
 
@@ -2402,7 +2402,7 @@ C<LangerthaX::Plugin::$name>. Fully qualified names (with C<::>) are
 used as-is.
 
 Plugin instances are created automatically with C<< raider => $self >>.
-Extra constructor arguments can be passed via C<_plugin_args>.
+Extra constructor arguments can be passed via C<plugin_args>.
 
 =cut
 

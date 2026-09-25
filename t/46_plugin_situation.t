@@ -33,7 +33,7 @@ sub situation_plugin {
     raider_mcp => 1,
     plugins    => ['+Langertha::Raider::Plugin::Situation'],
   );
-  return $raider->_plugin_instances->[0];
+  return $raider->plugin_instances->[0];
 }
 
 subtest '_situation_text shape' => sub {

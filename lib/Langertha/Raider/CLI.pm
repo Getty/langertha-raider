@@ -227,7 +227,7 @@ is disabled.
 sub trace_plugin {
   my ($self) = @_;
   return unless $self->trace;
-  for my $p (@{$self->_raider->_plugin_instances}) {
+  for my $p (@{$self->_raider->plugin_instances}) {
     return $p if $p->isa('Langertha::Raider::Plugin::Trace');
   }
   return;

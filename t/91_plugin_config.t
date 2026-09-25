@@ -51,8 +51,8 @@ subtest 'classic string syntax still works' => sub {
     raider_mcp => 1,
     plugins    => ['TestPlugin::Configurable'],
   );
-  is(scalar @{$raider->_plugin_instances}, 1, 'one instance');
-  isa_ok($raider->_plugin_instances->[0], 'TestPlugin::Configurable');
+  is(scalar @{$raider->plugin_instances}, 1, 'one instance');
+  isa_ok($raider->plugin_instances->[0], 'TestPlugin::Configurable');
 };
 
 subtest 'Name => { args } pair syntax' => sub {
@@ -61,7 +61,7 @@ subtest 'Name => { args } pair syntax' => sub {
     raider_mcp => 1,
     plugins    => ['+TestPlugin::Configurable' => { my_option => 'custom' }],
   );
-  my $instances = $raider->_plugin_instances;
+  my $instances = $raider->plugin_instances;
   is(scalar @$instances, 1, 'one instance');
   isa_ok($instances->[0], 'TestPlugin::Configurable');
   is($instances->[0]->my_option, 'custom', 'per-plugin args applied');
@@ -76,7 +76,7 @@ subtest 'mixed: string + Name => { args }' => sub {
       '+TestPlugin::Configurable' => { my_option => 'second' },
     ],
   );
-  my $instances = $raider->_plugin_instances;
+  my $instances = $raider->plugin_instances;
   is(scalar @$instances, 2, 'two instances');
   isa_ok($instances->[0], 'TestPlugin::Configurable');
   isa_ok($instances->[1], 'TestPlugin::Configurable');
@@ -96,7 +96,7 @@ subtest 'pre-instantiated object' => sub {
     raider_mcp => 1,
     plugins    => [$plugin],
   );
-  my $instances = $raider->_plugin_instances;
+  my $instances = $raider->plugin_instances;
   is(scalar @$instances, 1, 'one instance');
   is($instances->[0], $plugin, 'same object passed through');
 };
@@ -117,7 +117,7 @@ subtest 'mixed: object + Name => { args } + string' => sub {
       'TestPlugin::Configurable',
     ],
   );
-  my $instances = $raider->_plugin_instances;
+  my $instances = $raider->plugin_instances;
   is(scalar @$instances, 3, 'three instances');
   is($instances->[0], $obj, 'object preserved');
   is($instances->[0]->my_option, 'from_obj', 'object args intact');
@@ -127,26 +127,26 @@ subtest 'mixed: object + Name => { args } + string' => sub {
   is($instances->[2]->my_option, 'default_val', 'bare string gets defaults');
 };
 
-subtest 'per-plugin args override _plugin_args' => sub {
+subtest 'per-plugin args override plugin_args' => sub {
   my $raider = Langertha::Raider->new(
     engine       => MockEngine->new,
     raider_mcp   => 1,
     plugins      => ['+TestPlugin::Configurable' => { my_option => 'winner' }],
-    _plugin_args => { my_option => 'loser' },
+    plugin_args => { my_option => 'loser' },
   );
-  my $plugin = $raider->_plugin_instances->[0];
-  is($plugin->my_option, 'winner', 'per-plugin args win over _plugin_args');
+  my $plugin = $raider->plugin_instances->[0];
+  is($plugin->my_option, 'winner', 'per-plugin args win over plugin_args');
 };
 
-subtest '_plugin_args still work as fallback' => sub {
+subtest 'plugin_args still work as fallback' => sub {
   my $raider = Langertha::Raider->new(
     engine       => MockEngine->new,
     raider_mcp   => 1,
     plugins      => ['TestPlugin::Configurable'],
-    _plugin_args => { my_option => 'from_fallback' },
+    plugin_args => { my_option => 'from_fallback' },
   );
-  my $plugin = $raider->_plugin_instances->[0];
-  is($plugin->my_option, 'from_fallback', '_plugin_args used when no per-plugin args');
+  my $plugin = $raider->plugin_instances->[0];
+  is($plugin->my_option, 'from_fallback', 'plugin_args used when no per-plugin args');
 };
 
 subtest 'sugar: plugin Name => { args } works' => sub {
@@ -162,7 +162,7 @@ subtest 'sugar: plugin Name => { args } works' => sub {
     engine     => MockEngine->new,
     raider_mcp => 1,
   );
-  my $instances = $raider->_plugin_instances;
+  my $instances = $raider->plugin_instances;
   is(scalar @$instances, 2, 'two instances from sugar');
   isa_ok($instances->[0], 'TestPlugin::Configurable');
   is($instances->[0]->my_option, 'sugar_val', 'sugar args applied');
@@ -175,7 +175,7 @@ subtest '+ClassName loads directly without prefix search' => sub {
     raider_mcp => 1,
     plugins    => ['+TestPlugin::Configurable'],
   );
-  my $instances = $raider->_plugin_instances;
+  my $instances = $raider->plugin_instances;
   is(scalar @$instances, 1, 'one instance');
   isa_ok($instances->[0], 'TestPlugin::Configurable');
 };
@@ -186,7 +186,7 @@ subtest '+ClassName with Name => { args } syntax' => sub {
     raider_mcp => 1,
     plugins    => ['+TestPlugin::Configurable' => { my_option => 'custom', priority => 5 }],
   );
-  my $instances = $raider->_plugin_instances;
+  my $instances = $raider->plugin_instances;
   is(scalar @$instances, 1, 'one instance');
   isa_ok($instances->[0], 'TestPlugin::Configurable');
   is($instances->[0]->my_option, 'custom', 'args applied');
@@ -202,7 +202,7 @@ subtest '+ClassName mixed with short names' => sub {
       '+TestPlugin::Configurable' => { my_option => 'from_plus' },
     ],
   );
-  my $instances = $raider->_plugin_instances;
+  my $instances = $raider->plugin_instances;
   is(scalar @$instances, 2, 'two instances');
   isa_ok($instances->[0], 'TestPlugin::Configurable');
   isa_ok($instances->[1], 'TestPlugin::Configurable');
@@ -215,7 +215,7 @@ subtest 'empty hashref is valid (no extra args)' => sub {
     raider_mcp => 1,
     plugins    => ['+TestPlugin::Configurable' => {}],
   );
-  my $instances = $raider->_plugin_instances;
+  my $instances = $raider->plugin_instances;
   is(scalar @$instances, 1, 'one instance');
   isa_ok($instances->[0], 'TestPlugin::Configurable');
   is($instances->[0]->my_option, 'default_val', 'default my_option');

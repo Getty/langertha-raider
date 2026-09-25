@@ -1085,7 +1085,7 @@ subtest 'plugin_before_llm_call conversation survives a pause and respond_f' => 
 
   # The plugin and the loop share one conversation: the plugin's view on the
   # resumed iteration is the same complete conversation the loop proceeds with.
-  my $plugin = $raider->_plugin_instances->[0];
+  my $plugin = $raider->plugin_instances->[0];
   ok(conv_carries_id($plugin->seen->[-1], 'tc_rec'),
     'plugin_before_llm_call sees the record result on the resumed iteration');
 };

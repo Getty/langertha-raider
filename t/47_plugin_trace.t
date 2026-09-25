@@ -37,7 +37,7 @@ sub trace_plugin {
     raider_mcp => 1,
     plugins    => [ '+Langertha::Raider::Plugin::Trace' => { color => 0, %args } ],
   );
-  return $raider->_plugin_instances->[0];
+  return $raider->plugin_instances->[0];
 }
 
 sub capture_stdout {
