@@ -25,6 +25,9 @@ my $repo = path(__FILE__)->absolute->parent->parent;
 #   noisy   - non-JSON text on stdout around the events
 #   killed  - one event, then SIGKILL on itself before run.finished
 #   twice   - two run.finished events, the last one counts
+#   wait    - one event, then waits for a signal: SIGINT ends it cancelled,
+#             SIGTERM interrupted, each with run.finished and death by the
+#             signal, as bin/raider does; FAKE_RELEASE is touched once waiting
 #   *       - run.started, message, run.finished with "answer: MISSION"
 my $FAKE = <<'PERL';
 use strict;
@@ -44,6 +47,22 @@ exit 0 if $mission eq 'silent';
 print "plain text on stdout\n" if $mission eq 'noisy';
 event('run.started');
 if ( $mission eq 'killed' ) { kill 'KILL', $$; sleep 5 }
+if ( $mission eq 'wait' ) {
+  for my $sig (qw( INT TERM )) {
+    $SIG{$sig} = sub {
+      event('run.finished', status => $sig eq 'INT' ? 'cancelled' : 'interrupted',
+        $sig eq 'TERM' ? ( signal => 'TERM' ) : (), elapsed => 0.3);
+      $SIG{$sig} = 'DEFAULT';
+      kill $sig, $$;
+      sleep 5;
+      exit 1;
+    };
+  }
+  open my $r, '>', $ENV{FAKE_RELEASE} or die $!;
+  close $r;
+  sleep 30;
+  exit 1;
+}
 event('message', text => 'thinking');
 event('run.finished', status => 'completed', response => 'first', elapsed => 0.1) if $mission eq 'twice';
 print "{broken json\n" if $mission eq 'noisy';
@@ -401,6 +420,57 @@ subtest 'ACP maps an interrupted run to cancelled' => sub {
     status => 'interrupted', error => 'interrupted by SIGTERM' } );
   my ($reply) = grep { ( $_->{id} // 0 ) == 9 } @{ $stream->{lines} };
   is( $reply->{result}{stopReason}, 'cancelled', 'interrupted: cancelled' );
+};
+
+subtest 'ACP maps a cancelled run to cancelled, signalled or not' => sub {
+  for my $signaled ( 0, 1 ) {
+    my $hall = Langertha::Raider::Hall->new( root => path( tempdir( CLEANUP => 1 ) ) );
+    my $acp = Langertha::Raider::Hall::ACP->new( hall => $hall, port => 0, host => '127.0.0.1' );
+    my $stream = CaptureStream->new;
+    my $session = { stream => $stream, raider_name => 'bjorn', pending_request_id => 9 };
+    $acp->_sessions->{s1} = $session;
+    $acp->_attach_subscription( $session, 'bjorn-1', $stream );
+    $hall->_emit( 'raider.done', { id => 'bjorn-1', exit_code => 0, signaled => $signaled, status => 'cancelled' } );
+    my ($reply) = grep { ( $_->{id} // 0 ) == 9 } @{ $stream->{lines} };
+    is( $reply->{result}{stopReason}, 'cancelled', 'cancelled, signaled '.$signaled );
+  }
+};
+
+# A hall whose bjorn waits for a signal (mission "wait"), turned until it
+# does; returns the hall and its events.
+sub waiting_hall {
+  my ( $hall, $tmp ) = fake_hall("raiders:\n  bjorn: {}\n");
+  return ( $hall, hall_events($hall) );
+}
+
+sub wait_ready {
+  my ( $hall ) = @_;
+  ok( wait_until( $hall, sub { -e $ENV{FAKE_RELEASE} } ), 'the raider waits for a signal' );
+}
+
+subtest 'ACP session/cancel sends the running raider SIGINT' => sub {
+  my ( $hall, $events ) = waiting_hall();
+  my $acp = Langertha::Raider::Hall::ACP->new( hall => $hall, port => 0, host => '127.0.0.1' );
+  my $stream = CaptureStream->new;
+  $acp->_sessions->{s1} = { stream => $stream, raider_name => 'bjorn' };
+  $acp->_session_prompt( $stream, 7, { sessionId => 's1', prompt => [ { type => 'text', text => 'wait' } ] } );
+  wait_ready($hall);
+  $acp->_session_cancel( $stream, 8, { sessionId => 's1' } );
+  wait_until( $hall, sub { grep { ( $_->{id} // 0 ) == 7 } @{ $stream->{lines} } } );
+  my ($reply) = grep { ( $_->{id} // 0 ) == 7 } @{ $stream->{lines} };
+  is( $reply->{result}{stopReason}, 'cancelled', 'the prompt: cancelled' );
+  my ($done) = map { $_->[1] } grep { $_->[0] eq 'raider.done' } @$events;
+  like( $done, { status => 'cancelled', signaled => 1 }, 'the raider ended its run cancelled, by SIGINT' );
+};
+
+subtest 'kill_raider still sends SIGTERM' => sub {
+  my ( $hall, $events ) = waiting_hall();
+  my $spawn = $hall->spawn( name => 'bjorn', mission => 'wait' );
+  wait_ready($hall);
+  is( $hall->kill_raider( $spawn->{id} ), { killed => 1, id => $spawn->{id} }, 'killed' );
+  wait_until( $hall, sub { !%{ $hall->raiders } } );
+  my ($done) = map { $_->[1] } grep { $_->[0] eq 'raider.done' } @$events;
+  like( $done, { status => 'interrupted', signaled => 1 }, 'the raider ended its run interrupted, by SIGTERM' );
 };
 
 done_testing;

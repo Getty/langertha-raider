@@ -1256,12 +1256,34 @@ sub attach {
 
 sub kill_raider {
   my ($self, $id) = @_;
+  return $self->_signal_raider(TERM => $id) ? { killed => 1, id => $id } : { error => 'raider not found' };
+}
+
+=method cancel_raider
+
+    my $res = $hall->cancel_raider($id);   # { cancelled => 1, id => $id } or { error => ... }
+
+Cancels the run of the running raider C<$id> with C<SIGINT>: F<raider>
+ends the run as C<cancelled> (its C<run.finished>, the session journal)
+and then dies of the signal. C<kill_raider> sends C<SIGTERM> instead, a
+stop that ends the run as C<interrupted>.
+
+=cut
+
+sub cancel_raider {
+  my ($self, $id) = @_;
+  return $self->_signal_raider(INT => $id) ? { cancelled => 1, id => $id } : { error => 'raider not found' };
+}
+
+# Sends $signal to the process of raider $id; false when there is no such raider.
+sub _signal_raider {
+  my ($self, $signal, $id) = @_;
   for my $r (values %{$self->raiders}) {
     next unless $r->id eq $id;
-    kill 'TERM', $r->pid if $r->pid;
-    return { killed => 1, id => $id };
+    kill $signal, $r->pid if $r->pid;
+    return 1;
   }
-  return { error => 'raider not found' };
+  return 0;
 }
 
 =method logs

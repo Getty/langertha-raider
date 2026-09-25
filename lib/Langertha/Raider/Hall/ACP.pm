@@ -41,7 +41,9 @@ gets no answer until its run has started and ended; then it is answered
 like any other, with C<end_turn> or C<cancelled>, also when the hall had
 to start that run without the session (C<hall.session_error>).
 
-=item * C<session/cancel> — send the running raider a TERM; prompts still
+=item * C<session/cancel> — cancel the running raider's run with a
+C<SIGINT> (L<Langertha::Raider::Hall/cancel_raider>): it ends the run as
+C<cancelled>, and its prompt is answered C<cancelled>. Prompts still
 waiting are answered C<cancelled> and never run.
 
 =back
@@ -398,7 +400,7 @@ sub _session_cancel {
     $self->_reply($stream, $rid, { stopReason => 'cancelled' });
   }
   if (my $rid = $session->{current_raider_id}) {
-    $self->hall->kill_raider($rid);
+    $self->hall->cancel_raider($rid);
   }
   $self->_reply($stream, $id, {});
 }
