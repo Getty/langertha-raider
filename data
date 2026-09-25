@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-25T22:12:51Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-25T22:12:51Z
+created: 2026-09-25T05:05:24Z
+id: 74
+priority: low
+started: 2026-09-25T21:58:38Z
+status: done
+tags:
+- plugins
+- core-dep
+title: Migrate to core's public plugin hooks (plugin_instances, plugin_args, plugin_pipeline_tool_call_f)
+updated: 2026-09-25T22:12:51Z
+---
+
+Core k226 (langertha main, unreleased) added public plugin_instances (ro), plugin_args and plugin_pipeline_tool_call_f on Role::PluginHost; the private _plugin_instances/_plugin_args/_plugin_pipeline_tool_call stay as aliases. Call sites: lib/Langertha/Raider.pm _plugin_instances (~10x), Raider.pm _plugin_pipeline_tool_call -> plugin_pipeline_tool_call_f, Raider.pm POD _plugin_args -> plugin_args, lib/Langertha/Raider/CLI.pm:1167. Tests: t/46,47,50,86,87,91. BLOCKED until a core release carries k226 — then bump the Langertha requires in cpanfile to that version and migrate.
+
+Maintainer 2026-09-25: jetzt migrieren, main braucht ohnehin core-main; Floor-Bump beim core-Release.
