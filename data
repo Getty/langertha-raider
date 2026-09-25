@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-09-25T04:17:37Z
+claimed_by: worker-session
+class: standard
+completed: 2026-09-25T04:17:37Z
+created: 2026-09-25T03:14:27Z
+id: 65
+priority: high
+started: 2026-09-25T04:17:37Z
+status: done
+tags:
+- sessions
+title: 'Session 1: SessionStore - Journal schreiben/lesen/sperren (ADR 0003/0015)'
+updated: 2026-09-25T04:17:37Z
+---
+
+ADR 0015. Internes Modul (z.B. Langertha::Raider::Session): anlegen (id YYYYMMDD-HHMMSS-xxxx UTC, session.created als Zeile 1, .raider/.gitignore mit sessions/ und lib/), oeffnen zum Schreiben mit exklusivem nicht-blockierendem flock auf <id>.lock ("session is in use"), append mit v/seq/time/type, lesen mit Toleranz fuer abgeschnittene letzte Zeile (gemeldet), neuer Append startet auf frischer Zeile. Scope project (<root>/.raider/sessions) und home (~/.raider/sessions, HOME ueberschreibbar fuer Tests). Nur Modul + Tests.
