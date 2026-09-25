@@ -1,0 +1,29 @@
+---
+class: standard
+created: 2026-09-24T15:31:43Z
+id: 22
+priority: low
+status: backlog
+tags:
+- backlog
+- cleanup
+title: Restposten Chaos-Inventar (nach M0/M1 einplanen)
+updated: 2026-09-25T21:59:37Z
+---
+
+Aus STATE-AND-VISION §4 + Code-Abgleich 2026-09-24, nicht in M0/M1-Tickets erfasst:
+- Hall-Raider-Felder: persona geschrieben (Hall/CLI.pm:103,:144) nie gelesen; mcp, isolated gelesen und ignoriert (Hall.pm:553-554); Hall-Top-Level preferred_lib_target nie gelesen; PERL5LIB .raider-hall/raiders/NAME/lib (Hall.pm:641) passt nicht zu cpanm --local-lib (<target>/lib/perl5).
+- Pack-Felder extra_mcp, add_allowed_commands, engine_options geladen (Packs.pm:124-126), nie genutzt -> gemaess ADR 0005 als Capability-Anfragen umsetzen oder streichen.
+- Pack-Discovery ueber $INC (Packs.pm:78); keine Projekt-/Home-Pack-Verzeichnisse.
+- Tool-Liste im Prompt handgeschrieben/unvollstaendig (CLI.pm:222-229) -> ADR 0005.
+- Core-Privatzugriffe: _async_http 5x (Raider.pm:858,1560,1738,1916,2091), _langfuse_timestamp 9x; Usage-Parsing dreifach -> Tickets auf langertha-Board (Handoff RDR-17). langertha k172 (Session-Embeddings async) liegt seit Extraktion auf dem falschen Board.
+- Grosse Dateien: Raider.pm (2214, _run_raid_loop monolithisch :1658-~2020), Hall.pm, Hall/CLI.pm.
+- Testluecken: Situation, Trace, HallTools, ACP::CLI, Hall::CLI; Telegram/Cron nicht e2e; Raider::MCP nur im geskippten Live-Test.
+- Naming: Langertha::Raid* vs Langertha::Raider::*; Tools als Funktionen, Hall-Teile als Klassen; packs vs persona; Default-Persona hartkodiert in CLI.pm (siehe auch #10, #6).
+- Oeffentliche API inventarisieren (was ist public: Engine, Raid, Plugins, Tool-Builder?) bevor interne Module neu geschnitten werden.
+
+Bestaetigt bei #27/#18 (2026-09-25): Hall _spawn_raider liest persona/mcp/isolated und ignoriert sie, obwohl hall init/add-raider persona schreiben.
+
+Stand 2026-09-25: Core-Privatzugriffe stehen auf dem langertha-Board als #190/#192. Testluecken -> #42. Naming App::Raider-Reste -> #10 erledigt. Offen bleiben: Hall-Felder persona/mcp/isolated, Pack-Felder (ADR 0005), Pack-Discovery, Tool-Liste im Prompt (ADR 0005), Raider.pm-Groesse, Public-API-Inventar.
+
+2026-09-25: Hall-Felder -> #81, Pack-Felder + Pack-Discovery -> #82 (Maintainer-Entscheid). Offen bleiben: Tool-Liste im Prompt (ADR 0005), Raider.pm-Groesse, Public-API-Inventar.
