@@ -32,6 +32,12 @@ other ACP-capable clients — see L<Langertha::Raider::Hall::ACP>.
 
 =back
 
+The name picks the slot. A name with a leading number (C<1bjorn>) is a
+singleton: one run at a time, further missions wait in a queue that
+survives a hall restart. A plain name (C<bjorn>) runs every mission at
+once, in parallel; its runs share the slot log. The hall keeps its running
+raiders by run ID, so each run is reaped and reported on its own.
+
 An MCP adapter on C<.raider-hall.mcp> is B<not implemented>:
 L<Langertha::Raider::Hall::MCP> describes the hall tools, but no socket is
 opened and an C<mcp> section in the config has no effect.
@@ -50,14 +56,15 @@ The hall then appends one line to the slot log,
 C<[hall] raider ID STATUS: TEXT> with the response or error cut to 300
 characters, so C<raider hall logs> shows the outcome.
 
+Each run starts its part of the slot log with C<[hall] raider ID started>.
 Run IDs are C<SLOT-TIME>, with C<.2>, C<.3>, ... appended when a run of the
 same slot started in the same second. Only the newest L</keep_events>
 events files per slot are kept. A slot log larger than L</max_log_size> is
 moved to F<SLOT.log.1> when the next run of the slot starts.
 
-C<raider hall logs ID> works for ended runs too: the slot is taken from the
-ID, and the answer is the slot log, or the result line built from the run's
-events file when the slot log no longer carries it.
+C<raider hall logs ID> shows the part of the slot log from that run's start
+line to its result line, and works for ended runs too: the slot is taken
+from the ID; see L</logs>.
 
 =head1 CONFIG FILE
 
@@ -505,7 +512,7 @@ sub _reap_raider {
     %$result,
   });
 
-  delete $self->raiders->{$slot};
+  delete $self->raiders->{$raider->id};
   $self->_prune_events($slot);
 
   if ($slot =~ /^\d+(.+)$/) {
@@ -587,7 +594,7 @@ sub _build_keep_events {
 
 Size in bytes above which a slot log F<SLOT.log> is moved to F<SLOT.log.1>
 (replacing an older one) when the next run of that slot starts -- never
-while a raider of the slot is still writing it. From
+while any raider of the slot is still writing it. From
 C<logs: { max_log_size: N }> in F<.raider-hall.yml>, default 1048576
 (1 MiB); 0 never rotates.
 
@@ -610,7 +617,7 @@ sub _log_dir { $_[0]->root->child('.raider-hall', 'logs') }
 sub _rotate_log {
   my ($self, $slot) = @_;
   my $max = $self->max_log_size;
-  return unless $max > 0 && !$self->raiders->{$slot};
+  return unless $max > 0 && !$self->_slot_busy($slot);
   my $log = $self->_log_dir->child("${slot}.log");
   return unless -f $log && -s $log > $max;
   $log->move($self->_log_dir->child("${slot}.log.1"));
@@ -627,6 +634,18 @@ sub _prune_events {
     map { $_->basename =~ /^\Q$slot\E-(\d+)(?:\.(\d+))?\.events\.jsonl$/ ? [ $_, $1, $2 // 1 ] : () }
     $dir->children;
   $_->[0]->remove for @runs[ 0 .. $#runs - $keep ];
+}
+
+sub _slot_busy {
+  my ($self, $slot) = @_;
+  return scalar grep { $_->slot_name eq $slot } values %{$self->raiders};
+}
+
+# The slots with at least one running raider, each named once.
+sub _running_slots {
+  my ($self) = @_;
+  my %slots = map { $_->slot_name => 1 } values %{$self->raiders};
+  return [ sort keys %slots ];
 }
 
 sub _find_raider_by_pid {
@@ -657,22 +676,20 @@ sub spawn {
 
   my ($slot, $base_name) = $self->_parse_name($name);
 
-  if ($slot && $self->raiders->{$slot}) {
-    if ($slot =~ /^\d+(.+)$/) {
-      push @{$self->singleton_queues->{$slot} //= []}, {
-        mission => $mission,
-        attach => $attach,
-        $telegram ? ( telegram => $telegram ) : (),
-      };
-      $self->_persist_queue($slot);
-      $self->_emit('raider.queued', {
-        slot => $slot,
-        queue_depth => scalar @{$self->singleton_queues->{$slot}},
-      });
-      return { queued => 1, slot => $slot };
-    }
-    my $err = JSON::MaybeXS->new->encode({error => "slot $slot already occupied"});
-    return { error => $err };
+  # Only numbered names have a slot here: singletons, queued while busy.
+  # A plain name runs in parallel.
+  if ($slot && $self->_slot_busy($slot)) {
+    push @{$self->singleton_queues->{$slot} //= []}, {
+      mission => $mission,
+      attach => $attach,
+      $telegram ? ( telegram => $telegram ) : (),
+    };
+    $self->_persist_queue($slot);
+    $self->_emit('raider.queued', {
+      slot => $slot,
+      queue_depth => scalar @{$self->singleton_queues->{$slot}},
+    });
+    return { queued => 1, slot => $slot };
   }
 
   return $self->_spawn_raider($slot // $name, $base_name // $name, $mission, $attach, $telegram);
@@ -720,6 +737,7 @@ sub _spawn_raider {
   $id = $base_id.'.'.++$n while -e $log_dir->child("${id}.events.jsonl");
   my $events_path = $log_dir->child("${id}.events.jsonl");
   $events_path->touch;
+  $log_path->append_utf8($self->_start_line($id));
 
   my $lib_path = $self->_raider_lib_path($base_name);
   my $extra_perl5lib = join ':', grep { defined && length } ($lib_path,
@@ -768,7 +786,7 @@ sub _spawn_raider {
     events_path => $events_path,
     mission => $mission,
   });
-  $self->raiders->{$slot} = $raider;
+  $self->raiders->{$id} = $raider;
 
   $self->_emit('raider.spawned', {
     id => $id,
@@ -807,10 +825,10 @@ sub _raider_lib_path {
 sub ps {
   my ($self) = @_;
   my @list;
-  for my $slot (sort keys %{$self->raiders}) {
-    my $r = $self->raiders->{$slot};
+  for my $r (sort { $a->slot_name cmp $b->slot_name || $a->id cmp $b->id }
+             values %{$self->raiders}) {
     push @list, {
-      slot => $slot,
+      slot => $r->slot_name,
       pid => $r->pid,
       base_name => $r->base_name,
       mission => $r->mission,
@@ -849,11 +867,17 @@ sub kill_raider {
 
     my $res = $hall->logs(id => $id);   # { log => $text } or { error => ... }
 
-The slot log of a running raider. For an ended run the slot comes from the
-ID (C<SLOT-TIME> or C<SLOT-TIME.N>); the run counts as known while its
-events file or its result line in the slot log is there. The answer is the
-slot log, followed by the result line from the events file when the slot
-log does not carry it (rotated or removed).
+The run's part of its slot log: from its C<[hall] raider ID started> line
+to its result line, or to the end of the log while it runs. Runs of a plain
+name in parallel share the slot log, so their lines can interleave. A log
+without that start line (written before the hall marked starts, or
+rotated away) is answered with the whole slot log.
+
+For an ended run the slot comes from the ID (C<SLOT-TIME> or
+C<SLOT-TIME.N>); the run counts as known while its events file or its
+lines in the slot log are there. When the log does not carry its result
+line (rotated or removed), the result line built from the events file is
+appended.
 
 =cut
 
@@ -862,7 +886,8 @@ sub logs {
   my $id = $args{id} // '';
   for my $r (values %{$self->raiders}) {
     next unless $r->id eq $id;
-    return { log => -f $r->log_path ? $r->log_path->slurp_utf8 : '' };
+    my $log = -f $r->log_path ? $r->log_path->slurp_utf8 : '';
+    return { log => $self->_run_section($log, $id) // $log };
   }
   return $self->_ended_logs($id);
 }
@@ -876,15 +901,31 @@ sub _ended_logs {
   my $dir = $self->_log_dir;
   my $log_path = $dir->child("${slot}.log");
   my $log = -f $log_path ? $log_path->slurp_utf8 : '';
-  my $logged = index($log, '[hall] raider '.$id.' ') >= 0;
+  my $section = $self->_run_section($log, $id);
+  $log = $section if defined $section;
+  my $logged = $log =~ /^\[hall\] raider \Q$id\E \w+: /m;
   my $events = $dir->child("${id}.events.jsonl");
-  return $missing unless $logged || -f $events;
+  return $missing unless defined $section || $logged || -f $events;
   return { log => $log } if $logged;
   my $doc = Langertha::Raider::Hall::Raider->new(
     id => $id, slot_name => $slot, base_name => $slot, mission => '',
     log_path => $log_path, events_path => $events,
   )->run_finished;
   return { log => $log.( $doc ? $self->_result_line($id, $self->_result_of($doc)) : '' ) };
+}
+
+sub _start_line {
+  my ($self, $id) = @_;
+  return '[hall] raider '.$id." started\n";
+}
+
+# From the run's start line to its result line, or to the end of the log;
+# undef when the log has no start line for it.
+sub _run_section {
+  my ($self, $log, $id) = @_;
+  my $start = quotemeta $self->_start_line($id);
+  return $1 if $log =~ /^($start.*?(?:^\[hall\] raider \Q$id\E \w+: [^\n]*\n|\z))/ms;
+  return;
 }
 
 sub shutdown {

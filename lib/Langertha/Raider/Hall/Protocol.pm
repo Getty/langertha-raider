@@ -65,7 +65,7 @@ sub setup_handlers {
     $stream->write(JSON::MaybeXS->new->encode({
       running => scalar(keys %{$hall->raiders}),
       root => $hall->root->stringify,
-      slots => [sort keys %{$hall->raiders}],
+      slots => $hall->_running_slots,
     }) . "\n");
   });
 

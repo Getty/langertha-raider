@@ -197,7 +197,58 @@ subtest 'the slot log ends each run with a readable result line' => sub {
   like( $lines[-1], qr/^\[hall\] raider \Q$long->{id}\E completed: answer: x+\.\.\.$/,
     'a long response is cut' );
   cmp_ok( length $lines[-1], '<', 400, 'to a short line' );
-  is( scalar( grep { /^\[hall\]/ } @lines ), 3, 'one result line per run' );
+  is( scalar( grep { /^\[hall\] raider \S+ \w+: / } @lines ), 3, 'one result line per run' );
+};
+
+subtest 'unnumbered names run in parallel, each run is reaped' => sub {
+  my ( $hall, $tmp ) = fake_hall();
+  my @done = run_spawns( $hall,
+    { name => 'bjorn', mission => 'alpha' },
+    { name => 'bjorn', mission => 'beta' } );
+  is( scalar @done, 2, 'a raider.done for each run' );
+  is( [ sort map { $_->{response} } @done ], [ 'answer: alpha', 'answer: beta' ],
+    'each run with its own result' );
+  isnt( $done[0]{id}, $done[1]{id}, 'distinct run IDs' );
+  is( [ map { $_->{slot} } @done ], [ 'bjorn', 'bjorn' ], 'same slot' );
+  is( $hall->raiders, {}, 'both left the table' );
+  my $log = $tmp->child( '.raider-hall', 'logs', 'bjorn.log' )->slurp_utf8;
+  like( $log, qr/^\[hall\] raider \Q$_->{id}\E completed: /m, 'result line of '.$_->{id} ) for @done;
+
+  my @ids = map { $hall->spawn( name => 'bjorn', mission => $_ )->{id} } 'one', 'two';
+  is( [ sort map { $_->{id} } $hall->ps ], [ sort @ids ], 'ps lists both running runs' );
+  is( $hall->mcp_adapter->handle_tool_call('hall_status')->{slots}, ['bjorn'],
+    'status names the slot once' );
+  my @more = run_spawns($hall);
+  is( [ sort map { $_->{id} } @more ], [ sort @ids ], 'both reaped' );
+};
+
+subtest 'the slot log marks the start of each run, logs ID shows only that run' => sub {
+  my ( $hall, $tmp ) = fake_hall();
+  my $log = $tmp->child( '.raider-hall', 'logs', 'bjorn.log' );
+  $log->parent->mkpath;
+  $log->spew_utf8("legacy line without a marker\n");
+  my $running = $hall->spawn( name => 'bjorn', mission => 'one' );
+  like( $log->slurp_utf8, qr/^\[hall\] raider \Q$running->{id}\E started$/m, 'start marker' );
+  like( $hall->logs( id => $running->{id} )->{log}, qr/\A\[hall\] raider \Q$running->{id}\E started\n/,
+    'running: the section starts at the marker' );
+  my ($one) = run_spawns($hall);
+  my ($two) = run_spawns( $hall, { name => 'bjorn', mission => 'two' } );
+
+  my $first = $hall->logs( id => $one->{id} )->{log};
+  like( $first, qr/\A\[hall\] raider \Q$one->{id}\E started\n/, 'starts at its marker' );
+  like( $first, qr/some diagnostic noise/, 'holds its stderr' );
+  like( $first, qr/^\[hall\] raider \Q$one->{id}\E completed: answer: one\n\z/m, 'ends with its result line' );
+  unlike( $first, qr/legacy line|\Q$two->{id}\E /, 'nothing before or after the run' );
+
+  my $second = $hall->logs( id => $two->{id} )->{log};
+  like( $second, qr/\A\[hall\] raider \Q$two->{id}\E started\n.*completed: answer: two\n\z/s,
+    'the second run alone' );
+  unlike( $second, qr/\Q$one->{id}\E /, 'without the first' );
+
+  my $logs = $tmp->child( '.raider-hall', 'logs' );
+  $logs->child('bjorn-7.events.jsonl')->spew_utf8("\n");
+  like( $hall->logs( id => 'bjorn-7' )->{log}, qr/\Alegacy line.*answer: two/s,
+    'no marker (older run): the whole slot log' );
 };
 
 subtest 'run IDs stay unique within the same second' => sub {
@@ -279,7 +330,10 @@ subtest 'no rotation while a raider of the slot still writes the log' => sub {
     log_path => $logs->child('bjorn.log') );
   $hall->_rotate_log('bjorn');
   ok( !$logs->child('bjorn.log.1')->exists, 'occupied slot: not rotated' );
-  delete $hall->raiders->{bjorn};
+  $hall->raiders->{'bjorn-2'} = delete $hall->raiders->{bjorn};
+  $hall->_rotate_log('bjorn');
+  ok( !$logs->child('bjorn.log.1')->exists, 'occupied slot, entry under its run ID: not rotated' );
+  delete $hall->raiders->{'bjorn-2'};
   $hall->_rotate_log('bjorn');
   ok( $logs->child('bjorn.log.1')->exists, 'free slot: rotated' );
 };

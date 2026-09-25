@@ -4,7 +4,7 @@ our $VERSION = '0.503';
 
 =head1 DESCRIPTION
 
-Data object the L<Langertha::Raider::Hall> keeps per running raider slot:
+Data object the L<Langertha::Raider::Hall> keeps per running raider, keyed by run ID:
 id, pid, slot and base name, log path, events path and mission.
 
 =cut

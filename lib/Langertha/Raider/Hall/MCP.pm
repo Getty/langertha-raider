@@ -130,7 +130,7 @@ sub handle_tool_call {
     return {
       running => scalar(keys %{$hall->raiders}),
       root => $hall->root->stringify,
-      slots => [sort keys %{$hall->raiders}],
+      slots => $hall->_running_slots,
     };
   }
   return { error => "unknown tool: $tool" };
