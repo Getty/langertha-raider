@@ -227,6 +227,26 @@ subtest 'a failed write: the next event starts on a fresh line' => sub {
   is($j->events->[-1]{content}, 'next', 'the next event reads fine');
 };
 
+subtest 'create with more fields; remove only under the lock' => sub {
+  my $root = tempdir(CLEANUP => 1);
+  my $store = Langertha::Raider::SessionStore->new(root => $root);
+  my $s = $store->create(forked_from => '20200101-000000-0000', id => 'ignored');
+  like($store->read($s->id)->created, { forked_from => '20200101-000000-0000', id => $s->id },
+    'extra fields in session.created, never over its own');
+
+  my $id = $s->id;
+  like(dies { $store->remove($id) }, qr/\Asession \Q$id\E is in use/, 'not while a writer holds it');
+  ok($store->exists($id), 'still there');
+  $s->release;
+  my $keep = $store->create;
+  $keep->release;
+  $store->remove($id);
+  ok(!$store->exists($id), 'journal removed');
+  ok(!-e path($store->dir, $id.'.lock'), 'lock file removed');
+  is([ $store->ids ], [ $keep->id ], 'the other session is untouched');
+  like(dies { $store->remove($id) }, qr/\Aunknown session /, 'unknown afterwards');
+};
+
 subtest 'history.cleared: the working history starts again' => sub {
   my $root = tempdir(CLEANUP => 1);
   my $store = Langertha::Raider::SessionStore->new(root => $root);
@@ -242,6 +262,22 @@ subtest 'history.cleared: the working history starts again' => sub {
     'history: only after the last clear');
   is(scalar(grep { $_->{role} eq 'user' } @{ $j->session_history_messages }), 2, 'session_history keeps everything');
   is(scalar @{ $j->runs }, 2, 'the runs are all there');
+  $s->release;
+};
+
+subtest 'messages outside a run (a fork) are history as they are' => sub {
+  my $root = tempdir(CLEANUP => 1);
+  my $store = Langertha::Raider::SessionStore->new(root => $root);
+  my $s = $store->create;
+  $s->append('message', role => 'user', content => 'old q');
+  $s->append('message', role => 'assistant', content => 'old a');
+  $s->append('run.started', run => 'r1');
+  $s->append('message', run => 'r1', role => 'user', content => 'unanswered');
+  $s->append('run.finished', run => 'r1', status => 'failed');
+  my $j = $store->read($s->id);
+  is($j->history_messages, [ { role => 'user', content => 'old q' }, { role => 'assistant', content => 'old a' } ],
+    'copied messages count, a failed run does not');
+  is([ map { $_->{run} } @{ $j->runs } ], [ 'r1' ], 'they are no run');
   $s->release;
 };
 

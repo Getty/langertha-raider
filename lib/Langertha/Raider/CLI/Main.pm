@@ -39,7 +39,8 @@ then either the REPL (L<Langertha::Raider::CLI::REPL>) or one prompt
 =over
 
 =item C<0> -- success, including C<--help>, the exports, C<config explain>,
-C<session list>, C<session show> and leaving the REPL.
+C<session list>, C<session show>, C<session fork>, C<session rm> and
+leaving the REPL.
 
 =item C<1> -- the run failed: the engine, a tool or the network raised an
 error (with a machine format, the output is the C<failed> document).
@@ -55,9 +56,9 @@ or ambiguous session, or C<--continue> without any session.
 engine is unknown, or a pack detection rule is invalid.
 
 =item C<4> -- the session to continue (C<--session>, C<--continue>,
-C<session resume>) is in use: another raider has it open for writing and
-holds its lock. Unlike a usage error the same command can work later, which
-is why it has a status of its own.
+C<session resume>) or to remove (C<session rm>) is in use: another raider
+has it open for writing and holds its lock. Unlike a usage error the same
+command can work later, which is why it has a status of its own.
 
 =item C<130>, C<143> -- a one-shot run was interrupted by C<SIGINT> or
 C<SIGTERM>. It writes the C<interrupted> document (or a note), then dies of
@@ -148,6 +149,8 @@ Usage: raider [options] [prompt...]
        raider session list [options]       the project's sessions, newest first
        raider session show ID [--json]     one session, event by event
        raider session resume ID [options]  continue a session in the REPL
+       raider session fork ID [--json]     a new session with its history
+       raider session rm ID [--json]       delete a session
 
 Options:
   -e, --engine NAME        anthropic, openai, deepseek, groq, mistral, gemini,
@@ -387,11 +390,11 @@ sub run {
     }
   }
 
-  # raider session list | show ID | resume ID [options]. Only these words
-  # make the subcommand; any other prompt starting with "session" (raider
-  # session is lost?) stays a prompt.
+  # raider session list | show ID | resume ID | fork ID | rm ID [options].
+  # Only these words make the subcommand; any other prompt starting with
+  # "session" (raider session is lost?) stays a prompt.
   my ( $session_cmd, $session_id );
-  if (!$config_cmd && @argv >= 2 && $argv[0] eq 'session' && $argv[1] =~ /\A(?:list|show|resume)\z/) {
+  if (!$config_cmd && @argv >= 2 && $argv[0] eq 'session' && $argv[1] =~ /\A(?:list|show|resume|fork|rm)\z/) {
     ( undef, $session_cmd ) = splice @argv, 0, 2;
   }
 
@@ -400,21 +403,21 @@ sub run {
   # Behind options (raider -e openai config explain) only the exact words
   # "config explain" are the subcommand; any other prompt starting with
   # "config" stays a prompt. The same for "session list" and "session
-  # show|resume ID" with a word shaped like a session id.
+  # show|resume|fork|rm ID" with a word shaped like a session id.
   if (!$config_cmd && @prompt == 2 && $prompt[0] eq 'config' && $prompt[1] eq 'explain') {
     $config_cmd = 'explain';
     @prompt = ();
   }
   if (!$config_cmd && !$session_cmd && @prompt >= 2 && $prompt[0] eq 'session'
       && ( (@prompt == 2 && $prompt[1] eq 'list')
-        || (@prompt == 3 && $prompt[1] =~ /\A(?:show|resume)\z/ && $self->session_store_class->is_ref($prompt[2])) )) {
+        || (@prompt == 3 && $prompt[1] =~ /\A(?:show|resume|fork|rm)\z/ && $self->session_store_class->is_ref($prompt[2])) )) {
     ( undef, $session_cmd ) = splice @prompt, 0, 2;
   }
   if ($session_cmd) {
     my $wants_id = $session_cmd ne 'list';
     $session_id = shift @prompt if $wants_id;
     if (@prompt || ($wants_id && !$self->session_store_class->is_ref($session_id))) {
-      $self->_warn("Usage: raider session list | show ID | resume ID [options]\n");
+      $self->_warn("Usage: raider session list | show ID | resume ID | fork ID | rm ID [options]\n");
       return EXIT_USAGE;
     }
   }
@@ -624,10 +627,12 @@ sub resume_session {
     my $exit = $main->session_command(list => undef, $opt);
     my $exit = $main->session_command(show => $id, $opt);
 
-C<raider session list> and C<raider session show ID> for the project in
-C<-r> (or the working directory), through
+C<raider session list>, C<show ID>, C<fork ID> and C<rm ID> for the
+project in C<-r> (or the working directory), through
 L<Langertha::Raider::CLI::Sessions>; a document format (C<--json>,
-C<--msgpack>, C<--yaml>) writes them as one document.
+C<--msgpack>, C<--yaml>) writes them as one document. C<rm> of a session
+another raider has open ends with C<4>, as a resume of it would; a fork or
+removal that fails otherwise with C<1>.
 
 =cut
 
@@ -648,8 +653,16 @@ sub session_command {
     return EXIT_OK;
   }
   $id = $self->resolve_session($store, $id) // return EXIT_USAGE;
-  $sessions->show($id, $machine);
-  return EXIT_OK;
+  if ($cmd eq 'show') {
+    $sessions->show($id, $machine);
+    return EXIT_OK;
+  }
+  my $method = $cmd eq 'fork' ? 'fork_session' : 'remove';
+  return EXIT_OK if eval { $sessions->$method($id, $machine); 1 };
+  my $error = $self->output->error_text($@);
+  my $in_use = $error =~ / is in use\z/;
+  $self->_warn($error.($in_use ? ' by another raider' : '')."\n");
+  return $in_use ? EXIT_SESSION_IN_USE : EXIT_RUN_ERROR;
 }
 
 =method resolve_session

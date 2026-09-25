@@ -180,7 +180,8 @@ hashes: the user input and final assistant text of every run that has a
 final assistant text. A run that failed or was interrupted before its
 answer adds nothing, as a live raid adds nothing to C<history> then. A
 C<history.cleared> event (C</clear> in the REPL) empties it: only the
-messages after the last one count.
+messages after the last one count. A C<message> outside any run (the
+history a fork took over) counts as it is.
 
 =cut
 
@@ -190,7 +191,7 @@ sub history_messages {
   my @messages;
   for my $e (@{ $self->events }) {
     if ($e->{type} eq 'history.cleared') { @messages = () }
-    elsif ($e->{type} eq 'message' && $answered{ $e->{run} // '' }) {
+    elsif ($e->{type} eq 'message' && (!defined $e->{run} || $answered{ $e->{run} })) {
       push @messages, { role => $e->{role}, content => $e->{content} };
     }
   }

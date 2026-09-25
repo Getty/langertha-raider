@@ -253,14 +253,28 @@ candidates listed.
     raider --session ID "and now ..."    # one more run in session ID
     raider --continue "and now ..."      # the same in the newest session
     raider -i --continue                 # the REPL on the newest session
+    raider session fork ID               # a new session with ID's history
+    raider session rm ID                 # delete session ID
 
 C<session list> shows id, number of runs, the state of the last run and
 the first prompt of each session; C<session show> prints every event, then
 what the crash rules found. Both read without the lock, take C<-r> for the
-project and a document format (C<--json>, C<--msgpack>, C<--yaml>). As for
+project and a document format (C<--json>, C<--msgpack>, C<--yaml>), as do
+C<session fork> and C<session rm>. As for
 C<config explain>, the options may come first; there only
-C<session list> and C<session show|resume> followed by a session id are the
-subcommand, any other prompt starting with C<session> is sent as a prompt.
+C<session list> and C<session show|resume|fork|rm> followed by a session id
+are the subcommand, any other prompt starting with C<session> is sent as a
+prompt.
+
+C<session fork ID> starts a new session in the same project whose
+C<session.created> names the original in C<forked_from>, and copies what a
+resume would replay as the conversation into it, as C<message> events
+outside any run. The original is only read, not locked or changed; the
+fork has its own journal from then on and is continued like any session
+(C<session resume>, C<--session>). C<session rm ID> deletes the journal
+and its lock file; it takes the lock first, so a session another raider
+has open is refused with exit status C<4>. Raider never deletes a session
+on its own.
 
 Continuing a session (C<--session ID>, C<--continue>, C<session resume>)
 takes its lock, replays the conversation -- the input and answer of every
@@ -279,7 +293,8 @@ with exit status C<4>.
 =over
 
 =item C<0> -- success, including C<--help>, the exports, C<config explain>,
-C<session list>, C<session show> and leaving the REPL.
+C<session list>, C<session show>, C<session fork>, C<session rm> and
+leaving the REPL.
 
 =item C<1> -- the run failed: the engine, a tool or the network raised an
 error. With a machine output flag, the document says C<failed>.
@@ -293,11 +308,10 @@ version.
 engine is unknown.
 
 =item C<4> -- the session to continue (C<--session>, C<--continue>,
-C<session resume>) is in use by another raider. A usage error
-(C<2>) is also an unknown or ambiguous session, a C<--session> that is no
-session id,
-C<--continue> without any session, or more than one of C<--session>,
-C<--continue> and C<--no-session>.
+C<session resume>) or to remove (C<session rm>) is in use by another
+raider. A usage error (C<2>) is also an unknown or ambiguous session, a
+C<--session> that is no session id, C<--continue> without any session, or
+more than one of C<--session>, C<--continue> and C<--no-session>.
 
 =item C<130>, C<143> -- a one-shot run was interrupted by C<SIGINT> or
 C<SIGTERM>. F<raider> ends the tool commands still running, writes the

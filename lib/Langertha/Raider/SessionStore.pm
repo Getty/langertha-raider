@@ -275,16 +275,18 @@ sub new_id {
 =method create
 
     my $session = $store->create;
+    my $fork    = $store->create(forked_from => $id);
 
 Starts a new session: L</prepare>, claims a fresh id (a file that already
 exists is never reused), locks it and writes C<session.created> as line 1
 -- C<id>, C<scope>, C<root> (the project, or the home directory),
-C<principal> and C<raider> (the version).
+C<principal> and C<raider> (the version), plus the given fields (which
+never replace those).
 
 =cut
 
 sub create {
-  my ( $self ) = @_;
+  my ( $self, %fields ) = @_;
   $self->prepare;
   my ( $id, $path );
   for my $try (1 .. 100) {
@@ -298,6 +300,7 @@ sub create {
   }
   my $session = $self->session_class->new(id => $id, path => $path, clock => $self->clock);
   $session->append('session.created',
+    %fields,
     id        => $id,
     scope     => $self->scope,
     root      => $self->scope eq 'project' ? path($self->root)->absolute->stringify : $self->home,
@@ -336,6 +339,26 @@ sub read {
   my ( $self, $id ) = @_;
   croak 'unknown session '.($id // '(undef)') unless $self->exists($id);
   return $self->journal_class->load($self->path_of($id), id => $id);
+}
+
+=method remove
+
+    $store->remove($id);
+
+Deletes a session: its journal and its lock file. It takes the lock first,
+so it croaks C<session ID is in use> -- at once -- while another writer has
+the session open, and C<unknown session ID> when there is none. Nothing in
+Raider removes a session on its own.
+
+=cut
+
+sub remove {
+  my ( $self, $id ) = @_;
+  my $session = $self->open($id);
+  path($session->path)->remove or croak 'cannot remove '.$session->path.': '.$!;
+  path($session->lock_path)->remove;
+  $session->release;
+  return;
 }
 
 __PACKAGE__->meta->make_immutable;
