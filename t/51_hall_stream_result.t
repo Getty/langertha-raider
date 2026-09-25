@@ -27,12 +27,14 @@ my $repo = path(__FILE__)->absolute->parent->parent;
 #   twice   - two run.finished events, the last one counts
 #   wait    - one event, then waits for a signal: SIGINT ends it cancelled,
 #             SIGTERM interrupted, each with run.finished and death by the
-#             signal, as bin/raider does; FAKE_RELEASE is touched once waiting
+#             signal (unblocked first), as bin/raider does; FAKE_RELEASE is
+#             touched once waiting
 #   *       - run.started, message, run.finished with "answer: MISSION"
 my $FAKE = <<'PERL';
 use strict;
 use warnings;
 use JSON::PP;
+use POSIX qw( sigprocmask SIG_UNBLOCK SIGINT SIGTERM );
 my $mission = $ARGV[-1];
 open my $a, '>>', $ENV{FAKE_ARGV_LOG} or die $!;
 print $a JSON::PP->new->canonical->encode([ @ARGV ]), "\n";
@@ -53,6 +55,9 @@ if ( $mission eq 'wait' ) {
       event('run.finished', status => $sig eq 'INT' ? 'cancelled' : 'interrupted',
         $sig eq 'TERM' ? ( signal => 'TERM' ) : (), elapsed => 0.3);
       $SIG{$sig} = 'DEFAULT';
+      # Perl blocks the signal while its handler runs; unblock it, as
+      # bin/raider does, or it only lands once the handler is left.
+      sigprocmask( SIG_UNBLOCK, POSIX::SigSet->new( $sig eq 'INT' ? SIGINT : SIGTERM ) );
       kill $sig, $$;
       sleep 5;
       exit 1;
