@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-09-25T00:02:13Z
+claimed_by: test-writer
+class: standard
+completed: 2026-09-25T00:02:13Z
+created: 2026-09-24T23:49:55Z
+id: 52
+priority: medium
+started: 2026-09-25T00:02:13Z
+status: done
+tags:
+- tests
+title: 'Tests: alle *_API_KEY in Subprozess-Tests leeren'
+updated: 2026-09-25T00:02:13Z
+---
+
+Aus #50: t/39_cli_main.t (und ggf. andere bin/raider-Subprozess-Tests) loeschen nur einige Keys; MINIMAX_API_KEY u.a. bleiben, Autodetection koennte kuenftig echte Engines erreichen. Zentral alle *_API_KEY (und passende Base-URL-Envs) leeren, z.B. Helper in t/lib.
