@@ -1,0 +1,78 @@
+{"action":"move","agent":"worker-followup","detail":"done","task_id":51,"ts":"2026-09-24T23:49:51Z"}
+{"action":"create","agent":"test-writer","detail":"in-progress","task_id":52,"ts":"2026-09-24T23:49:55Z"}
+{"action":"move","agent":"test-writer","detail":"done","task_id":52,"ts":"2026-09-25T00:02:13Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":40,"ts":"2026-09-25T00:10:28Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":34,"ts":"2026-09-25T00:10:32Z"}
+{"action":"create","agent":"worker-json","detail":"in-progress","task_id":53,"ts":"2026-09-25T01:34:59Z"}
+{"action":"create","agent":"worker-json","detail":"in-progress","task_id":54,"ts":"2026-09-25T01:35:03Z"}
+{"action":"create","agent":"worker-mission","detail":"in-progress","task_id":55,"ts":"2026-09-25T01:35:07Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"done","task_id":34,"ts":"2026-09-25T01:35:11Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"done","task_id":40,"ts":"2026-09-25T01:35:16Z"}
+{"action":"edit","agent":"worker-json","detail":"in-progress","task_id":53,"ts":"2026-09-25T01:36:06Z"}
+{"action":"edit","agent":"worker-json","detail":"in-progress","task_id":54,"ts":"2026-09-25T01:36:11Z"}
+{"action":"move","agent":"worker-mission","detail":"done","task_id":55,"ts":"2026-09-25T01:46:43Z"}
+{"action":"move","agent":"worker-json","detail":"done","task_id":53,"ts":"2026-09-25T01:51:58Z"}
+{"action":"move","agent":"worker-json","detail":"done","task_id":54,"ts":"2026-09-25T01:52:02Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":56,"ts":"2026-09-25T01:52:07Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":57,"ts":"2026-09-25T01:52:12Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":58,"ts":"2026-09-25T01:52:16Z"}
+{"action":"move","agent":"worker-cli3","detail":"in-progress","task_id":56,"ts":"2026-09-25T02:22:10Z"}
+{"action":"move","agent":"worker-cli3","detail":"in-progress","task_id":58,"ts":"2026-09-25T02:22:14Z"}
+{"action":"move","agent":"worker-hall2","detail":"in-progress","task_id":57,"ts":"2026-09-25T02:22:18Z"}
+{"action":"move","agent":"worker-hall2","detail":"done","task_id":57,"ts":"2026-09-25T02:29:19Z"}
+{"action":"create","agent":"worker-hall2","detail":"in-progress","task_id":59,"ts":"2026-09-25T02:29:24Z"}
+{"action":"move","agent":"worker-cli3","detail":"done","task_id":56,"ts":"2026-09-25T02:38:13Z"}
+{"action":"move","agent":"worker-cli3","detail":"done","task_id":58,"ts":"2026-09-25T02:38:17Z"}
+{"action":"move","agent":"worker-hall2","detail":"done","task_id":59,"ts":"2026-09-25T02:38:21Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":60,"ts":"2026-09-25T02:38:26Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":61,"ts":"2026-09-25T02:38:30Z"}
+{"action":"move","agent":"worker-hall2","detail":"in-progress","task_id":60,"ts":"2026-09-25T02:38:43Z"}
+{"action":"move","agent":"worker-cli3","detail":"in-progress","task_id":61,"ts":"2026-09-25T02:38:47Z"}
+{"action":"move","agent":"worker-hall2","detail":"done","task_id":60,"ts":"2026-09-25T02:48:40Z"}
+{"action":"create","agent":"worker-hall2","detail":"in-progress","task_id":62,"ts":"2026-09-25T02:48:44Z"}
+{"action":"move","agent":"worker-cli3","detail":"done","task_id":61,"ts":"2026-09-25T02:55:48Z"}
+{"action":"edit","agent":"worker-cli3","detail":"done","task_id":61,"ts":"2026-09-25T02:55:53Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":63,"ts":"2026-09-25T02:55:57Z"}
+{"action":"move","agent":"worker-cli3","detail":"in-progress","task_id":63,"ts":"2026-09-25T02:56:06Z"}
+{"action":"move","agent":"worker-hall2","detail":"done","task_id":62,"ts":"2026-09-25T02:57:50Z"}
+{"action":"edit","agent":"worker-hall2","detail":"done","task_id":62,"ts":"2026-09-25T02:57:54Z"}
+{"action":"move","agent":"worker-cli3","detail":"done","task_id":63,"ts":"2026-09-25T03:04:14Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":64,"ts":"2026-09-25T03:04:18Z"}
+{"action":"create","agent":"worker-session","detail":"in-progress","task_id":65,"ts":"2026-09-25T03:14:27Z"}
+{"action":"create","agent":"worker-session","detail":"in-progress","task_id":66,"ts":"2026-09-25T03:14:32Z"}
+{"action":"create","agent":"worker-session","detail":"in-progress","task_id":67,"ts":"2026-09-25T03:14:36Z"}
+{"action":"create","agent":"worker-session-hall","detail":"in-progress","task_id":68,"ts":"2026-09-25T03:14:41Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":69,"ts":"2026-09-25T03:14:45Z"}
+{"action":"move","agent":"worker-session-hall","detail":"todo","task_id":68,"ts":"2026-09-25T03:15:11Z"}
+{"action":"move","agent":"worker-session","detail":"done","task_id":65,"ts":"2026-09-25T04:17:37Z"}
+{"action":"move","agent":"worker-session","detail":"done","task_id":66,"ts":"2026-09-25T04:17:42Z"}
+{"action":"move","agent":"worker-session","detail":"done","task_id":67,"ts":"2026-09-25T04:17:47Z"}
+{"action":"create","agent":"worker-session","detail":"in-progress","task_id":70,"ts":"2026-09-25T04:17:51Z"}
+{"action":"move","agent":"worker-session","detail":"in-progress","task_id":69,"ts":"2026-09-25T04:17:56Z"}
+{"action":"move","agent":"worker-session-hall","detail":"in-progress","task_id":68,"ts":"2026-09-25T04:18:01Z"}
+{"action":"move","agent":"worker-session-hall","detail":"done","task_id":68,"ts":"2026-09-25T04:29:07Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":71,"ts":"2026-09-25T04:29:12Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":72,"ts":"2026-09-25T04:29:16Z"}
+{"action":"move","agent":"worker-session-hall","detail":"in-progress","task_id":71,"ts":"2026-09-25T04:29:28Z"}
+{"action":"move","agent":"worker-session-hall","detail":"in-progress","task_id":72,"ts":"2026-09-25T04:29:33Z"}
+{"action":"move","agent":"worker-session","detail":"done","task_id":69,"ts":"2026-09-25T04:59:17Z"}
+{"action":"move","agent":"worker-session","detail":"done","task_id":70,"ts":"2026-09-25T04:59:21Z"}
+{"action":"move","agent":"worker-session-hall","detail":"done","task_id":71,"ts":"2026-09-25T04:59:26Z"}
+{"action":"move","agent":"worker-session-hall","detail":"done","task_id":72,"ts":"2026-09-25T04:59:30Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":73,"ts":"2026-09-25T04:59:35Z"}
+{"action":"move","agent":"worker-hall3","detail":"in-progress","task_id":73,"ts":"2026-09-25T04:59:50Z"}
+{"action":"move","agent":"worker-app","detail":"in-progress","task_id":41,"ts":"2026-09-25T04:59:55Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":74,"ts":"2026-09-25T05:05:24Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":74,"ts":"2026-09-25T05:05:32Z"}
+{"action":"move","agent":"worker-app","detail":"done","task_id":41,"ts":"2026-09-25T05:21:15Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":75,"ts":"2026-09-25T05:21:20Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":76,"ts":"2026-09-25T05:21:25Z"}
+{"action":"move","agent":"worker-app","detail":"in-progress","task_id":76,"ts":"2026-09-25T05:21:37Z"}
+{"action":"move","agent":"worker-app","detail":"in-progress","task_id":64,"ts":"2026-09-25T05:21:42Z"}
+{"action":"move","agent":"worker-hall3","detail":"done","task_id":73,"ts":"2026-09-25T05:27:20Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":77,"ts":"2026-09-25T05:27:25Z"}
+{"action":"move","agent":"worker-hall3","detail":"in-progress","task_id":75,"ts":"2026-09-25T05:27:31Z"}
+{"action":"move","agent":"worker-hall3","detail":"in-progress","task_id":77,"ts":"2026-09-25T05:27:36Z"}
+{"action":"move","agent":"worker-hall3","detail":"done","task_id":75,"ts":"2026-09-25T05:44:44Z"}
+{"action":"move","agent":"worker-hall3","detail":"done","task_id":77,"ts":"2026-09-25T05:44:49Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":78,"ts":"2026-09-25T05:44:53Z"}
