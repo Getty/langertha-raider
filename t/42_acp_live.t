@@ -6,6 +6,8 @@ use File::Temp qw( tempdir );
 use IO::Socket::IP;
 use YAML::PP;
 use POSIX qw( WNOHANG );
+use lib 't/lib';
+use Test::Raider::Env qw( isolate_home );
 
 # End-to-end LIVE test: spins a real hall with ACP, sends a real
 # session/prompt, expects a real (paid) LLM answer to come back.
@@ -16,6 +18,8 @@ plan skip_all => 'live test: set TEST_LIVE=1 (plus OPENAI_API_KEY) to run'
   unless $ENV{TEST_LIVE};
 plan skip_all => 'live test: TEST_LIVE=1 also needs OPENAI_API_KEY'
   unless $ENV{OPENAI_API_KEY};
+
+isolate_home();
 
 # Pick a free port.
 my $probe = IO::Socket::IP->new(

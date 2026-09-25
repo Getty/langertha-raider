@@ -4,7 +4,8 @@ use Test::More;
 use File::Temp qw( tempdir );
 use Path::Tiny;
 use lib 't/lib';
-use Test::Raider::Env qw( clear_engine_env );
+use Test::Raider::Env qw( clear_engine_env isolate_home );
+isolate_home();
 
 # Regression: bin/raider must read the agent profile table from
 # $Langertha::Raider::CLI::AGENT_PROFILES (formerly $App::Raider::...).

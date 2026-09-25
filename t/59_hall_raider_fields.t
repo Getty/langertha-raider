@@ -7,7 +7,8 @@ use Test2::V0;
 use JSON::PP ();
 use Path::Tiny;
 use lib 't/lib';
-use Test::Raider::Env qw( clear_engine_env );
+use Test::Raider::Env qw( clear_engine_env isolate_home );
+isolate_home();
 use Test::Raider::Hall qw( fake_hall run_spawns );
 use Langertha::Raider::CLI::Main;
 

@@ -3,6 +3,9 @@ use warnings;
 use Test2::V0;
 use Path::Tiny;
 use File::Temp qw( tempdir );
+use lib 't/lib';
+use Test::Raider::Env qw( isolate_home );
+isolate_home();
 use Langertha::Raider::Hall::CLI;
 
 # Regression: GetOptions consumed @ARGV but the subcommands kept working on

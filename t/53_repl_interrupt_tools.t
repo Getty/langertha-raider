@@ -8,7 +8,8 @@ use File::Temp qw( tempdir );
 use JSON::MaybeXS ();
 use Path::Tiny;
 use lib 't/lib';
-use Test::Raider::Env qw( clear_engine_env );
+use Test::Raider::Env qw( clear_engine_env isolate_home );
+isolate_home();
 use Test::Raider::StubEngine qw( stub_engine alive );
 
 clear_engine_env();

@@ -4,6 +4,9 @@ use Test2::V0;
 use File::Temp qw( tempdir );
 use Path::Tiny;
 use YAML::PP ();
+use lib 't/lib';
+use Test::Raider::Env qw( isolate_home );
+isolate_home();
 use Langertha::Raider::CLI;
 
 # Explicit CLI flags (-m, -k, -o, -e) beat .raider.yml, and the model the

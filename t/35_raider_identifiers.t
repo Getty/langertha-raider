@@ -7,6 +7,9 @@ use Test2::Bundle::More;
 use File::Temp qw( tempdir );
 use Path::Tiny;
 use IO::Async::Loop;
+use lib 't/lib';
+use Test::Raider::Env qw( isolate_home );
+isolate_home();
 
 use Langertha::Raider::CLI;
 use Langertha::Raider::Skill;

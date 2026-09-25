@@ -6,6 +6,9 @@ use File::Temp qw( tempdir );
 use IO::Socket::IP;
 use JSON::MaybeXS;
 use YAML::PP;
+use lib 't/lib';
+use Test::Raider::Env qw( isolate_home );
+isolate_home();
 use Langertha::Raider::Hall;
 no warnings 'once';  # PROTOCOL_VERSION imported from the ACP package
 

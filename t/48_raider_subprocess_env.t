@@ -6,7 +6,8 @@ use warnings;
 use Test2::V0;
 use Path::Tiny;
 use lib 't/lib';
-use Test::Raider::Env qw( clear_engine_env );
+use Test::Raider::Env qw( clear_engine_env isolate_home );
+isolate_home();
 
 # karr #52: t/39_cli_main.t and friends only deleted six known *_API_KEY
 # names before spawning bin/raider, so an engine not on that list --

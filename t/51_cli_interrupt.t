@@ -12,7 +12,8 @@ use JSON::MaybeXS ();
 use POSIX qw( WIFSIGNALED WTERMSIG WIFEXITED WEXITSTATUS );
 use Path::Tiny;
 use lib 't/lib';
-use Test::Raider::Env qw( clear_engine_env );
+use Test::Raider::Env qw( clear_engine_env isolate_home );
+isolate_home();
 
 clear_engine_env();
 

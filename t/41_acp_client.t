@@ -5,6 +5,9 @@ use Path::Tiny;
 use File::Temp qw( tempdir );
 use IO::Socket::IP;
 use YAML::PP;
+use lib 't/lib';
+use Test::Raider::Env qw( isolate_home );
+isolate_home();
 
 # End-to-end smoketest: fork a child that runs a real hall ACP
 # adapter on an ephemeral port, then drive it from the parent with

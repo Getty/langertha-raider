@@ -7,7 +7,8 @@ use Test2::V0;
 use File::Temp qw( tempdir );
 use JSON::MaybeXS ();
 use lib 't/lib';
-use Test::Raider::Env qw( clear_engine_env );
+use Test::Raider::Env qw( clear_engine_env isolate_home );
+isolate_home();
 use Langertha::Raider::Application;
 use Langertha::Raider::CLI;
 
