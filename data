@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T04:59:30Z
+claimed_by: worker-session-hall
+class: standard
+completed: 2026-09-25T04:59:30Z
+created: 2026-09-25T04:29:16Z
+id: 72
+priority: low
+started: 2026-09-25T04:29:33Z
+status: done
+tags:
+- hall
+- sessions
+- telegram
+title: 'Hall: Session-Bindungen zuruecksetzen und aufraeumen; telegram_reply in Forum-Topic'
+updated: 2026-09-25T04:59:30Z
+---
+
+Aus #68: (1) Bindungs-Map waechst nur; ACP-Eintraege bleiben nach Hall-Crash. (2) Kein Weg, eine neue Konversation zu beginnen (z.B. Telegram /new, raider hall session reset BINDING). (3) telegram_reply kennt keinen Thread; Antworten in Forum-Topics landen im Haupt-Chat -> Thread an Reply-Ziel binden (Env/Bindung wie bot/chat_id).
