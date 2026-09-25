@@ -2401,7 +2401,7 @@ are resolved first to C<Langertha::Plugin::$name>, then to
 C<LangerthaX::Plugin::$name>. Fully qualified names (with C<::>) are
 used as-is.
 
-Plugin instances are created automatically with C<< raider => $self >>.
+Plugin instances are created automatically with C<< host => $self >>.
 Extra constructor arguments can be passed via C<plugin_args>.
 
 =cut

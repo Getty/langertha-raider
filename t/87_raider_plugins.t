@@ -562,7 +562,7 @@ subtest 'multiple event consumers all receive event' => sub {
   sub provides_events { ['engine_test'] }
 
   # Answers with itself, so the test reaches the instance through the public
-  # fire_event_f instead of core's private _plugin_instances (k195).
+  # fire_event_f instead of reaching into plugin_instances.
   async sub on_engine_test { my ($self) = @_; push @{$self->log}, 'engine_test'; return $self }
 
   __PACKAGE__->meta->make_immutable;

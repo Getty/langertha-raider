@@ -200,6 +200,10 @@ Revision history for Langertha-Raider
       .raider/lib): each hall raider installs modules there and gets
       <target>/lib/perl5 on PERL5LIB, instead of a per-raider lib
       directory nothing installed into.
+    - Langertha::Raider uses Role::PluginHost's public plugin hooks
+      (plugin_instances, plugin_args, plugin_pipeline_tool_call_f) instead
+      of their private names; this needs a Langertha release that ships
+      them (core k226).
     - New Langertha::Raider->cancel stops a raid at its next safe point and
       is safe in a signal handler; the raid returns a Result of type
       cancelled (is_cancelled), and a tool call it cut off is reported as
