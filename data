@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-25T04:17:47Z
+claimed_by: worker-session
+class: standard
+completed: 2026-09-25T04:17:47Z
+created: 2026-09-25T03:14:36Z
+id: 67
+priority: high
+started: 2026-09-25T04:17:47Z
+status: done
+tags:
+- sessions
+- cli
+title: 'Session 3: raider session list/show/resume und --session ID'
+updated: 2026-09-25T04:17:47Z
+---
+
+ADR 0015, nach Session 2. raider session list (Projekt, neueste zuerst, Kurzinfo), raider session show ID (lesbar; --json), raider session resume ID (REPL setzt fort), --session ID / --continue fuer One-Shot und REPL (letzte Session). Resume baut history aus message-Events, session_history aus allen; tool.call ohne result -> unknown melden, nie erneut ausfuehren; run ohne finished -> interrupted. Lock verhindert zweiten Schreiber (klare Meldung, Exit 2 oder eigener).
