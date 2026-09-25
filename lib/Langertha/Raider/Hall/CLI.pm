@@ -738,11 +738,8 @@ EOF
 # The engines' key variables come from the resolver that picks the
 # engine inside the raider; the web-search keys are WebTools'.
 sub api_key_env_vars {
-  my @engines = qw(
-    anthropic openai deepseek groq mistral gemini minimax cerebras openrouter
-  );
   return (
-    ( grep { defined } map { Langertha::Raider::EngineResolver->env_var_for_engine($_) } @engines ),
+    Langertha::Raider::EngineResolver->api_key_env_vars,
     qw( BRAVE_API_KEY SERPER_API_KEY GOOGLE_API_KEY GOOGLE_CSE_ID )
   );
 }

@@ -125,6 +125,38 @@ my %ENGINE_CLASS = (
   ollama     => 'Langertha::Engine::Ollama',
 );
 
+my @ENGINE_NAMES = qw(
+  anthropic openai deepseek groq mistral gemini minimax cerebras openrouter ollama
+);
+
+=method engine_names
+
+    my @names = $resolver->engine_names;   # ('anthropic', 'openai', ...)
+
+Every engine name L</engine_class> knows, always in the same order. Also
+callable on the class.
+
+=cut
+
+sub engine_names {
+  my ($self) = @_;
+  return @ENGINE_NAMES;
+}
+
+=method api_key_env_vars
+
+    my @vars = $resolver->api_key_env_vars;   # ('ANTHROPIC_API_KEY', ...)
+
+The API key environment variables of all L</engine_names>, in that
+order; engines without one are left out. Also callable on the class.
+
+=cut
+
+sub api_key_env_vars {
+  my ($self) = @_;
+  return grep { defined } map { $self->env_var_for_engine($_) } $self->engine_names;
+}
+
 =method env_var_for_engine
 
     my $var = $resolver->env_var_for_engine('openai');   # 'OPENAI_API_KEY'

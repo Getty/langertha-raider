@@ -52,6 +52,20 @@ subtest 'model and key' => sub {
     'default model on the class');
 };
 
+subtest 'engine names and key variables' => sub {
+  my $class = 'Langertha::Raider::EngineResolver';
+  is([ $class->engine_names ],
+    [qw( anthropic openai deepseek groq mistral gemini minimax cerebras openrouter ollama )],
+    'every known engine, fixed order');
+  is(dies { resolver(undef, engine => $_)->engine_class }, undef, 'engine class for '.$_)
+    for $class->engine_names;
+  is([ $class->api_key_env_vars ],
+    [qw( ANTHROPIC_API_KEY OPENAI_API_KEY DEEPSEEK_API_KEY GROQ_API_KEY MISTRAL_API_KEY
+      GEMINI_API_KEY MINIMAX_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY )],
+    'key variables in engine order, ollama left out');
+  is([ resolver()->api_key_env_vars ], [ $class->api_key_env_vars ], 'same on an instance');
+};
+
 subtest 'engine arguments' => sub {
   my $r = resolver({ default => { temperature => 0.3, model => 'yml-model', perl => 1 } },
     engine => 'openai', model => 'flag-model',
