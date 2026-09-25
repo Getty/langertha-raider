@@ -97,7 +97,9 @@ Revision history for Langertha-Raider
       ID works after the run has ended, with or without --follow.
     - A one-shot raider stopped by SIGINT or SIGTERM writes the
       "interrupted" document (or run.state/run.finished when streaming),
-      then dies of the same signal (shell status 130/143).
+      then dies of the same signal (shell status 130/143), also when the
+      signal arrives during startup; tool commands still running (bash,
+      perl_eval, perl_cpanm) are ended first.
     - -i together with a machine output flag is a usage error (exit 2);
       the document's elapsed has millisecond resolution.
     - /reload, the banner and the generated raider skill name a -M
