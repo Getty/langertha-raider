@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T05:27:20Z
+claimed_by: worker-hall3
+class: standard
+completed: 2026-09-25T05:27:20Z
+created: 2026-09-25T04:59:35Z
+id: 73
+priority: medium
+started: 2026-09-25T04:59:50Z
+status: done
+tags:
+- hall
+- sessions
+title: 'Hall-Queues: Singleton-Queues beim Start abarbeiten, queue_depth fuer Slot-Queue,
+  ACP-Ergebnis nach queued'
+updated: 2026-09-25T05:27:20Z
+---
+
+Aus #71/#72: (1) Beim Start geladene Singleton-Queues werden nicht abgearbeitet; neue Mission ueberholt sie. (2) spawn-Antwort der Slot-Queue ohne queue_depth, raider hall spawn druckt undef. (3) ACP antwortet bei wartendem Prompt mit stopReason queued; das spaetere Ergebnis erreicht den Client nie. (4) Cron-Bindungen entfernter Jobs bleiben in der Map. (5) Tests: gemeinsame IO::Async-Loop laesst abgebrochene Hall-Subtests den naechsten stoeren.
