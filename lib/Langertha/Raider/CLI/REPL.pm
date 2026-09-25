@@ -25,7 +25,12 @@ L<Langertha::Raider::CLI::Runner>, until C</quit>, C</exit>, C<:q>,
 C<quit>, C<exit> or the end of input.
 
 On a terminal, lines come from L<Term::ReadLine::Gnu> (line editing,
-F<~/.raider_history>, two-strike Ctrl-C) or L<IO::Prompt::Tiny>. When L</in>
+F<~/.raider_history>) or L<IO::Prompt::Tiny>.
+
+The first C<SIGINT> (Ctrl-C) only warns, also while a prompt runs; a second
+one within two seconds, or a C<SIGTERM>, leaves the REPL with exit status 0,
+after ending the tool commands still running
+(L<Langertha::Raider::CLI::Runner/terminate_children>). When L</in>
 is not a terminal, lines are read from it as they are, without prompt, so
 piped input ends the REPL at its end.
 
@@ -198,24 +203,26 @@ sub run {
 
   # Two-strike Ctrl-C: first press warns, second within 2s exits. Saves the
   # user from accidentally killing a running raid and removes the old
-  # "Ctrl-C + Return" Docker quirk.
-  my $last_sigint = 0;
-  local $SIG{INT} = sub {
-    my $now = time;
-    if ($last_sigint && $now - $last_sigint <= 2) {
-      $call->('save');
-      $out->emit($out->c(meta => "\nbye."), "\n");
-      exit 0;
-    }
-    $last_sigint = $now;
-    $out->emit($out->c(meta => "\n(press Ctrl-C again within 2s to quit)"), "\n");
-    $call->('redisplay');
-  };
-  local $SIG{TERM} = sub {
+  # "Ctrl-C + Return" Docker quirk. Leaving ends the tool commands still
+  # running: a bash command sits in a process group of its own and would
+  # outlive raider.
+  my $leave = sub {
+    local $SIG{INT}  = 'IGNORE';
+    local $SIG{TERM} = 'IGNORE';
+    $self->runner->terminate_children;
     $call->('save');
     $out->emit($out->c(meta => "\nbye."), "\n");
     exit 0;
   };
+  my $last_sigint = 0;
+  local $SIG{INT} = sub {
+    my $now = time;
+    $leave->() if $last_sigint && $now - $last_sigint <= 2;
+    $last_sigint = $now;
+    $out->emit($out->c(meta => "\n(press Ctrl-C again within 2s to quit)"), "\n");
+    $call->('redisplay');
+  };
+  local $SIG{TERM} = $leave;
 
   $self->banner($rl->{impl});
   $self->commands->cmd_prompt if $self->customize_prompt;
