@@ -1,5 +1,5 @@
 package Langertha::Raider::CLI::Runner;
-# ABSTRACT: Internal runner of one raider CLI prompt, human or --json
+# ABSTRACT: Internal runner of one raider CLI prompt, for a human or a machine
 our $VERSION = '0.503';
 use Moose;
 use namespace::autoclean;
@@ -8,7 +8,8 @@ use namespace::autoclean;
 
     # Internal to Langertha-Raider -- no API promise.
     my $runner = Langertha::Raider::CLI::Runner->new(app => $app, output => $out);
-    my $ok = $runner->run_prompt('Summarize README.md', json => 1);
+    my $ok = $runner->run_prompt('Summarize README.md');
+    $ok = $runner->run_prompt('Summarize README.md', machine => $machine);
 
 =head1 DESCRIPTION
 
@@ -16,8 +17,10 @@ B<Internal module.> Its interface may change without notice.
 
 Runs one prompt through L<Langertha::Raider::CLI/run> and renders the
 outcome: the agent's answer plus a status line (elapsed seconds, history
-size against the context budget, token usage when tracing), or with
-C<json> the single C<--json> document of L<Langertha::Raider::CLI::Output>.
+size against the context budget, token usage when tracing), or with a
+C<machine> (L<Langertha::Raider::CLI::Machine>) the run's document -- and,
+when that machine streams, the C<run.started>, C<run.state> and C<message>
+events around it.
 
 =attr app
 
@@ -43,11 +46,11 @@ has output => (
 
 =method run_prompt
 
-    my $ok = $runner->run_prompt($text, json => 0);
+    my $ok = $runner->run_prompt($text, machine => $machine);
 
 Returns true when the run finished, false when it failed (the error is
-printed, or with C<json> is the document). An empty prompt runs nothing and
-counts as finished.
+printed, or with C<machine> is the C<failed> document). An empty prompt runs
+nothing and counts as finished.
 
 =cut
 
@@ -57,6 +60,13 @@ sub run_prompt {
   my $app = $self->app;
   my $out = $self->output;
 
+  my $machine = $o{machine};
+  if ($machine) {
+    $machine->event('run.started', engine => $app->engine_name,
+      $app->has_model ? ( model => $app->model ) : ());
+    $machine->event('run.state', state => 'running');
+  }
+
   my $t0 = time;
   my $result;
   my $ok = eval { $result = $app->run($text); 1 };
@@ -64,14 +74,16 @@ sub run_prompt {
 
   unless ($ok) {
     my $err = $@; chomp $err;
-    $o{json} ? $out->json_error($err, $elapsed) : $out->say_error($err);
+    return $self->_finish_machine($machine, failed => error => $err, elapsed => $elapsed) if $machine;
+    $out->say_error($err);
     return 0;
   }
 
   my $r = $app->raider;
-  if ($o{json}) {
-    $out->json_result($result, $r->metrics, $elapsed);
-    return 1;
+  if ($machine) {
+    $machine->event('message', role => 'assistant', content => "$result");
+    return $self->_finish_machine($machine, completed =>
+      response => "$result", metrics => $r->metrics, elapsed => $elapsed);
   }
 
   $out->say_agent("$result");
@@ -87,6 +99,14 @@ sub run_prompt {
   $out->say_meta(sprintf('%ds | history %d msgs, %d/%d tok (%d%%)%s',
     $elapsed, $msgs, $last, $cap, $pct, $tok_part));
   return 1;
+}
+
+# The last state change and the document; true for a completed run.
+sub _finish_machine {
+  my ( $self, $machine, $status, %fields ) = @_;
+  $machine->event('run.state', state => $status);
+  $machine->finish($machine->document($status, %fields));
+  return $status eq 'completed' ? 1 : 0;
 }
 
 __PACKAGE__->meta->make_immutable;

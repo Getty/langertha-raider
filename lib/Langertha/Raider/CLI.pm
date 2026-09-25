@@ -380,6 +380,17 @@ has trace => (
   default => sub { -t STDOUT ? 1 : 0 },
 );
 
+=attr trace_out
+
+Filehandle the L</trace> is printed to. Defaults to C<STDOUT>.
+
+=cut
+
+has trace_out => (
+  is      => 'ro',
+  default => sub { \*STDOUT },
+);
+
 =attr perl
 
 Enable the PerlTools MCP server (perl_eval, perl_check, perl_cpanm).
@@ -1003,7 +1014,7 @@ sub _build_raider {
   if ($self->trace) {
     # Pass as name + {args}; PluginHost still injects `host`. The `loop` arg
     # lets the plugin drive a spinner during LLM HTTP calls.
-    push @plugins, '+Langertha::Raider::Plugin::Trace', { loop => $self->loop };
+    push @plugins, '+Langertha::Raider::Plugin::Trace', { loop => $self->loop, out => $self->trace_out };
   }
   push @plugins, '+Langertha::Raider::Plugin::Situation';
   return Langertha::Raider->new(

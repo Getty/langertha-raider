@@ -1,0 +1,255 @@
+package Langertha::Raider::CLI::Machine;
+# ABSTRACT: Internal writer of the raider CLI's machine output (JSON, MessagePack, YAML)
+our $VERSION = '0.503';
+use Moose;
+use Moose::Util::TypeConstraints qw( enum );
+use namespace::autoclean;
+use Data::MessagePack;
+use Encode qw( encode_utf8 );
+use IO::Handle;
+use JSON::MaybeXS ();
+use Time::HiRes ();
+use YAML::PP;
+
+=head1 SYNOPSIS
+
+    # Internal to Langertha-Raider -- no API promise.
+    my $machine = Langertha::Raider::CLI::Machine->new(format => 'json', stream => 1);
+
+    $machine->event('run.started', engine => 'openai', model => 'gpt-4o-mini');
+    $machine->finish($machine->document(completed => response => 'hi', elapsed => 1));
+
+=head1 DESCRIPTION
+
+B<Internal module.> Its interface may change without notice.
+
+The machine output of F<raider> (ADR 0013): one format-independent model
+-- the run's document and, when streaming, the events leading up to it --
+written in one of three encodings. The model is built as plain Perl data;
+L</encode> turns it into octets for the chosen L</format>. The reference of
+the format itself is the POD of F<raider>.
+
+Before encoding, the data is normalized through JSON, so a value is a
+number, a string or a boolean exactly as the JSON encoding would write it --
+the same fields and types in every encoding.
+
+=cut
+
+=attr format
+
+C<json>, C<msgpack> or C<yaml>. Required.
+
+=cut
+
+has format => (
+  is       => 'ro',
+  isa      => enum([qw( json msgpack yaml )]),
+  required => 1,
+);
+
+=attr stream
+
+True for the C<--stream-*> flags: L</event> writes every event, and
+L</finish> writes the document as the C<run.finished> event. False writes
+only the document, once, at L</finish>.
+
+=cut
+
+has stream => (
+  is      => 'ro',
+  isa     => 'Bool',
+  default => 0,
+);
+
+=attr version
+
+The format version written into the document and every event. Only C<1>
+exists; see L</versions>.
+
+=cut
+
+has version => (
+  is      => 'ro',
+  isa     => 'Int',
+  default => 1,
+);
+
+=attr out
+
+Filehandle the octets are written to. Defaults to C<STDOUT>. It is switched
+to C<:raw> before each write.
+
+=cut
+
+has out => (
+  is      => 'ro',
+  default => sub { \*STDOUT },
+);
+
+=attr clock
+
+Code reference returning the current time as epoch seconds, for the C<time>
+of an event. Defaults to L<Time::HiRes/time>.
+
+=cut
+
+has clock => (
+  is      => 'ro',
+  isa     => 'CodeRef',
+  default => sub { \&Time::HiRes::time },
+);
+
+has _seq => (
+  traits  => ['Counter'],
+  is      => 'ro',
+  isa     => 'Int',
+  default => 0,
+  handles => { _next_seq => 'inc' },
+);
+
+=method versions
+
+    my @known = Langertha::Raider::CLI::Machine->versions;   # (1)
+
+The format versions this raider can write.
+
+=cut
+
+sub versions { (1) }
+
+=method document
+
+    my $doc = $machine->document(completed => response => $text, metrics => $m, elapsed => $s);
+    my $doc = $machine->document(failed => error => $message, elapsed => $s);
+
+The document of a finished run: C<version>, C<status> and the given fields.
+
+=cut
+
+sub document {
+  my ( $self, $status, %fields ) = @_;
+  return { %fields, version => $self->version, status => $status };
+}
+
+=method event
+
+    $machine->event('tool.call', name => 'bash', arguments => { command => 'ls' });
+
+Writes one event -- the payload plus C<version>, C<type>, C<seq> and C<time>
+-- when L</stream> is on; does nothing otherwise.
+
+=cut
+
+sub event {
+  my ( $self, $type, %payload ) = @_;
+  return unless $self->stream;
+  $self->write({
+    %payload,
+    version => $self->version,
+    type    => $type,
+    seq     => $self->_next_seq,
+    time    => $self->clock->(),
+  });
+  return;
+}
+
+=method finish
+
+    $machine->finish($doc);
+
+Writes the run's document: as the C<run.finished> event when streaming (its
+payload is the document), otherwise as the one document of the run.
+
+=cut
+
+sub finish {
+  my ( $self, $doc ) = @_;
+  return $self->event('run.finished', %$doc) if $self->stream;
+  $self->write($doc);
+  return;
+}
+
+=method write
+
+Encodes the data with L</encode> and writes it to L</out>, flushed.
+
+=cut
+
+sub write {
+  my ( $self, $data ) = @_;
+  my $out = $self->out;
+  binmode $out, ':raw';
+  print {$out} $self->encode($data);
+  $out->flush;
+  return;
+}
+
+=method encode
+
+    my $octets = $machine->encode($data);
+
+The data normalized and encoded for L</format>: a pretty-printed canonical
+JSON document or one compact line per event, a MessagePack object with text
+as UTF-8 C<str>, or a YAML document starting with C<--->.
+
+=cut
+
+sub encode {
+  my ( $self, $data ) = @_;
+  my $method = '_encode_'.$self->format;
+  return $self->$method($self->normalize($data));
+}
+
+=method normalize
+
+The data after a round trip through JSON: numbers, strings and booleans
+(L<JSON::PP::Boolean>) as JSON sees them, text as characters.
+
+=cut
+
+sub normalize {
+  my ( $self, $data ) = @_;
+  my $json = JSON::MaybeXS->new(canonical => 1, convert_blessed => 1, allow_nonref => 1);
+  return $json->decode($json->encode($data));
+}
+
+sub _encode_json {
+  my ( $self, $data ) = @_;
+  my $json = JSON::MaybeXS->new(utf8 => 1, canonical => 1, $self->stream ? () : ( pretty => 1 ));
+  return $self->stream ? $json->encode($data)."\n" : $json->encode($data);
+}
+
+sub _encode_msgpack {
+  my ( $self, $data ) = @_;
+  return Data::MessagePack->new->canonical(1)->utf8(1)->pack($self->_msgpack_booleans($data));
+}
+
+sub _encode_yaml {
+  my ( $self, $data ) = @_;
+  return encode_utf8(YAML::PP->new(boolean => 'JSON::PP', header => 1)->dump_string($data));
+}
+
+# Data::MessagePack refuses JSON::PP::Boolean; swap in its own booleans.
+sub _msgpack_booleans {
+  my ( $self, $data ) = @_;
+  return { map { $_ => $self->_msgpack_booleans($data->{$_}) } keys %$data } if ref $data eq 'HASH';
+  return [ map { $self->_msgpack_booleans($_) } @$data ] if ref $data eq 'ARRAY';
+  return $data ? Data::MessagePack::true() : Data::MessagePack::false() if JSON::MaybeXS::is_bool($data);
+  return $data;
+}
+
+__PACKAGE__->meta->make_immutable;
+
+1;
+
+=seealso
+
+=over
+
+=item * L<raider>
+
+=item * L<Langertha::Raider::CLI::Runner>
+
+=back
+
+=cut

@@ -11,6 +11,7 @@ use JSON::MaybeXS ();
 use Path::Tiny;
 use lib 't/lib';
 use Test::Raider::Env qw( clear_engine_env );
+use Langertha::Raider::CLI::Machine;
 use Langertha::Raider::CLI::Main;
 use Langertha::Raider::CLI::Output;
 use Langertha::Raider::CLI::REPL;
@@ -67,7 +68,7 @@ sub main_run {
 my $root = tempdir(CLEANUP => 1);
 my @base = ( '-r', $root, '-e', 'openai', '-k', 'test', '--no-trace' );
 
-subtest 'Runner: human and --json' => sub {
+subtest 'Runner: human and machine' => sub {
   my $app = My::App->new(root => $root, engine => 'openai', api_key => 'test', trace => 0);
   my ( $fh, $read ) = buffer();
   my $runner = Langertha::Raider::CLI::Runner->new(app => $app,
@@ -80,14 +81,18 @@ subtest 'Runner: human and --json' => sub {
   my ( $jfh, $jread ) = buffer();
   my $json = Langertha::Raider::CLI::Runner->new(app => $app,
     output => Langertha::Raider::CLI::Output->new(out => $jfh, color => 0));
-  ok($json->run_prompt('grüß', json => 1), 'json finished');
-  like(JSON::MaybeXS->new->decode($jread->()),
-    { response => 'answer to grüß', metrics => { raids => E() }, elapsed => E() }, 'json document');
+  ok($json->run_prompt('grüß', machine => Langertha::Raider::CLI::Machine->new(format => 'json', out => $jfh)),
+    'json finished');
+  is(JSON::MaybeXS->new->decode($jread->()),
+    { version => 1, status => 'completed', response => 'answer to grüß', metrics => hash { field raids => E(); etc() },
+      elapsed => E() }, 'json document');
   my ( $efh, $eread ) = buffer();
   ok(!Langertha::Raider::CLI::Runner->new(app => $app,
-    output => Langertha::Raider::CLI::Output->new(out => $efh, color => 0))->run_prompt('fail', json => 1),
+    output => Langertha::Raider::CLI::Output->new(out => $efh, color => 0))
+      ->run_prompt('fail', machine => Langertha::Raider::CLI::Machine->new(format => 'json', out => $efh)),
     'failure');
-  is(JSON::MaybeXS->new->decode($eread->()), { error => 'boom', elapsed => E() }, 'json error document');
+  is(JSON::MaybeXS->new->decode($eread->()), { version => 1, status => 'failed', error => 'boom', elapsed => E() },
+    'json error document');
 };
 
 subtest 'REPL reads piped lines to their end' => sub {
@@ -180,10 +185,12 @@ subtest 'success exits 0, a failed run 1' => sub {
   like($out, qr/\Aanswer to from stdin\n/, 'answer');
   ( $exit, $out ) = main_run('', @base, '--json', 'hi');
   is($exit, 0, '--json');
-  like(JSON::MaybeXS->new->decode($out), { response => 'answer to hi' }, 'only the JSON document on stdout');
+  like(JSON::MaybeXS->new->decode($out), { version => 1, status => 'completed', response => 'answer to hi' },
+    'only the JSON document on stdout');
   ( $exit, $out ) = main_run('', @base, '--json', 'fail');
   is($exit, 1, 'failed run');
-  is(JSON::MaybeXS->new->decode($out), { error => 'boom', elapsed => E() }, 'JSON error document');
+  is(JSON::MaybeXS->new->decode($out), { version => 1, status => 'failed', error => 'boom', elapsed => E() },
+    'JSON error document');
   ( $exit, $out ) = main_run('', @base, 'fail');
   is($exit, 1, 'failed run without --json');
   is($out, "error: boom\n", 'error line');
@@ -227,7 +234,8 @@ subtest 'bin/raider' => sub {
   is($? >> 8, 2, 'usage error');
   my $out = `@{[ $q->(@cmd, @base, '--json', '-o', 'url=http://127.0.0.1:1', 'hi') ]} 2>/dev/null </dev/null`;
   is($? >> 8, 1, 'unreachable engine: run failed');
-  like(JSON::MaybeXS->new->decode($out), { error => T(), elapsed => E() }, 'stdout is the JSON error document');
+  like(JSON::MaybeXS->new->decode($out), { version => 1, status => 'failed', error => T(), elapsed => E() },
+    'stdout is the JSON error document');
   `printf '/quit\\n' | @{[ $q->(@cmd, @base, '-i') ]} >/dev/null 2>&1`;
   is($? >> 8, 0, 'piped REPL ends');
 };

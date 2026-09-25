@@ -1,5 +1,5 @@
 package Langertha::Raider::CLI::Output;
-# ABSTRACT: Internal terminal and JSON renderer of the raider CLI
+# ABSTRACT: Internal terminal renderer of the raider CLI
 our $VERSION = '0.503';
 use Moose;
 use namespace::autoclean;
@@ -15,17 +15,15 @@ use Term::ANSIColor qw( colored color );
     $out->say_error('something failed');
     $out->say_agent($result);
     $out->config_report($app->explain_config);
-    $out->json_result($result, $metrics, $elapsed);
 
 =head1 DESCRIPTION
 
 B<Internal module.> Its interface may change without notice.
 
-Everything the F<raider> CLI prints goes through here: the blue/yellow
-palette, the agent/meta/error lines, the C<raider config explain> report and
-the C<--json> documents. The C<--json> format is a single pretty-printed,
-canonical object -- C<{response, metrics, elapsed}> on success,
-C<{error, elapsed}> on failure.
+Everything the F<raider> CLI prints for a human goes through here: the
+blue/yellow palette, the agent/meta/error lines and the C<raider config
+explain> report. The machine output (C<--json> and friends) is
+L<Langertha::Raider::CLI::Machine>.
 
 =cut
 
@@ -191,35 +189,6 @@ sub pack_reason {
   $text .= ' [rule: '.$d->{rule_from}.']'
     if $opt{rule} && $d && ( !defined $p->{source} || $p->{source} eq 'detected' );
   return $text;
-}
-
-=method json_result
-
-    $out->json_result($response, $metrics, $elapsed);
-
-=method json_error
-
-    $out->json_error($message, $elapsed);
-
-Print the C<--json> document of a finished or a failed run.
-
-=cut
-
-sub json_result {
-  my ( $self, $response, $metrics, $elapsed ) = @_;
-  return $self->_json({ response => "$response", metrics => $metrics, elapsed => $elapsed });
-}
-
-sub json_error {
-  my ( $self, $error, $elapsed ) = @_;
-  return $self->_json({ error => $error, elapsed => $elapsed });
-}
-
-# Characters, not octets: the handle's :encoding(UTF-8) layer encodes them.
-sub _json {
-  my ( $self, $data ) = @_;
-  $self->emit(JSON::MaybeXS->new(pretty => 1, canonical => 1)->encode($data));
-  return;
 }
 
 __PACKAGE__->meta->make_immutable;

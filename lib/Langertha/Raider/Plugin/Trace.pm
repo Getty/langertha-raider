@@ -42,6 +42,18 @@ has color => (
   default => sub { -t STDOUT ? 1 : 0 },
 );
 
+=attr out
+
+Filehandle the trace is printed to. Defaults to C<STDOUT>; the raider CLI
+passes C<STDERR> when stdout carries machine output.
+
+=cut
+
+has out => (
+  is      => 'ro',
+  default => sub { \*STDOUT },
+);
+
 =attr max_value_length
 
 Maximum characters shown per argument value in tool-call summaries. Longer
@@ -90,7 +102,7 @@ sub _spinner_enabled {
   return 0 unless $self->has_loop;
   return 0 unless $self->color;
   return 0 if $ENV{ANSI_COLORS_DISABLED};
-  return 0 unless -t STDOUT;
+  return 0 unless -t $self->out;
   return 1;
 }
 
@@ -106,7 +118,7 @@ sub _start_spinner {
     my $frame = $SPINNER_FRAMES[$idx % @SPINNER_FRAMES];
     $self->_spinner_idx($idx + 1);
     local $| = 1;
-    print "\r", $self->_c(accent => $frame), ' ', $self->_c(iter => 'thinking…'), "\033[K";
+    print { $self->out } "\r", $self->_c(accent => $frame), ' ', $self->_c(iter => 'thinking…'), "\033[K";
   };
   $tick->();
 
@@ -130,7 +142,7 @@ sub _stop_spinner {
     $self->_clear_spinner_timer;
   }
   local $| = 1;
-  print "\r\033[K";
+  print { $self->out } "\r\033[K";
 }
 
 sub _extract_usage {
@@ -209,7 +221,7 @@ async sub plugin_before_tool_call {
   my ($self, $name, $input) = @_;
   $self->_stop_spinner;
   my $args = $self->_summarize_args($input);
-  print
+  print { $self->out }
     $self->_c(tool => "> $name"),
     (length $args ? ' ' . $self->_c(args => $args) : ''),
     "\n";
@@ -237,7 +249,7 @@ async sub plugin_after_tool_call {
 
   my $key  = $is_err ? 'err' : 'ok';
   my $lead = $is_err ? '! '  : '. ';
-  print
+  print { $self->out }
     $self->_c($key => $lead . "${bytes}b"),
     (length $first ? ' ' . $self->_c(text => $self->_truncate($first)) : ''),
     "\n";

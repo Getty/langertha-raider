@@ -1,12 +1,10 @@
 #!/usr/bin/env perl
-# ABSTRACT: The raider CLI renderer: lines, config report and the --json documents
+# ABSTRACT: The raider CLI renderer: lines and the config report
 
 use strict;
 use warnings;
 use utf8;
 use Test2::V0;
-use Encode qw( decode_utf8 );
-use JSON::MaybeXS ();
 use Langertha::Raider::CLI::Output;
 
 # An Output writing into a string through the same :encoding(UTF-8) layer
@@ -56,21 +54,6 @@ engine: openai
   skills                 ["claude"]  (from .raider.yml, merged; raider)
   ignored anthropic: section of an inactive engine
 OUT
-};
-
-subtest '--json result' => sub {
-  my ( $out, $read ) = output();
-  $out->json_result('Grüße ✓', { raids => 1 }, 3);
-  my $octets = $read->();
-  my $doc = JSON::MaybeXS->new(utf8 => 1)->decode($octets);
-  is($doc, { response => 'Grüße ✓', metrics => { raids => 1 }, elapsed => 3 }, 'document, UTF-8 once');
-  like(decode_utf8($octets), qr/\A\{\n   "elapsed" : 3,\n/, 'pretty and canonical');
-};
-
-subtest '--json error' => sub {
-  my ( $out, $read ) = output();
-  $out->json_error('kaputt: ä', 0);
-  is(JSON::MaybeXS->new(utf8 => 1)->decode($read->()), { error => 'kaputt: ä', elapsed => 0 }, 'error document');
 };
 
 done_testing;

@@ -53,13 +53,83 @@ same inside the REPL. The options may also come first
 C<config explain> are the subcommand, any other prompt starting with
 C<config> is sent as a prompt.
 
-With C<--json>, F<raider> emits a single JSON object
-(C<{response, metrics, elapsed}>, or C<{error, elapsed}> when the run failed)
-instead of the human-oriented output, which is useful for scripting. The
-live trace stays off with C<--json> unless C<--trace> is given.
+With C<--json>, C<--msgpack> or C<--yaml>, F<raider> prints one document
+describing the run instead of the human-oriented output, which is useful
+for scripting; see L</MACHINE OUTPUT>.
 
 When standard input is not a terminal, the REPL (C<-i>) reads its lines
 from it and ends at its end.
+
+=head1 MACHINE OUTPUT
+
+C<--json>, C<--msgpack> and C<--yaml> print one document for the run, once,
+when it has ended. Nothing else goes to standard output: the live trace is
+off unless C<--trace> asks for it, and then goes to standard error like
+every diagnostic. The flags exclude each other; giving two is a usage
+error. A usage or configuration error (exit status C<2> or C<3>) prints no
+document, only its message on standard error.
+
+The three flags write the same model in three encodings:
+
+=over
+
+=item C<--json> -- a pretty-printed JSON object with sorted keys, UTF-8.
+
+=item C<--msgpack> -- one MessagePack map; text is written as UTF-8 C<str>,
+never C<bin>. Standard output is binary.
+
+=item C<--yaml> -- one YAML document, starting with C<--->, UTF-8.
+
+=back
+
+=head2 The document
+
+A run that completed:
+
+    {
+       "elapsed" : 3,
+       "metrics" : { "iterations" : 2, "raids" : 1, "time_ms" : 2710.4, "tool_calls" : 1 },
+       "response" : "The README describes ...",
+       "status" : "completed",
+       "version" : 1
+    }
+
+A run that failed:
+
+    { "elapsed" : 0, "error" : "...", "status" : "failed", "version" : 1 }
+
+=over
+
+=item C<version> -- integer, the format version (see below).
+
+=item C<status> -- how the run ended: C<completed> or C<failed>. These are
+the run states of the redesign (ADR 0009) that end a run and that the CLI
+can produce today; C<cancelled>, C<refused> and C<interrupted> are reserved
+for when it can.
+
+=item C<response> -- the agent's final answer (C<completed> only).
+
+=item C<metrics> -- the raider's cumulative metrics: C<raids>,
+C<iterations>, C<tool_calls>, C<time_ms> (C<completed> only).
+
+=item C<error> -- the error message (C<failed> only).
+
+=item C<elapsed> -- seconds the run took.
+
+=back
+
+=head2 Versions
+
+C<--json=N> (C<--msgpack=N>, C<--yaml=N>) asks for format version C<N>; the
+version belongs to the model, so it means the same in every encoding. The
+only version is C<1>, which is also what the plain flags write; any other
+C<N> is a usage error. Only the C<=N> form carries a version -- in
+C<raider --json 2 ...> the C<2> is part of the prompt.
+
+Within a version, fields are only ever added, never renamed, removed or
+changed in meaning, so a consumer must ignore fields it does not know. A
+breaking change is a new version, chosen with C<--json=2>; the plain flag
+stays on the old version for at least one release after the new one ships.
 
 =head1 EXIT STATUS
 
@@ -69,10 +139,11 @@ from it and ends at its end.
 and leaving the REPL.
 
 =item C<1> -- the run failed: the engine, a tool or the network raised an
-error.
+error. With a machine output flag, the document says C<failed>.
 
 =item C<2> -- usage error: unknown option, a C<-o> that is not
-C<KEY=VALUE>, an unknown C<config> subcommand, or no prompt.
+C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
+machine output flag, or an unknown format version.
 
 =item C<3> -- configuration error: F<.raider.yml> cannot be read, or the
 engine is unknown.

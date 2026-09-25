@@ -9,6 +9,7 @@ use IO::Prompt::Tiny qw( prompt );
 use Path::Tiny;
 use Langertha::Raider::ACP::CLI;
 use Langertha::Raider::CLI;
+use Langertha::Raider::CLI::Machine;
 use Langertha::Raider::CLI::Output;
 use Langertha::Raider::CLI::REPL;
 use Langertha::Raider::CLI::Runner;
@@ -38,10 +39,11 @@ then either the REPL (L<Langertha::Raider::CLI::REPL>) or one prompt
 and leaving the REPL.
 
 =item C<1> -- the run failed: the engine, a tool or the network raised an
-error (with C<--json>, the output is the C<{error, elapsed}> document).
+error (with a machine format, the output is the C<failed> document).
 
 =item C<2> -- usage error: unknown option, a C<-o> that is not
-C<KEY=VALUE>, an unknown C<config> subcommand, or no prompt.
+C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
+machine format, or an unknown machine format version.
 
 =item C<3> -- configuration error: F<.raider.yml> cannot be read, the
 engine is unknown, or a pack detection rule is invalid.
@@ -60,6 +62,13 @@ use constant {
   EXIT_USAGE     => 2,
   EXIT_CONFIG    => 3,
 };
+
+# The machine output flags (ADR 0013): flag => [ format, stream ].
+my %MACHINE_FLAG = (
+  json    => [ json    => 0 ],
+  msgpack => [ msgpack => 0 ],
+  yaml    => [ yaml    => 0 ],
+);
 
 =attr output
 
@@ -93,11 +102,12 @@ has in => (
   default => sub { \*STDIN },
 );
 
-sub app_class    { 'Langertha::Raider::CLI' }
-sub config_class { 'Langertha::Raider::Config' }
-sub repl_class   { 'Langertha::Raider::CLI::REPL' }
-sub runner_class { 'Langertha::Raider::CLI::Runner' }
-sub skill_class  { 'Langertha::Raider::Skill' }
+sub app_class     { 'Langertha::Raider::CLI' }
+sub config_class  { 'Langertha::Raider::Config' }
+sub machine_class { 'Langertha::Raider::CLI::Machine' }
+sub repl_class    { 'Langertha::Raider::CLI::REPL' }
+sub runner_class  { 'Langertha::Raider::CLI::Runner' }
+sub skill_class   { 'Langertha::Raider::Skill' }
 
 sub _warn {
   my ( $self, @text ) = @_;
@@ -147,7 +157,10 @@ Options:
                            /pack NAME still work)
   -i, --interactive        REPL mode (default when stdin is a TTY with no
                            prompt argv and no pipe; forces it otherwise)
-      --json               Emit JSON ({response, metrics, elapsed}) and exit
+      --json[=N]           Print one JSON document for the run and exit
+                           (format version N; 1 is the only one)
+      --msgpack[=N]        The same document as MessagePack
+      --yaml[=N]           The same document as YAML
       --max-iterations N   Hard safety cap on tool rounds per raid
                            (default: 10000 — effectively unlimited)
       --no-color           Disable ANSI colors
@@ -184,7 +197,8 @@ USAGE
     my ( $opt, @prompt ) = $main->parse_options(@argv);
 
 Parses the options; returns the option hash (with C<-o> pairs in
-C<engine_options>) and the remaining words, or nothing after reporting a
+C<engine_options>, and a machine format in C<machine> as C<format>,
+C<stream> and C<version>) and the remaining words, or nothing after reporting a
 usage error.
 
 =cut
@@ -193,6 +207,15 @@ sub parse_options {
   my ( $self, @argv ) = @_;
   my %opt = ( packs => [], no_packs => [], skill_dirs => [] );
   my @raw_engine_opts;
+  # --json=N and friends. Only the =N form carries a version: an optional
+  # Getopt::Long value would also take the next word (raider --json 3 ...).
+  my ( %machine_flag, %machine_version );
+  for my $arg (@argv) {
+    last if $arg eq '--';
+    next unless $arg =~ /\A--([a-z-]+)=(.*)\z/s && $MACHINE_FLAG{$1};
+    $machine_version{$1} = $2;
+    $arg = '--'.$1;
+  }
   my $parser = Getopt::Long::Parser->new(config => [qw( no_ignore_case bundling )]);
   my $ok = do {
     local $SIG{__WARN__} = sub { $self->_warn(@_) };
@@ -205,7 +228,7 @@ sub parse_options {
       'k|api-key=s'           => \$opt{api_key},
       'o|option=s@'           => \@raw_engine_opts,
       'i|interactive'         => \$opt{interactive},
-      'json'                  => \$opt{json},
+      ( map { $_ => \$machine_flag{$_} } sort keys %MACHINE_FLAG ),
       'max-iterations=i'      => \$opt{max_iterations},
       'no-color'              => \$opt{no_color},
       'trace!'                => \$opt{trace},
@@ -225,6 +248,22 @@ sub parse_options {
   unless ($ok) {
     $self->_warn("Bad options. Try --help.\n");
     return;
+  }
+
+  my @machine = grep { $machine_flag{$_} } sort keys %MACHINE_FLAG;
+  if (@machine > 1) {
+    $self->_warn(join(', ', map { '--'.$_ } @machine).": only one machine output format at a time\n");
+    return;
+  }
+  if (my ( $flag ) = @machine) {
+    my $version = $machine_version{$flag} // 1;
+    unless ($version =~ /\A\d+\z/ && grep { $_ == $version } $self->machine_class->versions) {
+      $self->_warn("unknown --".$flag." version '".$version."' (known: "
+        .join(', ', $self->machine_class->versions).")\n");
+      return;
+    }
+    my ( $format, $stream ) = @{ $MACHINE_FLAG{$flag} };
+    $opt{machine} = { format => $format, stream => $stream, version => 0 + $version };
   }
 
   my %engine_opts;
@@ -250,9 +289,9 @@ sub parse_options {
     my %args = $main->app_args($opt);
 
 Constructor arguments for L<Langertha::Raider::CLI> from the parsed
-options, without C<config> and the skill sources. With C<--json> the live
-trace is off unless C<--trace> asks for it, so stdout carries only the
-JSON document.
+options, without C<config> and the skill sources. With a machine format
+the live trace is off unless C<--trace> asks for it, and then goes to
+L</err>, so stdout carries only the machine output.
 
 =cut
 
@@ -262,7 +301,8 @@ sub app_args {
   for my $key (qw( engine model root mission api_key trace perl detect max_iterations bare )) {
     $args{$key} = $opt->{$key} if defined $opt->{$key};
   }
-  $args{trace}          = 0                        if $opt->{json} && !defined $opt->{trace};
+  $args{trace}          = 0                        if $opt->{machine} && !defined $opt->{trace};
+  $args{trace_out}      = $self->err               if $opt->{machine};
   $args{pack_names}     = $opt->{packs}            if @{ $opt->{packs} // [] };
   $args{no_pack_names}  = $opt->{no_packs}         if @{ $opt->{no_packs} // [] };
   $args{engine_options} = $opt->{engine_options}   if %{ $opt->{engine_options} // {} };
@@ -313,7 +353,7 @@ sub run {
     @prompt = ();
   }
 
-  $ENV{ANSI_COLORS_DISABLED} = 1 if $opt->{no_color} || $opt->{json};
+  $ENV{ANSI_COLORS_DISABLED} = 1 if $opt->{no_color} || $opt->{machine};
 
   if ($opt->{help}) {
     $self->output->emit($self->usage);
@@ -388,9 +428,9 @@ sub run {
   }
 
   # Default to interactive REPL when stdin is a terminal and no prompt was
-  # given on argv / piped in / requested as one-shot JSON.
+  # given on argv / piped in / requested as one-shot machine output.
   my $in = $self->in;
-  my $interactive = $opt->{interactive} || (!$opt->{json} && !@prompt && -t $in);
+  my $interactive = $opt->{interactive} || (!$opt->{machine} && !@prompt && -t $in);
 
   if ($interactive) {
     my %seen;
@@ -422,7 +462,10 @@ sub run {
     return EXIT_USAGE;
   }
   my $runner = $self->runner_class->new(app => $app, output => $self->output);
-  return $runner->run_prompt($text, json => $opt->{json}) ? EXIT_OK : EXIT_RUN_ERROR;
+  my $machine = $opt->{machine}
+    ? $self->machine_class->new(%{ $opt->{machine} }, out => $self->output->out)
+    : undef;
+  return $runner->run_prompt($text, machine => $machine) ? EXIT_OK : EXIT_RUN_ERROR;
 }
 
 __PACKAGE__->meta->make_immutable;
