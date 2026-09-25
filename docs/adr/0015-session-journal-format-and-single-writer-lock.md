@@ -30,6 +30,10 @@ journal should not invent a second one.
   - `tool.result` — `call`, `name`, `status` (`succeeded` | `failed` | `cancelled`),
     `content` (full text; the journal is the never-compressed history).
   - `run.finished` — `run`, `status` (ADR 0009 end states), `metrics`, `error`.
+  - `history.cleared` — the REPL's `/clear`; resume rebuilds `history` from the messages
+    after the last one (added 2026-09-25, karr #70).
+  - `session.created` of a fork carries `forked_from`; the copied history follows as
+    `message` events without `run` (added 2026-09-25, karr #69).
   - Readers ignore unknown types and fields; new types are added without a new `v`.
 - **One writer, enforced by a lock.** The writing process holds an exclusive, non-blocking
   `flock` on `<id>.lock` next to the journal for as long as it has the session open for
@@ -52,9 +56,10 @@ journal should not invent a second one.
   - a numbered slot (`1bjorn`) → one session, continued by each queued mission;
   - a cron job → its own session per job;
   - a plain-name run (`bjorn`, parallel) → a fresh session per run, never shared.
-  The hall starts the raider with that session; the single-writer lock makes a second
-  concurrent run on the same binding fail loudly instead of corrupting it (the singleton
-  queue normally prevents that).
+  The hall starts the raider with that session. A mission for a binding that is already
+  running waits in a per-binding queue (ADR 0003: new input is queued); the single-writer
+  lock stays the last line of defence and makes a run fail loudly only when something
+  outside the hall holds the session (amended 2026-09-25, karr #71).
 
 ## Consequences
 

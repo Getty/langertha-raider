@@ -119,13 +119,25 @@ Revision history for Langertha-Raider
       conversation is replayed, nothing recorded is run again, and runs
       without an end or tool calls without a result are reported. A
       session another raider has open ends raider with exit status 4.
+      Session ids can be shortened to a unique start or their last four
+      hex digits. /clear in the REPL is recorded and honoured on resume. A
+      journal that cannot be written mid-run is a warning; the run goes
+      on. New raider session fork ID and raider session rm ID (refused
+      while another raider has it open). Creating .raider/lib for the Perl
+      tools also writes .raider/.gitignore.
     - The machine output document (and run.finished) names its session;
       stream tool.call/tool.result events carry call and status.
     - Hall runs keep their conversation in a session journal under the hall
       root: a Telegram chat (or topic), a cron job, an ACP session and a
       numbered slot each continue their own session, a plain-name run gets
       a fresh one. raider.done, ps and attach name the session; a run whose
-      session is still in use fails at once with a raider.done saying so.
+      session is still in use by something outside the hall fails at once
+      with a raider.done saying so. A mission for a binding that is already
+      running waits in that binding's queue, kept across hall restarts.
+      raider hall session reset BINDING and Telegram /new start a binding
+      over in a new session (journals are kept); ACP bindings are
+      forgotten on hall start; telegram_reply answers into the forum topic
+      the message came from.
     - A one-shot raider stopped by SIGINT or SIGTERM writes the
       "interrupted" document (or run.state/run.finished when streaming),
       then dies of the same signal (shell status 130/143), also when the
