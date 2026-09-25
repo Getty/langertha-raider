@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T02:38:13Z
+claimed_by: worker-cli3
+class: standard
+completed: 2026-09-25T02:38:13Z
+created: 2026-09-25T01:52:07Z
+id: 56
+priority: medium
+started: 2026-09-25T02:22:10Z
+status: done
+tags:
+- cli
+- json
+- hall
+title: 'Machine output: Abbruch per Signal ohne run.finished/interrupted'
+updated: 2026-09-25T02:38:13Z
+---
+
+Aus #54: SIGINT/SIGTERM beendet raider ohne run.finished (status interrupted) bzw. ohne Dokument. Hall beendet Raider per TERM -> betrifft Hall-Laeufe. Signal abfangen, Dokument/Event schreiben, passender Exit-Code (ADR 0009/0013).
