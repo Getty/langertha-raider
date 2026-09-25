@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-25T02:57:54Z
+claimed_by: worker-hall2
+class: standard
+completed: 2026-09-25T02:57:50Z
+created: 2026-09-25T02:48:44Z
+id: 62
+priority: medium
+started: 2026-09-25T02:57:50Z
+status: done
+tags:
+- bug
+- hall
+title: 'Hall: zweiter spawn fuer unnummerierten Namen ueberschreibt laufenden Raider-Eintrag'
+updated: 2026-09-25T02:57:54Z
+---
+
+Aus #60: Bei einem Namen wie bjorn (ohne Slot-Nummer) gilt der Slot fuer spawn nicht als belegt; ein zweiter spawn waehrend Lauf ersetzt den Eintrag in raiders, der erste ist beim Ende nicht mehr auffindbar (kein raider.done, Rotation-Annahme "Slot frei" unzuverlaessig). Reproduzieren; entweder eindeutige Keys pro Lauf oder einreihen/ablehnen. Nebenbei: logs ID zeigt ganzes Slot-Log statt nur den Lauf (Start-Marker pro Lauf).
+
+Semantik festgelegt (POD): unnummerierte Namen laufen parallel, nummerierte sind Singleton mit Queue. Offene Nebenwirkung: parallele Laeufe teilen SLOT.log (stderr kann sich mischen).
