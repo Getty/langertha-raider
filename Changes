@@ -92,6 +92,9 @@ Revision history for Langertha-Raider
       answer or error. Run IDs stay unique (SLOT-TIME.2, .3, ...), and only
       the newest 20 events files per slot are kept (logs.keep_events in
       .raider-hall.yml, 0 keeps all).
+    - The hall moves a slot log over logs.max_log_size (default 1 MiB, 0
+      off) to SLOT.log.1 when the slot's next run starts; raider hall logs
+      ID works after the run has ended, with or without --follow.
     - A one-shot raider stopped by SIGINT or SIGTERM writes the
       "interrupted" document (or run.state/run.finished when streaming),
       then dies of the same signal (shell status 130/143).
