@@ -10,6 +10,7 @@ use JSON::MaybeXS ();
 use Path::Tiny;
 use lib 't/lib';
 use Test::Raider::Env qw( clear_engine_env );
+use Test::Raider::Hall qw( hall_events wait_until );
 use Langertha::Raider::Hall;
 use Langertha::Raider::Hall::ACP;
 use Langertha::Raider::Hall::Raider;
@@ -53,35 +54,14 @@ PERL
 
 sub fake_hall {
   my ( $yml ) = @_;
-  my $tmp = path( tempdir( CLEANUP => 1 ) );
-  $tmp->child('.raider-hall.yml')->spew_utf8($yml) if defined $yml;
-  my $bin = $tmp->child('fake-raider');
-  $bin->spew_utf8( "#!$^X\n".$FAKE );
-  $bin->chmod(0755);
-  $ENV{RAIDER_HALL_RAIDER_BIN} = "$bin";
-  $ENV{FAKE_ARGV_LOG} = $tmp->child('argv.jsonl')->stringify;
-  return ( Langertha::Raider::Hall->new( root => $tmp ), $tmp );
+  return Test::Raider::Hall::fake_hall( script => $FAKE, yml => $yml );
 }
 
 # Spawn and turn the loop until the hall has reaped every raider; returns
 # the raider.done events emitted meanwhile.
 sub run_spawns {
   my ( $hall, @spawns ) = @_;
-  my @done;
-  no warnings 'redefine';
-  my $orig = \&Langertha::Raider::Hall::_emit;
-  local *Langertha::Raider::Hall::_emit = sub {
-    my ( $self, $type, $data ) = @_;
-    push @done, { %$data } if $type eq 'raider.done';
-    $self->$orig( $type, $data );
-  };
-  for my $spawn (@spawns) {
-    $hall->spawn(%$spawn);
-  }
-  my $deadline = time + 30;
-  $hall->loop->loop_once(0.1)
-    until ( !%{ $hall->raiders } && @done >= @spawns ) || time > $deadline;
-  return @done;
+  return Test::Raider::Hall::run_spawns( $hall, scalar @spawns, @spawns );
 }
 
 subtest 'run_finished reads the last run.finished of the events file' => sub {
@@ -385,13 +365,12 @@ sub acp_prompt {
   my ( $hall, $tmp ) = fake_hall();
   $tmp->child('.raider-hall.yml')->spew_utf8("raiders:\n  bjorn: {}\n");
   $hall = Langertha::Raider::Hall->new( root => $tmp );
+  hall_events($hall);
   my $acp = Langertha::Raider::Hall::ACP->new( hall => $hall, port => 0, host => '127.0.0.1' );
   my $stream = CaptureStream->new;
   $acp->_sessions->{s1} = { stream => $stream, raider_name => 'bjorn' };
   $acp->_session_prompt( $stream, 7, { sessionId => 's1', prompt => [ { type => 'text', text => $mission } ] } );
-  my $deadline = time + 30;
-  $hall->loop->loop_once(0.1)
-    until ( grep { ( $_->{id} // 0 ) == 7 } @{ $stream->{lines} } ) || time > $deadline;
+  wait_until( $hall, sub { grep { ( $_->{id} // 0 ) == 7 } @{ $stream->{lines} } } );
   my @chunks = map { $_->{params}{update}{content}{text} }
     grep { ( $_->{method} // '' ) eq 'session/update' } @{ $stream->{lines} };
   my ($reply) = grep { ( $_->{id} // 0 ) == 7 } @{ $stream->{lines} };

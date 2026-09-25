@@ -9,6 +9,7 @@ use JSON::MaybeXS ();
 use Path::Tiny;
 use lib 't/lib';
 use Test::Raider::Env qw( clear_engine_env );
+use Test::Raider::Hall qw( fake_hall hall_events run_spawns wait_until );
 use Langertha::Raider::Hall;
 use Langertha::Raider::Hall::ACP;
 use Langertha::Raider::Hall::Cron;
@@ -18,64 +19,6 @@ use Langertha::Raider::SessionStore;
 clear_engine_env();
 
 my $repo = path(__FILE__)->absolute->parent->parent;
-
-# A stand-in for bin/raider that treats sessions the way the real one does:
-# --session ID opens that journal for writing (exit 4 when another writer
-# holds it, exit 2 when there is none), without it a new session is
-# created in <--root>/.raider/sessions. It appends the mission as a
-# message and ends with run.finished naming the session. Mission "hold"
-# keeps the session open until the file in FAKE_RELEASE exists.
-my $FAKE = <<'PERL';
-use strict;
-use warnings;
-use JSON::PP;
-use Langertha::Raider::SessionStore;
-my @argv = @ARGV;
-open my $a, '>>', $ENV{FAKE_ARGV_LOG} or die $!;
-print $a JSON::PP->new->canonical->encode([ @argv ]), "\n";
-close $a;
-my %opt;
-while (@argv && $argv[0] ne '--') {
-  my $o = shift @argv;
-  $opt{$1} = shift @argv if $o =~ /^--(session|root)$/;
-}
-shift @argv;
-my $mission = join ' ', @argv;
-my $store = Langertha::Raider::SessionStore->new(root => $opt{root});
-my $session;
-if (defined $opt{session}) {
-  unless ($store->exists($opt{session})) { print STDERR "unknown session $opt{session}\n"; exit 2 }
-  $session = eval { $store->open($opt{session}) };
-  unless ($session) { print STDERR "$@ by another raider\n"; exit 4 }
-}
-else {
-  $session = $store->create;
-}
-my $run = $session->next_run;
-$session->append('message', run => $run, role => 'user', content => $mission);
-if ($mission eq 'hold') {
-  my $until = time + 20;
-  select undef, undef, undef, 0.05 until -e $ENV{FAKE_RELEASE} || time > $until;
-}
-$| = 1;
-print JSON::PP->new->canonical->encode({ version => 1, type => 'run.finished', seq => 1, time => time,
-  status => 'completed', response => 'answer: '.$mission,
-  session => { id => $session->id, path => ''.$session->path } }), "\n";
-exit 0;
-PERL
-
-sub fake_hall {
-  my ( $yml ) = @_;
-  my $tmp = path( tempdir( CLEANUP => 1 ) );
-  $tmp->child('.raider-hall.yml')->spew_utf8($yml) if defined $yml;
-  my $bin = $tmp->child('fake-raider');
-  $bin->spew_utf8( "#!$^X\nuse lib '".$repo->child('lib')."';\n".$FAKE );
-  $bin->chmod(0755);
-  $ENV{RAIDER_HALL_RAIDER_BIN} = "$bin";
-  $ENV{FAKE_ARGV_LOG} = $tmp->child('argv.jsonl')->stringify;
-  $ENV{FAKE_RELEASE} = $tmp->child('release')->stringify;
-  return ( Langertha::Raider::Hall->new( root => $tmp ), $tmp );
-}
 
 sub argvs {
   my $log = path( $ENV{FAKE_ARGV_LOG} );
@@ -93,24 +36,6 @@ sub session_flag {
 }
 
 sub store_of { Langertha::Raider::SessionStore->new( root => ''.$_[0] ) }
-
-# Turn the loop until $n raider.done events arrived and every raider left.
-sub run_spawns {
-  my ( $hall, $n, @spawns ) = @_;
-  my @done;
-  no warnings 'redefine';
-  my $orig = \&Langertha::Raider::Hall::_emit;
-  local *Langertha::Raider::Hall::_emit = sub {
-    my ( $self, $type, $data ) = @_;
-    push @done, { %$data } if $type eq 'raider.done';
-    $self->$orig( $type, $data );
-  };
-  $hall->spawn(%$_) for @spawns;
-  my $deadline = time + 30;
-  $hall->loop->loop_once(0.1)
-    until ( !%{ $hall->raiders } && @done >= $n ) || time > $deadline;
-  return @done;
-}
 
 subtest 'a numbered slot keeps one session across its queued missions' => sub {
   my ( $hall, $tmp ) = fake_hall();
@@ -166,14 +91,7 @@ subtest 'an explicit binding wins over the slot, a lost journal is replaced' => 
 
 subtest 'a mission for a busy binding waits for it (ADR 0003: new input is queued)' => sub {
   my ( $hall, $tmp ) = fake_hall();
-  my @events;
-  no warnings 'redefine';
-  my $orig = \&Langertha::Raider::Hall::_emit;
-  local *Langertha::Raider::Hall::_emit = sub {
-    my ( $self, $type, $data ) = @_;
-    push @events, [ $type, { %$data } ];
-    $self->$orig( $type, $data );
-  };
+  my $events = hall_events($hall);
   my $binding = 'telegram:ops:42';
   my $first = $hall->spawn( name => 'bjorn', mission => 'hold', binding => $binding );
   my $info = $hall->attach( $first->{id} );
@@ -184,7 +102,7 @@ subtest 'a mission for a busy binding waits for it (ADR 0003: new input is queue
   my $second = $hall->spawn( name => 'bjorn', mission => 'late', binding => $binding );
   is( $second, { queued => 1, slot => 'bjorn', binding => $binding, queue_depth => 1 },
     'queued on the binding' );
-  my ($queued) = grep { $_->[0] eq 'raider.queued' } @events;
+  my ($queued) = grep { $_->[0] eq 'raider.queued' } @$events;
   is( $queued->[1]{binding}, $binding, 'raider.queued names the binding' );
   my $file = $tmp->child( '.raider-hall', 'state', 'binding_queues.json' );
   is( JSON::MaybeXS->new->decode( $file->slurp_utf8 )->{$binding}[0]{mission}, 'late',
@@ -197,11 +115,9 @@ subtest 'a mission for a busy binding waits for it (ADR 0003: new input is queue
   is( scalar keys %{ $hall->raiders }, 3, 'three in parallel' );
 
   path( $ENV{FAKE_RELEASE} )->touch;
-  my $deadline = time + 40;
-  $hall->loop->loop_once(0.1)
-    until ( !%{ $hall->raiders } && 4 == grep { $_->[0] eq 'raider.done' } @events ) || time > $deadline;
+  wait_until( $hall, sub { !%{ $hall->raiders } && 4 == grep { $_->[0] eq 'raider.done' } @$events }, 40 );
 
-  my @done = map { $_->[1] } grep { $_->[0] eq 'raider.done' } @events;
+  my @done = map { $_->[1] } grep { $_->[0] eq 'raider.done' } @$events;
   is( [ grep { $_->{status} ne 'completed' } @done ], [], 'every run completed, none hit the lock' );
   my ($late) = grep { ( $_->{response} // '' ) eq 'answer: late' } @done;
   is( $late->{session}, $info->{session}, 'the queued mission ran in the binding\'s session' );
@@ -237,17 +153,13 @@ subtest 'a binding queue survives a hall restart' => sub {
   ok( $hall->spawn( name => 'bjorn', mission => 'next', binding => 'cron:nightly' )->{queued}, 'queued' );
 
   my $restarted = Langertha::Raider::Hall->new( root => $tmp );
-  no warnings 'redefine';
-  my @done;
-  my $orig = \&Langertha::Raider::Hall::_emit;
-  local *Langertha::Raider::Hall::_emit = sub {
-    my ( $self, $type, $data ) = @_;
-    push @done, { %$data } if $type eq 'raider.done';
-    $self->$orig( $type, $data );
-  };
+  my $events = hall_events($restarted);
   $restarted->_drain_binding_queues;
-  my $deadline = time + 30;
-  $restarted->loop->loop_once(0.1) until ( @done && !%{ $restarted->raiders } ) || time > $deadline;
+  my @done;
+  wait_until( $restarted, sub {
+    @done = map { $_->[1] } grep { $_->[0] eq 'raider.done' } @$events;
+    @done && !%{ $restarted->raiders };
+  } );
   is( $done[0]{response}, 'answer: next', 'the waiting mission ran after the restart' );
   is( $done[0]{session}, $hall->session_bindings->{'cron:nightly'}, 'on its binding' );
   is( $restarted->binding_queues, {}, 'and left the queue' );
@@ -304,17 +216,15 @@ subtest 'a cron job fires onto its own binding' => sub {
 }
 
 subtest 'an ACP session keeps one raider session across prompts' => sub {
-  my ( undef, $tmp ) = fake_hall("raiders:\n  bjorn: {}\n");
+  my ( undef, $tmp ) = fake_hall( yml => "raiders:\n  bjorn: {}\n" );
   my $hall = Langertha::Raider::Hall->new( root => $tmp );
+  hall_events($hall);
   my $acp = Langertha::Raider::Hall::ACP->new( hall => $hall, port => 0, host => '127.0.0.1' );
   my $stream = CaptureStream->new;
   $acp->_sessions->{'acp-1'} = { stream => $stream, raider_name => 'bjorn' };
-  my @done;
   for my $n ( 1, 2 ) {
     $acp->_session_prompt( $stream, $n, { sessionId => 'acp-1', prompt => [ { type => 'text', text => "p$n" } ] } );
-    my $deadline = time + 30;
-    $hall->loop->loop_once(0.1)
-      until ( !%{ $hall->raiders } && grep { ( $_->{id} // 0 ) == $n } @{ $stream->{lines} } ) || time > $deadline;
+    wait_until( $hall, sub { !%{ $hall->raiders } && grep { ( $_->{id} // 0 ) == $n } @{ $stream->{lines} } } );
   }
   my @ids = map { session_flag($_) } @{ argvs() };
   is( scalar @ids, 2, 'both prompts ran with --session' );
