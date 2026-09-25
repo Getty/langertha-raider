@@ -1,0 +1,19 @@
+---
+class: standard
+completed: 2026-09-25T01:35:11Z
+created: 2026-09-24T22:02:18Z
+id: 34
+priority: low
+started: 2026-09-25T01:35:11Z
+status: done
+tags:
+- idea
+- needs-adr
+- cli
+title: 'Idee: Packs zusaetzlich zu -M-Mission?'
+updated: 2026-09-25T01:35:11Z
+---
+
+Aus #19: -M ersetzt alles (.raider.md, Skills, Packs); Pack-Toggle wirkt mit -M nicht. Ob Packs auf -M aufsetzen sollen, ist unentschieden -> ADR bzw. Maintainer-Entscheid.
+
+ADR 0014 (proposed) geschrieben.
