@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-25T05:44:49Z
+claimed_by: worker-hall3
+class: standard
+completed: 2026-09-25T05:44:49Z
+created: 2026-09-25T05:27:25Z
+id: 77
+priority: low
+started: 2026-09-25T05:27:36Z
+status: done
+tags:
+- hall
+title: 'Hall-Kleinkram: idle Bindung mit gefuellter Queue, ACP-Prompt bei hall.session_error,
+  t/57 Fake-Raider-Duplikat'
+updated: 2026-09-25T05:44:49Z
+---
+
+Aus #73: (1) spawn prueft nicht, ob eine idle Bindung noch eine gefuellte Queue hat (nur um den Start herum relevant). (2) ACP-Prompt auf belegtem Slot bleibt offen, wenn der Lauf wegen hall.session_error ohne Bindung startet. (3) t/57 traegt eigene Kopie des Fake-Raider-Skripts, jetzt in t/lib/Test/Raider/Hall.pm.
