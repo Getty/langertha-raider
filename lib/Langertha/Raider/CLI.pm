@@ -8,7 +8,6 @@ use IO::Async::Loop;
 use Future::AsyncAwait;
 use Net::Async::MCP;
 use MCP::Run::Bash;
-use Module::Runtime ();
 use Path::Tiny;
 use Langertha::Raider::HallTools qw( build_hall_tools_server );
 
@@ -18,6 +17,7 @@ use Langertha::Raider::PerlTools qw( build_perl_tools_server );
 use Langertha::Raider::Packs     qw( build_packs );
 use Langertha::Raider::Config;
 use Langertha::Raider::Detect;
+use Langertha::Raider::EngineResolver;
 use Langertha::Raider;
 
 =head1 SYNOPSIS
@@ -96,20 +96,7 @@ has engine_name => (
   init_arg => 'engine',
 );
 
-sub _build_engine_name {
-  my ($self) = @_;
-  my $opt = $self->_cli_app_options->{engine};
-  return $opt if defined $opt && length $opt;
-  my $yml = $self->config->engine;
-  return $yml if defined $yml;
-  return 'anthropic' if $ENV{ANTHROPIC_API_KEY};
-  return 'openai'    if $ENV{OPENAI_API_KEY};
-  return 'deepseek'  if $ENV{DEEPSEEK_API_KEY};
-  return 'groq'      if $ENV{GROQ_API_KEY};
-  return 'mistral'   if $ENV{MISTRAL_API_KEY};
-  return 'gemini'    if $ENV{GEMINI_API_KEY};
-  return 'anthropic';
-}
+sub _build_engine_name { $_[0]->engine_resolver->engine_name }
 
 =attr default_model_for_engine
 
@@ -117,36 +104,48 @@ Per-engine default model when L</model> is not explicitly set.
 
 =cut
 
-my %DEFAULT_MODEL = (
-  anthropic => 'claude-haiku-4-5',
-  openai    => 'gpt-4o-mini',
-  deepseek  => 'deepseek-chat',
-  groq      => 'llama-3.3-70b-versatile',
-  mistral   => 'mistral-small-latest',
-  gemini    => 'gemini-2.5-flash',
-  cerebras  => 'llama3.1-8b',
-);
-
+# Plain functions, kept for callers of the former tables here; the tables
+# are the resolver's.
 sub env_var_for_engine {
   my ($engine) = @_;
-  my %map = (
-    anthropic  => 'ANTHROPIC_API_KEY',
-    openai     => 'OPENAI_API_KEY',
-    deepseek   => 'DEEPSEEK_API_KEY',
-    groq       => 'GROQ_API_KEY',
-    mistral    => 'MISTRAL_API_KEY',
-    gemini     => 'GEMINI_API_KEY',
-    minimax    => 'MINIMAX_API_KEY',
-    cerebras   => 'CEREBRAS_API_KEY',
-    openrouter => 'OPENROUTER_API_KEY',
-    ollama     => undef,
-  );
-  return $map{$engine};
+  return __PACKAGE__->engine_resolver_class->env_var_for_engine($engine);
 }
 
 sub default_model_for_engine {
   my ($engine) = @_;
-  return $DEFAULT_MODEL{$engine};
+  return __PACKAGE__->engine_resolver_class->default_model_for_engine($engine);
+}
+
+=attr engine_resolver
+
+The L<Langertha::Raider::EngineResolver> that picks engine, model and API
+key from the flags, the C<-o> options, F<.raider.yml> and the
+environment, and builds the engine.
+
+=cut
+
+has engine_resolver => (
+  is       => 'ro',
+  isa      => 'Langertha::Raider::EngineResolver',
+  init_arg => undef,
+  lazy     => 1,
+  builder  => '_build_engine_resolver',
+);
+
+sub engine_resolver_class { 'Langertha::Raider::EngineResolver' }
+
+# The resolver gets what was passed to the constructor (-e, -m, -k), so
+# its answers and those of the attributes here are the same.
+sub _build_engine_resolver {
+  my ($self) = @_;
+  my $explicit = $self->_explicit;
+  return $self->engine_resolver_class->new(
+    config         => $self->config,
+    engine_options => $self->engine_options,
+    ( $explicit->{engine}  ? ( engine  => $self->engine_name ) : () ),
+    ( $explicit->{model}   ? ( model   => $self->model )       : () ),
+    ( $explicit->{api_key} ? ( api_key => $self->api_key )     : () ),
+  );
 }
 
 =attr model
@@ -166,13 +165,7 @@ has model => (
   builder   => '_build_model',
 );
 
-sub _build_model {
-  my ($self) = @_;
-  return $self->engine_options->{model}
-    // $self->_engine_yml_options->{model}
-    // default_model_for_engine($self->engine_name)
-    // '';
-}
+sub _build_model { $_[0]->engine_resolver->model }
 
 sub has_model {
   my ($self) = @_;
@@ -188,10 +181,7 @@ key (e.g. ollama).
 
 =cut
 
-sub api_key_env {
-  my ($self) = @_;
-  return env_var_for_engine($self->engine_name);
-}
+sub api_key_env { $_[0]->engine_resolver->api_key_env }
 
 =attr api_key
 
@@ -890,11 +880,7 @@ sub _cli_app_options {
   return \%app;
 }
 
-sub _cli_engine_options {
-  my ($self) = @_;
-  my $opts = $self->engine_options;
-  return { map { $_ => $opts->{$_} } grep { !$self->config->is_app_key($_) } keys %$opts };
-}
+sub _cli_engine_options { $_[0]->engine_resolver->cli_engine_options }
 
 sub _load_yml_options {
   my ($self) = @_;
@@ -903,10 +889,7 @@ sub _load_yml_options {
   return { %{ $self->config->options($self->engine_name) }, %app };
 }
 
-sub _engine_yml_options {
-  my ($self) = @_;
-  return $self->config->engine_options($self->engine_name);
-}
+sub _engine_yml_options { $_[0]->engine_resolver->engine_yml_options }
 
 has loop => (
   is      => 'ro',
@@ -919,33 +902,9 @@ has _engine => (is => 'ro', lazy => 1, builder => '_build_engine');
 has _raider => (is => 'ro', lazy => 1, builder => '_build_raider');
 has _mcps   => (is => 'ro', lazy => 1, builder => '_build_mcps');
 
-sub _build_api_key {
-  my ($self) = @_;
-  my $configured = $self->engine_options->{api_key} // $self->_engine_yml_options->{api_key};
-  return $configured if defined $configured;
-  my $var = env_var_for_engine($self->engine_name);
-  return '' unless $var;
-  return $ENV{$var} // '';
-}
+sub _build_api_key { $_[0]->engine_resolver->api_key }
 
-sub _engine_class {
-  my ($self) = @_;
-  my %map = (
-    anthropic  => 'Langertha::Engine::Anthropic',
-    openai     => 'Langertha::Engine::OpenAI',
-    deepseek   => 'Langertha::Engine::DeepSeek',
-    groq       => 'Langertha::Engine::Groq',
-    mistral    => 'Langertha::Engine::Mistral',
-    gemini     => 'Langertha::Engine::Gemini',
-    minimax    => 'Langertha::Engine::MiniMax',
-    cerebras   => 'Langertha::Engine::Cerebras',
-    openrouter => 'Langertha::Engine::OpenRouter',
-    ollama     => 'Langertha::Engine::Ollama',
-  );
-  my $class = $map{$self->engine_name}
-    or die "Unknown engine: " . $self->engine_name . "\n";
-  return $class;
-}
+sub _engine_class { $_[0]->engine_resolver->engine_class }
 
 sub _build_mcps {
   my ($self) = @_;
@@ -1001,26 +960,13 @@ sub _build_mcps {
 
 sub _build_engine {
   my ($self) = @_;
-  my $class = $self->_engine_class;
-  Module::Runtime::require_module($class);
-  return $class->new($self->_engine_args);
+  return $self->engine_resolver->build_engine(mcp_servers => $self->_mcps);
 }
 
-# Engine constructor arguments: .raider.yml then -o (CLI wins), raider's
-# own keys left out. model and api_key go last: their accessors already
-# resolve flag over -o over .raider.yml, so an explicit -m / -k is never
-# overwritten.
+# Engine constructor arguments (Langertha::Raider::EngineResolver/engine_args).
 sub _engine_args {
   my ($self) = @_;
-  my %args = (
-    %{$self->_engine_yml_options},
-    %{$self->_cli_engine_options},
-    mcp_servers => $self->_mcps,
-  );
-  delete @args{qw( model api_key )};
-  $args{api_key} = $self->api_key if length $self->api_key;
-  $args{model}   = $self->model   if $self->has_model;
-  return %args;
+  return $self->engine_resolver->engine_args(mcp_servers => $self->_mcps);
 }
 
 sub _build_raider {
@@ -1259,9 +1205,9 @@ sub explain_config {
   }
   my %from_yml = map { $_ => $yml{$_}{candidate} } keys %yml;
 
-  my $env_var = env_var_for_engine($engine);
+  my $env_var = $self->engine_resolver->env_var_for_engine($engine);
   my $env_key = defined $env_var && length($ENV{$env_var} // '') ? $env_var : undef;
-  my $default_model = default_model_for_engine($engine);
+  my $default_model = $self->engine_resolver->default_model_for_engine($engine);
   my $yml_key = $from_yml{api_key};
 
   my @values = (
