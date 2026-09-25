@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T01:46:43Z
+claimed_by: worker-mission
+class: standard
+completed: 2026-09-25T01:46:43Z
+created: 2026-09-25T01:35:07Z
+id: 55
+priority: medium
+started: 2026-09-25T01:46:43Z
+status: done
+tags:
+- cli
+- context
+- packs
+title: -M ersetzt nur Anweisungen; --bare (ADR 0014)
+updated: 2026-09-25T01:46:43Z
+---
+
+ADR 0014. Persona-Text und Tool-Beschreibung trennen; -M ersetzt nur Default-Persona + .raider.md; Skills, Packs (inkl. detektiert) und Tool-Beschreibung bleiben. Neues --bare: keine .raider.md, keine Skills, keine Packs, keine Detektion; /pack NAME schaltet explizit weiter ein. config explain zeigt Anweisungsquelle (-M/.raider.md/default) und bare. Changes-Hinweis auf Bedeutungsaenderung von -M.
