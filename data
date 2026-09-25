@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-25T01:51:58Z
+claimed_by: worker-json
+class: standard
+completed: 2026-09-25T01:51:58Z
+created: 2026-09-25T01:34:59Z
+id: 53
+priority: medium
+started: 2026-09-25T01:51:58Z
+status: done
+tags:
+- cli
+- json
+title: 'JSON 1: --json mit version und status (ADR 0013)'
+updated: 2026-09-25T01:51:58Z
+---
+
+ADR 0013. Output.pm: version:1 + status (completed/failed; nur Zustaende, die die CLI erzeugen kann). Format-Referenz in POD von bin/raider. --json=N-Mechanik: nur Version 1 existiert; --json=1 akzeptieren, unbekannte Version = Usage-Fehler (exit 2). Hall/ACP-Leser pruefen, dass sie weiter funktionieren.
+
+ADR 0013 erweitert: auch --msgpack und --yaml (gleiches Dokument, gleiche Version, --FORMAT=N). Data::MessagePack als requires in cpanfile.
