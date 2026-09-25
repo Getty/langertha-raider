@@ -36,8 +36,12 @@ content, stream C<session/update> notifications from the hall event bus,
 return C<{ stopReason }> when the raider finishes. All prompts of an ACP
 session run in one raider session, bound as C<acp:SESSION> until the
 client disconnects (see L<Langertha::Raider::Hall/session_bindings>).
+A prompt that has to wait -- its C<1name> slot or its session is busy --
+gets no answer until its run has started and ended; then it is answered
+like any other, with C<end_turn> or C<cancelled>.
 
-=item * C<session/cancel> — send the raider a TERM.
+=item * C<session/cancel> — send the running raider a TERM; prompts still
+waiting are answered C<cancelled> and never run.
 
 =back
 
@@ -214,10 +218,14 @@ sub _binding_of { 'acp:'.$_[1] }
 
 sub _forget_session {
   my ($self, $session_id) = @_;
-  delete $self->_sessions->{$session_id};
+  my $session = delete $self->_sessions->{$session_id};
+  if ($session) {
+    $self->_end_run_subscription($session);
+    if (my $watch = delete $session->{_spawn_watch}) { $watch->close }
+  }
   my $hall = $self->hall or return;
   # Prompts still waiting for the session have no client left to answer.
-  $hall->_drop_binding_queue($self->_binding_of($session_id));
+  $hall->drop_queued($self->_binding_of($session_id));
   $hall->unbind_session($self->_binding_of($session_id));
   return;
 }
@@ -248,10 +256,13 @@ sub _session_prompt {
     return $self->_reply_err($stream, $id, -32000, "spawn failed: $spawn->{error}");
   }
 
-  # Queued (1name or the session busy) — report and return an intermediate
-  # stop reason.
+  # Queued (1name or the session busy): ACP has no stop reason for a turn
+  # that has not started, so the request stays open until the queued run
+  # starts and ends, and is answered like any other.
   if ($spawn->{queued}) {
-    return $self->_reply($stream, $id, { stopReason => 'queued' });
+    push @{ $session->{waiting} //= [] }, $id;
+    $self->_watch_spawns($session, $session_id, $stream);
+    return;
   }
 
   my $raider_id = $spawn->{id};
@@ -263,9 +274,42 @@ sub _session_prompt {
   $self->_attach_subscription($session, $raider_id, $stream);
 }
 
+# Waiting prompts start in order on the session's binding: each
+# raider.spawned there takes the oldest one and streams its run to it.
+sub _watch_spawns {
+  my ($self, $session, $session_id, $stream) = @_;
+  return if $session->{_spawn_watch};
+  my $binding = $self->_binding_of($session_id);
+  $session->{_spawn_watch} = $self->_subscribe('raider.spawned', sub {
+    my ($evt) = @_;
+    return unless ($evt->{binding} // '') eq $binding;
+    my $rid = shift @{ $session->{waiting} // [] };
+    return unless defined $rid;
+    $session->{current_raider_id} = $evt->{id};
+    $session->{pending_request_id} = $rid;
+    $self->_attach_subscription($session, $evt->{id}, $stream);
+  });
+}
+
+# A callback on the hall event bus: the hall writes each event as a JSON
+# line into the stream of a subscriber, so the callback sits behind a
+# SubStream. Closing that stream ends the subscription.
+sub _subscribe {
+  my ($self, $filter, $cb) = @_;
+  my $sub_stream = Langertha::Raider::Hall::ACP::SubStream->new(cb => sub {
+    my ($json_line) = @_;
+    my $evt = eval { JSON::MaybeXS->new->decode($json_line) };
+    return if $@;
+    $cb->($evt);
+  });
+  push @{ $self->hall->{_subscribers} ||= [] }, {
+    stream => $sub_stream, filter => $filter,
+  };
+  return $sub_stream;
+}
+
 sub _attach_subscription {
   my ($self, $session, $raider_id, $stream) = @_;
-  my $hall = $self->hall;
 
   my $handler = sub {
     my ($evt) = @_;
@@ -289,6 +333,7 @@ sub _attach_subscription {
           },
         });
       }
+      $self->_end_run_subscription($session);
       my $rid = delete $session->{pending_request_id};
       my $cancelled = $evt->{signaled}
         || ($evt->{status} // '') =~ /^(?:cancelled|interrupted)$/;
@@ -297,6 +342,7 @@ sub _attach_subscription {
       }) if defined $rid;
     }
     elsif ($t eq 'raider.failed') {
+      $self->_end_run_subscription($session);
       my $rid = delete $session->{pending_request_id};
       $self->_reply($stream, $rid, { stopReason => 'refusal' }) if defined $rid;
     }
@@ -317,19 +363,14 @@ sub _attach_subscription {
     }
   };
 
-  # Piggy-back on the hall subscriber bus with a synthetic "stream" that
-  # is actually our callback. The hall writes JSON+\n into ->write, so
-  # we wrap it.
-  my $fake_stream = Langertha::Raider::Hall::ACP::SubStream->new(cb => sub {
-    my ($json_line) = @_;
-    my $evt = eval { JSON::MaybeXS->new->decode($json_line) };
-    return if $@;
-    $handler->($evt);
-  });
-  push @{ $hall->{_subscribers} ||= [] }, {
-    stream => $fake_stream, filter => 'raider.',
-  };
-  $session->{_sub_stream} = $fake_stream;
+  $session->{_sub_stream} = $self->_subscribe('raider.', $handler);
+}
+
+# The run of the session's current prompt ended: stop listening to it.
+sub _end_run_subscription {
+  my ($self, $session) = @_;
+  my $sub_stream = delete $session->{_sub_stream} or return;
+  $sub_stream->close;
 }
 
 sub _session_id_for {
@@ -347,6 +388,11 @@ sub _session_cancel {
   my $session = $self->_sessions->{$session_id}
     or return $self->_reply_err($stream, $id, -32602, "unknown session: $session_id");
 
+  # Prompts still waiting end cancelled, without running.
+  $self->hall->drop_queued($self->_binding_of($session_id));
+  for my $rid (splice @{ $session->{waiting} // [] }) {
+    $self->_reply($stream, $rid, { stopReason => 'cancelled' });
+  }
   if (my $rid = $session->{current_raider_id}) {
     $self->hall->kill_raider($rid);
   }

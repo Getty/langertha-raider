@@ -26,4 +26,7 @@ sub write {
 sub handle { $_[0] }
 sub opened { $_[0]->{opened} }
 
+# The hall drops a subscriber whose stream is no longer opened.
+sub close { $_[0]->{opened} = 0 }
+
 1;

@@ -129,7 +129,7 @@ subtest 'queued singleton mission is replayed as text' => sub {
   my $tmp = tempdir(CLEANUP => 1);
   my $hall = Langertha::Raider::Hall->new(root => path($tmp));
 
-  $hall->raiders->{'1bjorn'} = Langertha::Raider::Hall::Raider->new({
+  $hall->raiders->{old} = Langertha::Raider::Hall::Raider->new({
     id => 'old',
     pid => 12345,
     slot_name => '1bjorn',

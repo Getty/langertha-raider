@@ -265,7 +265,9 @@ A run of a plain name (C<bjorn>) without such a binding is not bound: the
 raider starts a fresh session of its own.
 
 Telegram, cron and slot bindings stay until they are reset (see
-L</reset_session>); journals are never deleted by the hall.
+L</reset_session>); a hall start also forgets the bindings of cron jobs
+no longer in the config, and drops the missions they left waiting.
+Journals are never deleted by the hall.
 
 =cut
 
@@ -363,7 +365,22 @@ sub _forget_acp_bindings {
   my @acp = grep { /^acp:/ } keys %{$self->session_bindings};
   delete @{$self->session_bindings}{@acp};
   $self->_persist_session_bindings if @acp;
-  $self->_drop_binding_queue($_) for grep { /^acp:/ } keys %{$self->binding_queues};
+  $self->drop_queued($_) for grep { /^acp:/ } $self->_waiting_bindings;
+  return;
+}
+
+# Bindings of cron jobs no longer in the config are forgotten at a start,
+# and the missions they left waiting are dropped. Journals stay.
+sub _forget_removed_cron_bindings {
+  my ($self) = @_;
+  my %job = map { ( 'cron:'.( $_->{id} // $_->{name} // '' ) => 1 ) }
+    @{ $self->config->{cron} // [] };
+  my %gone = map { $_ => 1 } grep { /^cron:/ && !$job{$_} }
+    keys %{$self->session_bindings}, $self->_waiting_bindings;
+  for my $binding (sort keys %gone) {
+    $self->unbind_session($binding);
+    $self->drop_queued($binding);
+  }
   return;
 }
 
@@ -376,10 +393,93 @@ sub _binding_key {
   return;
 }
 
+=attr singleton_queues
+
+The missions waiting for a busy numbered slot, as a map from slot to a
+FIFO list; each slot's list is kept in F<.raider-hall/state/SLOT.queue.json>.
+A hall start runs what a previous hall left waiting before any new
+mission, and a new mission for a slot never overtakes the missions
+already waiting for it.
+
+=cut
+
 has singleton_queues => (
   is => 'ro',
-  default => sub { {} },
+  isa => 'HashRef',
+  lazy => 1,
+  builder => '_build_singleton_queues',
 );
+
+sub _build_singleton_queues {
+  my ($self) = @_;
+  my %queues;
+  for my $queue_file ($self->state_dir->children(qr/^\d+[a-z][-a-z0-9]*\.queue\.json$/)) {
+    my $slot = $queue_file->basename =~ s/\.queue\.json$//r;
+    my $q = eval { JSON::MaybeXS->new->decode($queue_file->slurp_utf8) };
+    $queues{$slot} = ref $q eq 'ARRAY' ? $q : [];
+  }
+  return \%queues;
+}
+
+# Start the missions waiting for a numbered slot, once nothing runs in it.
+# One whose binding is busy moves on to that binding's queue, and the next
+# one gets the slot.
+sub _drain_singleton_queue {
+  my ($self, $slot) = @_;
+  my $queue = $self->singleton_queues->{$slot} or return;
+  my ($base) = $slot =~ /^\d+(.+)$/;
+  while (@$queue && !$self->_slot_busy($slot)) {
+    my $next = shift @$queue;
+    $self->_persist_queue($slot);
+    $self->_spawn_next_in_queue($slot, $base, $next);
+  }
+  return;
+}
+
+sub _drain_singleton_queues {
+  my ($self) = @_;
+  $self->_drain_singleton_queue($_) for sort keys %{$self->singleton_queues};
+  return;
+}
+
+=method drop_queued
+
+    my $n = $hall->drop_queued('acp:acp-1f2e3d4c');
+
+Drops every mission waiting for a binding, from the binding's queue and
+from the slot queues, and returns how many there were.
+
+=cut
+
+sub drop_queued {
+  my ($self, $binding) = @_;
+  my $dropped = 0;
+  if (my $queue = delete $self->binding_queues->{$binding}) {
+    $dropped += @$queue;
+    $self->_persist_binding_queues;
+  }
+  my $slots = $self->singleton_queues;
+  for my $slot (sort keys %$slots) {
+    my $queue = $slots->{$slot};
+    my @keep = grep { ($_->{binding} // '') ne $binding } @$queue;
+    next if @keep == @$queue;
+    $dropped += @$queue - @keep;
+    @$queue = @keep;
+    $self->_persist_queue($slot);
+  }
+  return $dropped;
+}
+
+# Every binding a waiting mission names, in the binding queues or the slot
+# queues.
+sub _waiting_bindings {
+  my ($self) = @_;
+  my %waiting = map { $_ => 1 } keys %{$self->binding_queues};
+  for my $queue (values %{$self->singleton_queues}) {
+    $waiting{$_->{binding}} = 1 for grep { defined $_->{binding} } @$queue;
+  }
+  return sort keys %waiting;
+}
 
 =attr binding_queues
 
@@ -445,13 +545,6 @@ sub _drain_binding_queue {
   $self->_persist_binding_queues;
   return unless $next;
   return $self->spawn(%$next);
-}
-
-sub _drop_binding_queue {
-  my ($self, $binding) = @_;
-  return unless delete $self->binding_queues->{$binding};
-  $self->_persist_binding_queues;
-  return;
 }
 
 sub _drain_binding_queues {
@@ -534,13 +627,14 @@ sub run {
   $self->_setup_socket;
   $self->_setup_mcp_socket if $self->_want_mcp_socket;
   $self->_setup_event_broadcaster;
-  $self->_load_singleton_queues;
   $self->_setup_signal_handlers;
   $self->protocol;
   $self->_setup_cron;
   $self->_setup_telegram;
   $self->_setup_acp;
   $self->_forget_acp_bindings;
+  $self->_forget_removed_cron_bindings;
+  $self->_drain_singleton_queues;
   $self->_drain_binding_queues;
 
   $self->_emit('hall.started', { root => $self->root->stringify });
@@ -685,17 +779,20 @@ sub _emit {
   $data->{ts} //= time();
 
   my $json = JSON::MaybeXS->new->encode($data);
-  my @alive;
-  for my $sub (@{$self->{_subscribers}}) {
+  # Closed streams leave the list; a subscriber whose filter does not match
+  # stays, and so does one added while this event went out.
+  my %closed;
+  for my $sub (@{[ @{$self->{_subscribers} // []} ]}) {
+    my $stream = $sub->{stream};
+    unless ($stream && $stream->handle && $stream->handle->opened) {
+      $closed{$sub} = 1;
+      next;
+    }
     my $filter = $sub->{filter} // '';
     next if $filter ne '' && substr($type, 0, length($filter)) ne $filter;
-    my $stream = $sub->{stream};
-    if ($stream && $stream->handle && $stream->handle->opened) {
-      eval { $stream->write("$json\n") };
-      push @alive, $sub;
-    }
+    eval { $stream->write("$json\n") };
   }
-  $self->{_subscribers} = \@alive;
+  $self->{_subscribers} = [ grep { !$closed{$_} } @{$self->{_subscribers} // []} ];
 }
 
 sub _broadcast_to_socket {
@@ -712,21 +809,6 @@ sub _unsubscribe_stream {
 sub _register_cmd {
   my ($self, $name, $handler) = @_;
   $self->{_cmd_handlers}{$name} = $handler;
-}
-
-sub _load_singleton_queues {
-  my ($self) = @_;
-  my $state_dir = $self->state_dir;
-  return unless -d $state_dir;
-
-  for my $queue_file ($state_dir->children) {
-    next unless $queue_file->basename =~ /^.*\.queue\.json$/;
-    my $slot = $queue_file->basename;
-    $slot =~ s/\.queue\.json$//;
-    next unless $slot =~ /^\d+/;
-    my $q = eval { JSON::MaybeXS->new->decode($queue_file->slurp_utf8) } // [];
-    $self->singleton_queues->{$slot} = $q;
-  }
 }
 
 sub _persist_queue {
@@ -770,16 +852,7 @@ sub _reap_raider {
   delete $self->raiders->{$raider->id};
   $self->_prune_events($slot);
 
-  if ($slot =~ /^\d+(.+)$/) {
-    my $base = $1;
-    my $queue = $self->singleton_queues->{$slot} // [];
-    if (@$queue) {
-      my $next = shift @$queue;
-      $self->singleton_queues->{$slot} = $queue;
-      $self->_persist_queue($slot);
-      $self->_spawn_next_in_queue($slot, $base, $next);
-    }
-  }
+  $self->_drain_singleton_queue($slot) if $slot =~ /^\d+/;
 
   $self->_drain_binding_queue($raider->binding) if $raider->has_binding;
 }
@@ -953,7 +1026,8 @@ sub spawn {
   my ($slot, $base_name) = $self->_parse_name($name);
 
   # Only numbered names have a slot here: singletons, queued while busy.
-  # A plain name runs in parallel.
+  # A plain name runs in parallel. Missions already waiting go first.
+  $self->_drain_singleton_queue($slot) if $slot;
   if ($slot && $self->_slot_busy($slot)) {
     push @{$self->singleton_queues->{$slot} //= []}, {
       mission => $mission,
@@ -962,11 +1036,12 @@ sub spawn {
       defined $binding ? ( binding => $binding ) : (),
     };
     $self->_persist_queue($slot);
+    my $depth = scalar @{$self->singleton_queues->{$slot}};
     $self->_emit('raider.queued', {
       slot => $slot,
-      queue_depth => scalar @{$self->singleton_queues->{$slot}},
+      queue_depth => $depth,
     });
-    return { queued => 1, slot => $slot };
+    return { queued => 1, slot => $slot, queue_depth => $depth };
   }
 
   # One writer per session: a mission for a binding that is running waits
