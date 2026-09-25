@@ -53,4 +53,29 @@ subtest 'create, open, replay' => sub {
   $opened->release;
 };
 
+subtest 'fork and remove' => sub {
+  my $root = tempdir(CLEANUP => 1);
+  my $app = app($root);
+  my $s = $app->create_session;
+  $s->append('message', run => 'r1', role => 'user', content => 'hi');
+  $s->append('message', run => 'r1', role => 'assistant', content => 'hello');
+  $s->append('run.finished', run => 'r1', status => 'completed');
+
+  my $fork = $app->fork_session($s->id);
+  isnt($fork->{id}, $s->id, 'a new session');
+  is($fork, { id => T(), path => ''.$app->session_store->path_of($fork->{id}), forked_from => $s->id, messages => 2 },
+    'what the fork took over');
+  my $journal = $app->session_store->read($fork->{id});
+  is($journal->events->[0]{forked_from}, $s->id, 'session.created names the original');
+  is($journal->history_messages, [ { role => 'user', content => 'hi' }, { role => 'assistant', content => 'hello' } ],
+    'the history, outside any run');
+  ok(lives { $app->open_session($fork->{id})->release }, 'the fork is not left locked');
+
+  like(dies { $app->remove_session($s->id) }, qr/is in use/, 'no removal while open');
+  $s->release;
+  my $path = ''.$app->session_store->path_of($s->id);
+  is($app->remove_session($s->id), $path, 'removed, path returned');
+  ok(!-e $path, 'the journal is gone');
+};
+
 done_testing;

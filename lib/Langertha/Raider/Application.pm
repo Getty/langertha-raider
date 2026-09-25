@@ -1241,6 +1241,49 @@ sub replay_session {
   return $journal;
 }
 
+=method fork_session
+
+    my $fork = $app->fork_session($id);
+    # { id, path, forked_from, messages }
+
+A new session in L</session_store> whose C<session.created> names the
+session C<$id> in C<forked_from>, and which takes over its working
+history -- what a resume would replay into C<history>
+(L<Langertha::Raider::Session::Journal/history_messages>) -- as
+C<message> events outside any run. The original is only read (no lock
+needed) and never changed. Returns the new session's C<id> and C<path>,
+C<forked_from> and how many C<messages> it took over.
+
+=cut
+
+sub fork_session {
+  my ($self, $id) = @_;
+  my $store = $self->session_store;
+  my $history = $store->read($id)->history_messages;
+  my $session = $store->create(forked_from => $id);
+  $session->append('message', role => $_->{role}, content => $_->{content}) for @$history;
+  $session->release;
+  return { id => $session->id, path => ''.$session->path, forked_from => $id, messages => scalar @$history };
+}
+
+=method remove_session
+
+    my $path = $app->remove_session($id);
+
+Deletes the session C<$id> of L</session_store>, journal and lock file
+(L<Langertha::Raider::SessionStore/remove>, which croaks C<session ID is
+in use> while another raider has it open). Returns the journal's path.
+
+=cut
+
+sub remove_session {
+  my ($self, $id) = @_;
+  my $store = $self->session_store;
+  my $path = ''.$store->path_of($id);
+  $store->remove($id);
+  return $path;
+}
+
 =method reload_mission
 
 Rebuilds the mission (e.g. after C<.raider.md> has been edited) and swaps it

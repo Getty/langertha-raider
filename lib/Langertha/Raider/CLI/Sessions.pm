@@ -8,11 +8,11 @@ use JSON::MaybeXS ();
 =head1 SYNOPSIS
 
     # Internal to Langertha-Raider -- no API promise.
-    my $sessions = Langertha::Raider::CLI::Sessions->new(store => $store, output => $out);
+    my $sessions = Langertha::Raider::CLI::Sessions->new(app => $app, output => $out);
     $sessions->list;                        # raider session list
     $sessions->show($id);                   # raider session show ID
     $sessions->show($id, $machine);         # raider session show ID --json
-    my @notes = $sessions->restore($app, $session);           # --session ID, --continue
+    my @notes = $sessions->restore($session);                 # --session ID, --continue
     my $new = $sessions->fork_session($id);                   # raider session fork ID
     $sessions->remove($id);                                   # raider session rm ID
 
@@ -23,11 +23,12 @@ B<Internal module.> Its interface may change without notice.
 What F<raider> does with the session journals of a project
 (L<Langertha::Raider::SessionStore>, ADR 0015) beyond writing them: listing
 them, showing one, replaying one into a raider to resume it, forking one
-and removing one.
+and removing one -- the changes through the
+L<Langertha::Raider::Application>, this class presents them.
 
-=attr store
+=attr app
 
-The L<Langertha::Raider::SessionStore>. Required.
+The L<Langertha::Raider::Application> of the project. Required.
 
 =attr output
 
@@ -35,11 +36,19 @@ The L<Langertha::Raider::CLI::Output> to print to. Required.
 
 =cut
 
-has store => (
+has app => (
   is       => 'ro',
-  isa      => 'Langertha::Raider::SessionStore',
+  isa      => 'Langertha::Raider::Application',
   required => 1,
 );
+
+=method store
+
+The L<Langertha::Raider::Application/session_store> of L</app>.
+
+=cut
+
+sub store { $_[0]->app->session_store }
 
 has output => (
   is       => 'ro',
@@ -200,18 +209,17 @@ sub notes {
 
 =method restore
 
-    my @notes = $sessions->restore($app, $session);
+    my @notes = $sessions->restore($session);
 
 Replays the journal the L<Langertha::Raider::Session> was opened with into
-the raider of the L<Langertha::Raider::Application>
-(L<Langertha::Raider::Application/replay_session>). Returns a line saying
-what was resumed, then the L</notes>.
+the raider of L</app> (L<Langertha::Raider::Application/replay_session>).
+Returns a line saying what was resumed, then the L</notes>.
 
 =cut
 
 sub restore {
-  my ( $self, $app, $session ) = @_;
-  my $journal = $app->replay_session($session);
+  my ( $self, $session ) = @_;
+  my $journal = $self->app->replay_session($session);
   my $history = $journal->history_messages;
   my $runs = scalar @{ $journal->runs };
   return ( 'resumed session '.$session->id.': '.$runs.' run'.($runs == 1 ? '' : 's').', '
@@ -223,23 +231,17 @@ sub restore {
     $sessions->fork_session($id);            # human
     $sessions->fork_session($id, $machine);  # { version, id, path, forked_from, messages }
 
-C<raider session fork ID>: a new session of the same project whose
-C<session.created> names the original in C<forked_from>, and which takes
-over the working history of the original -- what a resume would replay
-into C<history> (L<Langertha::Raider::Session::Journal/history_messages>)
--- as C<message> events outside any run. From there it has a journal of
-its own; the original is only read (no lock needed) and never changed, and
-the workspace stays the same. Returns the new id.
+C<raider session fork ID>: a new session of the same project that takes
+over the working history of the original
+(L<Langertha::Raider::Application/fork_session>). From there it has a
+journal of its own; the original is never changed, and the workspace
+stays the same. Returns the new id.
 
 =cut
 
 sub fork_session {
   my ( $self, $id, $machine ) = @_;
-  my $history = $self->store->read($id)->history_messages;
-  my $session = $self->store->create(forked_from => $id);
-  $session->append('message', role => $_->{role}, content => $_->{content}) for @$history;
-  $session->release;
-  my %doc = ( id => $session->id, path => ''.$session->path, forked_from => $id, messages => scalar @$history );
+  my %doc = %{ $self->app->fork_session($id) };
   if ($machine) {
     $machine->write({ version => $machine->version, %doc });
   }
@@ -256,15 +258,14 @@ sub fork_session {
     $sessions->remove($id, $machine);  # { version, id, path, removed }
 
 C<raider session rm ID>: deletes the session's journal and lock file
-through L<Langertha::Raider::SessionStore/remove>, which croaks C<session
-ID is in use> while another raider has it open.
+through L<Langertha::Raider::Application/remove_session>, which croaks
+C<session ID is in use> while another raider has it open.
 
 =cut
 
 sub remove {
   my ( $self, $id, $machine ) = @_;
-  my $path = ''.$self->store->path_of($id);
-  $self->store->remove($id);
+  my $path = $self->app->remove_session($id);
   return $machine->write({ version => $machine->version, id => $id, path => $path, removed => JSON::MaybeXS->true })
     if $machine;
   $self->output->emit('removed session '.$id."\n");

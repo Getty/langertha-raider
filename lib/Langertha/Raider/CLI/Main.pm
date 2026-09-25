@@ -612,7 +612,7 @@ sub resume_session {
     return $error =~ / is in use\z/ ? EXIT_SESSION_IN_USE : EXIT_RUN_ERROR;
   }
   my @notes = eval {
-    $self->sessions_class->new(store => $store, output => $self->output)->restore($app, $session);
+    $self->sessions_class->new(app => $app, output => $self->output)->restore($session);
   };
   if ($@) {
     my $error = $self->output->error_text($@);
@@ -628,7 +628,8 @@ sub resume_session {
     my $exit = $main->session_command(show => $id, $opt);
 
 C<raider session list>, C<show ID>, C<fork ID> and C<rm ID> for the
-project in C<-r> (or the working directory), through
+project in C<-r> (or the working directory), through the
+L<Langertha::Raider::Application> of that project and
 L<Langertha::Raider::CLI::Sessions>; a document format (C<--json>,
 C<--msgpack>, C<--yaml>) writes them as one document. C<rm> of a session
 another raider has open ends with C<4>, as a resume of it would; a fork or
@@ -646,8 +647,11 @@ sub session_command {
     }
     $machine = $self->machine_class->new(%$m, out => $self->output->out);
   }
-  my $store = $self->session_store_class->new(root => $opt->{root} // Path::Tiny->cwd->stringify);
-  my $sessions = $self->sessions_class->new(store => $store, output => $self->output);
+  # The app of the project; building it reads no .raider.yml and builds no
+  # engine.
+  my $app = $self->app_class->new(root => $opt->{root} // Path::Tiny->cwd->stringify);
+  my $store = $app->session_store;
+  my $sessions = $self->sessions_class->new(app => $app, output => $self->output);
   if ($cmd eq 'list') {
     $sessions->list($machine);
     return EXIT_OK;
