@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-09-25T02:48:40Z
+claimed_by: worker-hall2
+class: standard
+completed: 2026-09-25T02:48:40Z
+created: 2026-09-25T02:38:26Z
+id: 60
+priority: low
+started: 2026-09-25T02:38:43Z
+status: done
+tags:
+- hall
+title: 'Hall: Slot-Logs wachsen unbegrenzt; hall logs ID nach Laufende ''not found'
+updated: 2026-09-25T02:48:40Z
+---
+
+Aus #59: (1) SLOT.log waechst ohne Grenze; Kuerzen kollidiert mit laufendem Schreiber -> Rotation beim Laufstart. (2) hall logs ID ohne --follow findet beendete Raider nicht mehr -> Slot aus ID ableiten und Slot-Log/Events-Datei zeigen.
