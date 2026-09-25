@@ -73,6 +73,15 @@ Revision history for Langertha-Raider
       raider.done events report exit_code 1 for failed runs.
     - --json encodes UTF-8 once and keeps the live trace off unless
       --trace is given; raider -i reads piped input to its end.
+    - Machine output is versioned (ADR 0013): --json, --msgpack and --yaml
+      print one document with "version" (1) and "status" (completed or
+      failed); --FORMAT=N selects the version, an unknown one is a usage
+      error.
+    - New --stream-json, --stream-msgpack and --stream-yaml: run.started,
+      run.state, tool.call, tool.result, message and run.finished events
+      as the run happens, run.finished always last. All six machine flags
+      exclude each other; with any of them --trace goes to stderr and
+      stdout carries only the machine output. Requires Data::MessagePack.
     - /reload, the banner and the generated raider skill name a -M
       mission as the persona; the generated skill lists /config, /model,
       /packs and /pack.
