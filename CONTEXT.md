@@ -91,8 +91,11 @@ is a ticket on that repo's karr board.
   Future::AsyncAwait. ~35 engines (inheritance = wire dialect, roles = capabilities),
   `Role::Tools` with the MCP tool loop, model listing, local engine discovery
   (`new_engine`, `LANGERTHA_<ENGINE>_API_KEY`), plugins, Langfuse, usage/cost, `RunContext`
-  and `Role::Runnable`. No config file format and no manifest yet. Raider still reaches into
-  private API (`_async_http`, `_langfuse_timestamp`) — to be replaced by public hooks.
+  and `Role::Runnable`, the provider manifest classes (`Langertha::Manifest`, core ADR 0029).
+  No config file format. Raider uses core's public engine hooks (`async_request_f`,
+  `async_loop`, `langfuse_timestamp`, `Usage->from_raw`; core ADR 0028); the only core
+  privates left are those of the `Role::PluginHost` Raider composes itself
+  (`_plugin_instances`, `_plugin_pipeline_tool_call`), tracked as core k226.
 - **langertha-knarr** (`~/dev/langertha-knarr`) — "universal LLM hub": proxy/server
   accepting OpenAI, Anthropic, Ollama, A2A, ACP-BeeAI, AG-UI; routes to engines or
   passthrough. `Handler::Raider` already serves one raider per session as model

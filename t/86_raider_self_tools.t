@@ -892,6 +892,25 @@ subtest 'raider_wait runs when the engine has no event loop' => sub {
   is(result_id_counts($engine)->{tc_wait}, 1, 'the wait got its tool_result');
 };
 
+# respond_f runs the rest of a paused batch through its own raider_wait site;
+# it needs the same fallback when the engine has no loop.
+subtest 'respond_f runs a trailing raider_wait when the engine has no event loop' => sub {
+  my $engine = SeqEngine->new(turns => [
+    { tool_calls => [
+      { name => 'raider_ask_user', input => { question => 'OK?' }, id => 'tc_ask' },
+      { name => 'raider_wait',     input => { seconds => 0 },     id => 'tc_wait' },
+    ] },
+    { tool_calls => [], text => 'resumed' },
+  ]);
+  no warnings 'redefine';
+  local *SeqEngine::async_loop = sub { undef };
+  my $raider = Langertha::Raider->new(engine => $engine, raider_mcp => 1);
+  ok($raider->raid('ask then wait')->is_question, 'pauses on ask_user');
+  my $r = $raider->respond('go');
+  is("$r", 'resumed', 'the wait after the pause fell back to the process-wide loop');
+  is(result_id_counts($engine)->{tc_wait}, 1, 'the wait got its tool_result');
+};
+
 subtest 'respond_f re-pauses on a second interactive self-tool in the batch' => sub {
   my $engine = SeqEngine->new(
     turns => [

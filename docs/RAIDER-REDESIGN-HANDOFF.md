@@ -653,6 +653,8 @@ Eine spätere Web-Oberfläche kann dagegen echte zusätzliche Aufgaben erfüllen
 
 ### 11.1 Das Minimum für die erste Version
 
+> Nachtrag: Beispiel und Absatz zu Fähigkeitsnamen/Dialekt in diesem Abschnitt wurden auf Anfrage an Core Manifest v1 angepasst (Core k198, ADR 0029); der Rest des Handoffs bleibt eingefroren.
+
 **Empfehlung:** `/.well-known/langertha.json` als vorgeschlagenen Ökosystemnamen wählen, weil das Datenmodell mehreren Distributionen dient. Das ist hier ausdrücklich ein eigener Entwurf, kein behaupteter bestehender Standard. Vor öffentlicher Standardisierung die Registrierungs- und Namensregeln für Well-Known-URIs prüfen. [R26]
 
 Version 1 beschreibt Endpunkte, Wire-Dialekte, Modell-IDs, deklarierte Fähigkeiten und Auth-Verweise. Sie enthält keine Shell-Befehle, keine frei zu ladenden Perl-Klassen, keine lokalen Secret-Pfade und keine automatisch aktivierten Systemprompts.
