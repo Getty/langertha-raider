@@ -212,6 +212,14 @@ Revision history for Langertha-Raider
       needed as a deadlock workaround. An embedding_engine on a different
       event loop than engine is refused at the start of the raid, and an
       embedding engine without simple_embedding_f gets no embeddings.
+    - Packs are also found in <project>/.raider/packs/<name>/ and
+      ~/.raider/packs/<name>/ (same layout as the shipped packs); for the
+      same name the project beats home, and home beats the shipped pack.
+      raider config explain shows where each pack comes from. A pack
+      directory with an unreadable pack.yml is skipped and reported in
+      raider config explain and /packs instead of stopping the start. The
+      never-used pack keys mcp, add_allowed_commands and engine_options
+      are ignored.
     - New Langertha::Raider->cancel stops a raid at its next safe point and
       is safe in a signal handler; the raid returns a Result of type
       cancelled (is_cancelled), and a tool call it cut off is reported as
