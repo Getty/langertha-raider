@@ -82,7 +82,11 @@ also when it failed or was interrupted; a machine document then names the
 session in C<session> (C<id>, C<path>). A journal write that fails is a
 warning (L</journal_error>); the run goes on.
 
-With C<catch_signals>, a C<SIGINT> or C<SIGTERM> during the run ends it as
+With C<catch_signals>, a C<SIGINT> during the run cancels it (L</cancel_run>):
+it ends as C<cancelled> at its next safe point, its outcome is printed or
+written as always, and then the process dies of C<SIGINT>
+(L</die_of_signal>). A second C<SIGINT> while it is being cancelled, one
+before the application started the run, and a C<SIGTERM> end it as
 C<interrupted>: see L</interrupt>.
 
 =cut
@@ -97,19 +101,40 @@ sub run_prompt {
   $self->_current({ machine => $machine, t0 => $t0 });
 
   # Handled right in the signal handler: a die from it would be swallowed
-  # by whichever eval the run happens to be in (LWP, the raid loop).
-  local $SIG{INT}  = $o{catch_signals} ? sub { $self->interrupt(INT  => $machine, $self->elapsed_since($t0)) } : $SIG{INT};
+  # by whichever eval the run happens to be in (LWP, the raid loop). The
+  # first SIGINT only cancels, so the run still ends by itself.
+  my $cancelled_by;
+  local $SIG{INT}  = $o{catch_signals} ? sub {
+    return $cancelled_by = 'INT' if !$cancelled_by && $self->cancel_run;
+    $self->interrupt(INT => $machine, $self->elapsed_since($t0));
+  } : $SIG{INT};
   local $SIG{TERM} = $o{catch_signals} ? sub { $self->interrupt(TERM => $machine, $self->elapsed_since($t0)) } : $SIG{TERM};
 
   my $end = $app->run_prompt($text,
     ( $o{session} ? ( session => $o{session} ) : () ),
     on_event => sub { $self->event(@_) },
   );
+  # The run has ended: no signal may cut its outcome short any more.
+  $SIG{INT} = $SIG{TERM} = 'IGNORE' if $cancelled_by;
   $self->_clear_current;
 
+  my $ok = $self->_report($machine, $end, $cancelled_by);
+  return $ok unless $cancelled_by;
+  $out->out->flush;
+  return $self->die_of_signal($cancelled_by);
+}
+
+# Prints or writes the outcome of a run that ended (see run_prompt); true
+# for a completed run.
+sub _report {
+  my ( $self, $machine, $end, $cancelled_by ) = @_;
+  my $app = $self->app;
+  my $out = $self->output;
   if ($end->{status} ne 'completed') {
     unless ($machine) {
-      $end->{status} eq 'cancelled' ? $out->say_meta('turn cancelled') : $out->say_error($end->{error});
+      $end->{status} eq 'cancelled'
+        ? $out->say_meta($cancelled_by ? 'cancelled (SIG'.$cancelled_by.')' : 'turn cancelled')
+        : $out->say_error($end->{error});
     }
     return $self->_document($machine, $end);
   }
@@ -173,7 +198,7 @@ sub interrupt {
     my $cancelling = $runner->cancel_run;
 
 Cancels the run in progress without leaving the process -- the REPL's
-first Ctrl-C: asks the application to cancel it
+first Ctrl-C, and the first C<SIGINT> of a one-shot run: asks the application to cancel it
 (L<Langertha::Raider::Application/cancel_run>), then ends the tool
 subprocesses still running (L</terminate_children>). The run ends as
 C<cancelled> at its next safe point and L</run_prompt> returns false,

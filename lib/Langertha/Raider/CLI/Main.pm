@@ -60,10 +60,11 @@ C<session resume>) or to remove (C<session rm>) is in use: another raider
 has it open for writing and holds its lock. Unlike a usage error the same
 command can work later, which is why it has a status of its own.
 
-=item C<130>, C<143> -- a one-shot run was interrupted by C<SIGINT> or
-C<SIGTERM>. It writes the C<interrupted> document (or a note), then dies of
-that same signal, which a shell reports as 128 plus the signal number; see
-L<Langertha::Raider::CLI::Runner/die_of_signal>.
+=item C<130>, C<143> -- a one-shot run was cancelled by C<SIGINT> or
+interrupted by C<SIGTERM> (see L<Langertha::Raider::CLI::Runner/run_prompt>).
+It writes the C<cancelled> or C<interrupted> document (or a note), then
+dies of that same signal, which a shell reports as 128 plus the signal
+number; see L<Langertha::Raider::CLI::Runner/die_of_signal>.
 
 =back
 

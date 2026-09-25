@@ -111,7 +111,12 @@ A run that failed:
 
     { "elapsed" : 0.42, "error" : "...", "status" : "failed", "version" : 1 }
 
-A run stopped by C<SIGINT> or C<SIGTERM> (see L</EXIT STATUS>):
+A run cancelled by C<SIGINT> (Ctrl-C; see L</EXIT STATUS>):
+
+    { "elapsed" : 3.912, "status" : "cancelled", "version" : 1 }
+
+A run stopped by C<SIGTERM>, by a second C<SIGINT> while it is being
+cancelled, or by either signal before it started:
 
     { "elapsed" : 5.107, "signal" : "TERM", "status" : "interrupted", "version" : 1 }
 
@@ -119,10 +124,10 @@ A run stopped by C<SIGINT> or C<SIGTERM> (see L</EXIT STATUS>):
 
 =item C<version> -- integer, the format version (see below).
 
-=item C<status> -- how the run ended: C<completed>, C<failed> or
-C<interrupted>. These are the run states of the redesign (ADR 0009) that
-end a run and that the CLI can produce today; C<cancelled> and C<refused>
-are reserved for when it can.
+=item C<status> -- how the run ended: C<completed>, C<failed>,
+C<cancelled> or C<interrupted>. These are the run states of the redesign
+(ADR 0009) that end a run and that the CLI can produce today; C<refused>
+is reserved for when it can.
 
 =item C<response> -- the agent's final answer (C<completed> only).
 
@@ -175,7 +180,8 @@ runs; C<call>, its id within the run (C<c1>, C<c2>, ...); C<status>,
 C<dispatched>.
 
 =item C<tool.result> -- C<call> and C<name> of the call; C<status>
-(C<succeeded>, or C<failed> when the tool reported an error); C<ok> (the
+(C<succeeded>, C<failed> when the tool reported an error, or C<cancelled>
+for a call a cancelled run cut off); C<ok> (the
 same as a boolean); C<size>, the length of the result text in characters;
 C<content>, its first 1000 characters; and C<truncated> (a boolean, true
 when C<content> was cut). The cut limits how much of a tool's output
@@ -313,13 +319,19 @@ raider. A usage error (C<2>) is also an unknown or ambiguous session, a
 C<--session> that is no session id, C<--continue> without any session, or
 more than one of C<--session>, C<--continue> and C<--no-session>.
 
-=item C<130>, C<143> -- a one-shot run was interrupted by C<SIGINT> or
-C<SIGTERM>. F<raider> ends the tool commands still running, writes the
-C<interrupted> document (or its events, or a note; with a machine format
-also for a signal during startup), then dies of that same signal, so a
-shell reports 128 plus
-the signal number and a parent that waits for it sees a process killed
-by the signal.
+=item C<130>, C<143> -- a one-shot run was cancelled by C<SIGINT> or
+interrupted by C<SIGTERM>. On C<SIGINT> (Ctrl-C) F<raider> cancels the run:
+it ends the tool commands still running, abandons a model request in
+flight, lets the run end at its next safe point and writes its document
+-- C<cancelled>, or what the run reached if it ended anyway -- or its
+events, or a note. A second C<SIGINT> while it cancels, a C<SIGTERM>, and
+with a machine format either signal during startup end the tool commands
+and write the C<interrupted> document at once. Either way F<raider> then
+dies of that same signal, so a shell reports 128 plus the signal number
+and a parent that waits for it sees a process killed by the signal. A
+model or embedding request that blocks the process (not an asynchronous
+one) holds a cancel up until it returns; the second C<SIGINT> does not
+wait.
 
 =back
 

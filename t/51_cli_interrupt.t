@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# ABSTRACT: raider interrupted by SIGINT/SIGTERM mid-run: the interrupted document or run.finished, death by the signal
+# ABSTRACT: raider interrupted by SIGTERM mid-run, or by SIGINT/SIGTERM at startup: the interrupted document or run.finished, death by the signal
 
 use strict;
 use warnings;
@@ -87,15 +87,15 @@ subtest '--json: SIGTERM writes the interrupted document' => sub {
   like($journal[-1], { run => 'r1', status => 'interrupted', signal => 'TERM' }, 'as interrupted');
 };
 
-subtest '--stream-json: SIGINT ends with run.state and run.finished' => sub {
-  my ( $status, $stdout, $stderr ) = interrupted_run(INT => '--stream-json');
-  died_of($status, 'INT', '--stream-json');
+subtest '--stream-json: SIGTERM ends with run.state and run.finished' => sub {
+  my ( $status, $stdout, $stderr ) = interrupted_run(TERM => '--stream-json');
+  died_of($status, 'TERM', '--stream-json');
   my $json = JSON::MaybeXS->new(utf8 => 1);
   my @events = map { $json->decode($_) } split /\n/, $stdout;
   is([ map { $_->{type} } @events ], [qw( run.started run.state run.state run.finished )],
     'event sequence') or diag 'stdout: '.$stdout."\nstderr: ".$stderr;
   is($events[2]{state}, 'interrupted', 'last state change is interrupted');
-  like($events[-1], { status => 'interrupted', signal => 'INT', elapsed => D(), seq => 4 },
+  like($events[-1], { status => 'interrupted', signal => 'TERM', elapsed => D(), seq => 4 },
     'run.finished carries the interrupted document');
 };
 
