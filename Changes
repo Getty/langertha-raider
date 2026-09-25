@@ -50,7 +50,8 @@ Revision history for Langertha-Raider
     - telegram.in events carry the sender's first_name and username, also
       in group chats.
     - Document that engine: is optional for hall raiders, and the hall
-      MCP adapter (.raider-hall.mcp) as not implemented.
+      MCP adapter (.raider-hall.mcp) as not implemented. raider hall init
+      and add-raider write engine: only when --engine is given.
     - Fix plugin self-tools being offered to the model twice per raid.
     - Fix perl tools: perl_eval and perl_check run the current perl in the
       working root with the private lib; perl_check says BEGIN/use run;
