@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-25T02:29:19Z
+claimed_by: worker-hall2
+class: standard
+completed: 2026-09-25T02:29:19Z
+created: 2026-09-25T01:52:12Z
+id: 57
+priority: low
+started: 2026-09-25T02:22:18Z
+status: done
+tags:
+- hall
+- json
+title: Hall liest --stream-json statt --json-Log
+updated: 2026-09-25T02:29:19Z
+---
+
+Aus #54: Hall-Log wird mit >> fortgeschrieben; bei wiederverwendetem Slot/stderr-Rauschen mehrere Dokumente, ACP reicht Rohtext weiter. ADR 0013 erlaubt Umstieg auf --stream-json; Log-Parsing robust machen.
