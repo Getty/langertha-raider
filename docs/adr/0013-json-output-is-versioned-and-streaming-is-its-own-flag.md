@@ -1,4 +1,4 @@
-# ADR 0013 — `--json` is versioned; streaming is its own flag
+# ADR 0013 — Machine output is versioned; streaming is its own flag
 
 - Status: accepted
 - Date: 2026-09-25
@@ -50,7 +50,22 @@ the thin `bin/raider` (0 success, 1 run failed, 2 usage, 3 configuration).
     last line.
   - Token deltas (`text.delta`) are left out of version 1; they can be added later
     without a new version, because consumers ignore unknown types.
-- **Same exit codes** for `--json`, `--stream-json` and human output.
+- **Same exit codes** for every machine format and for human output.
+- **The model is format-independent; JSON, MessagePack and YAML are encodings of it**
+  (added by the maintainer on 2026-09-25, before implementation):
+
+  | Document | Stream | Stream framing |
+  |---|---|---|
+  | `--json` | `--stream-json` | JSON Lines, one compact event per line |
+  | `--msgpack` | `--stream-msgpack` | concatenated MessagePack objects (self-delimiting), binary stdout |
+  | `--yaml` | `--stream-yaml` | one YAML document per event, each starting with `---` |
+
+  - All six flags are mutually exclusive. Document and events have exactly the same
+    fields and versions in every encoding; the version belongs to the model, not to the
+    encoding, so `--msgpack=2` and `--yaml=2` mean the same as `--json=2`.
+  - The encoders are `JSON::MaybeXS`, `Data::MessagePack` and `YAML::PP`; all three are
+    runtime requirements of the dist, so every format is always available.
+  - Text stays UTF-8 in all three; MessagePack writes strings as UTF-8 `str`, never `bin`.
 - **Surfaces follow later, not in this step.** The Hall may switch from reading the `--json`
   log to consuming `--stream-json`; ACP keeps its own protocol (ADR 0010) and is not
   replaced by this format.
