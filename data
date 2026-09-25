@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-25T05:21:15Z
+claimed_by: worker-app
+class: standard
+completed: 2026-09-25T05:21:15Z
+created: 2026-09-24T22:27:51Z
+id: 41
+priority: low
+started: 2026-09-25T04:59:55Z
+status: done
+tags:
+- refactor
+- cli
+title: 'CLI.pm aufteilen: Application-Klasse (Handoff §3.3)'
+updated: 2026-09-25T05:21:15Z
+---
+
+Aus #21: Langertha::Raider::CLI baut weiter Sessions und waehlt Provider. Schnitt nach Handoff §3.3 in Application-Klasse, klein und mit ADR-Abgleich (0002, 0003, 0007). Erst nach Session-ADR-Umsetzung sinnvoll.
