@@ -33,6 +33,9 @@ that spawns one-shot `raider` subprocesses, and "session" effectively means "pro
   sessions (ADR 0003) instead.
 - Code that today lives in `bin/raider` or `Raider::CLI` and decides behaviour moves into the
   shared service so every surface gets it.
+- The shared service is `Langertha::Raider::Application` (internal), with engine and model
+  choice in `Langertha::Raider::EngineResolver`; `Langertha::Raider::CLI` is its CLI
+  subclass (karr #41, 2026-09-25). The Hall does not use it yet.
 
 ## Source
 
