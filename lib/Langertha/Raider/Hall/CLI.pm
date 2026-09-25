@@ -13,6 +13,7 @@ use IO::Socket::UNIX;
 use POSIX qw(WNOHANG);
 use Socket qw(SOCK_STREAM);
 use YAML::PP;
+use Langertha::Raider::EngineResolver;
 use Langertha::Raider::Hall;
 
 sub main {
@@ -698,15 +699,10 @@ sub _render_docker_unit {
     push @docker, '-p', "$opt->{'acp-port'}:$opt->{'acp-port'}";
   }
 
-  # Forward standard API-key env vars — systemd EnvironmentFile is the
+  # Forward the API-key env vars — systemd EnvironmentFile is the
   # cleaner long-term answer, but -e on the docker command line is
   # explicit and survives without extra files.
-  for my $e (qw(
-    ANTHROPIC_API_KEY OPENAI_API_KEY DEEPSEEK_API_KEY GROQ_API_KEY
-    MISTRAL_API_KEY GEMINI_API_KEY MINIMAX_API_KEY CEREBRAS_API_KEY
-    OPENROUTER_API_KEY BRAVE_API_KEY SERPER_API_KEY
-    GOOGLE_API_KEY GOOGLE_CSE_ID
-  )) {
+  for my $e (api_key_env_vars()) {
     push @docker, '-e', $e;
   }
 
@@ -737,6 +733,18 @@ RestartSec=5
 [Install]
 WantedBy=default.target
 EOF
+}
+
+# The engines' key variables come from the resolver that picks the
+# engine inside the raider; the web-search keys are WebTools'.
+sub api_key_env_vars {
+  my @engines = qw(
+    anthropic openai deepseek groq mistral gemini minimax cerebras openrouter
+  );
+  return (
+    ( grep { defined } map { Langertha::Raider::EngineResolver->env_var_for_engine($_) } @engines ),
+    qw( BRAVE_API_KEY SERPER_API_KEY GOOGLE_API_KEY GOOGLE_CSE_ID )
+  );
 }
 
 sub print_install_help {

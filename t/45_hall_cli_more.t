@@ -11,6 +11,7 @@ use Path::Tiny;
 use File::Temp qw( tempdir );
 use JSON::MaybeXS ();
 use YAML::PP;
+use Langertha::Raider::EngineResolver;
 use Langertha::Raider::Hall::CLI;
 
 my $orig_cwd = path('.')->absolute;
@@ -207,6 +208,12 @@ subtest 'install --docker --stdout: docker unit content' => sub {
   like( $out, qr/myimg:tag hall start --acp-port 4711 --acp-host 0\.0\.0\.0/,
     'binds to 0.0.0.0 by default so the published port is reachable' );
   like( $out, qr{ExecStop=/usr/bin/docker stop myhall}, 'stop command' );
+  for my $engine (qw( anthropic openai deepseek groq mistral gemini minimax cerebras openrouter )) {
+    my $var = Langertha::Raider::EngineResolver->env_var_for_engine($engine);
+    like( $out, qr/ -e \Q$var\E /, 'forwards the '.$engine.' key the engine resolver names' );
+  }
+  like( $out, qr/ -e $_ /, 'forwards web-search key '.$_ )
+    for qw( BRAVE_API_KEY SERPER_API_KEY GOOGLE_API_KEY GOOGLE_CSE_ID );
 };
 
 subtest 'install: inside a container, --docker or --host must be chosen' => sub {
