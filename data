@@ -1,0 +1,20 @@
+---
+block_reason: Braucht Manifest-Schema aus langertha#191 und Policy/Executor (ADR 0005),
+  beides noch nicht da.
+blocked: true
+class: standard
+created: 2026-09-24T19:41:12Z
+id: 23
+priority: low
+status: backlog
+tags:
+- provider-discovery
+- m5
+- needs:langertha#191
+title: 'Provider-Discovery-Client: raider --provider HOST, provider add/inspect'
+updated: 2026-09-25T06:10:14Z
+---
+
+ADR 0007. Manifest begrenzt abrufen (HTTPS, Groessen-/Zeit-/Redirect-Limits, keine Credential-Weitergabe bei Origin-Wechsel, kein Selbstzugriff auf Loopback/Link-Local/Metadaten; interne Knarr/Skeid-Origins per lokaler Freigabe), validieren, Endpunkte+Auth anzeigen, lokale Credential-Bindung, Alias in ~/.raider/config.yml (ADR 0011). Aenderung von Origin/Auth -> erneute Zustimmung. Fixtures F33-F36, F38 aus dem Handoff. Braucht Schema aus langertha#191 und Policy/Executor (ADR 0005).
+
+Aus #78: EngineResolver::_build_engine_name prueft fuer die API-Key-Autowahl nur anthropic/openai/deepseek/groq/mistral/gemini, nicht engine_names. Bewusst unveraendert (Handoff §5.3: Autowahl bleibt vorerst); mit Provider-Discovery neu entscheiden.
