@@ -1,6 +1,6 @@
 # ADR 0013 — `--json` is versioned; streaming is its own flag
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-09-25
 - Tags: cli, json, machine-interface
 

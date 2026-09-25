@@ -1,6 +1,6 @@
 # ADR 0014 — `-M` replaces the instructions, not the whole context
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-09-25
 - Tags: cli, context, packs
 
