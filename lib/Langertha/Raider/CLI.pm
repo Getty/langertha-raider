@@ -136,6 +136,54 @@ around _raider_plugins => sub {
   return @plugins;
 };
 
+=method source_labels
+
+The command-line flags that set what
+L<Langertha::Raider::Application/explain_config> and the other reports
+name (L<Langertha::Raider::Application/source_label>): C<-e>, C<-m>,
+C<-k>, C<-o>, C<--pack>, C<--perl>, C<--bare>, C<-M>, ...
+
+=cut
+
+sub source_labels {
+  return {
+    engine                 => '-e',
+    model                  => '-m',
+    api_key                => '-k',
+    engine_options         => '-o',
+    'engine_options packs' => '-o packs',
+    pack_names             => '--pack',
+    no_pack_names          => '--no-pack',
+    perl                   => '--perl',
+    detect                 => '--detect',
+    no_detect              => '--no-detect',
+    bare                   => '--bare',
+    mission                => '-M',
+    cli_skill_sources      => '--claude/--openai/--skills',
+  };
+}
+
+=method persona_intro
+
+The default persona's opening names the CLI.
+
+=method persona_turn_end
+
+The CLI loops back to the user.
+
+=cut
+
+sub persona_intro { <<'EOM' }
+You are Langertha, viking shield-maiden. Autonomous CLI agent on user's
+local machine. CLI name: "raider". Just CLI. No pause, no abort, no ask
+to stop. You do things.
+EOM
+
+sub persona_turn_end { <<'EOM' }
+You have no yield / ask / abort tool. Task done: plain text reply. CLI
+loops back to user.
+EOM
+
 =method ignored_agent_files
 
 Returns a list of per-tool agent files that exist in the working root but

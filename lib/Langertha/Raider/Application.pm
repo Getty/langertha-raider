@@ -245,11 +245,37 @@ Tools (MCP):
 EOM
 }
 
-sub _persona_text { <<'EOM' }
-You are Langertha, viking shield-maiden. Autonomous CLI agent on user's
-local machine. CLI name: "raider". Just CLI. No pause, no abort, no ask
-to stop. You do things.
+# The default persona: what the agent is (persona_intro), how it works,
+# and how a turn ends (persona_turn_end). The first and the last part
+# depend on the surface the agent is reached through.
+sub _persona_text {
+  my ($self) = @_;
+  return $self->persona_intro."\n".$self->_persona_body.$self->persona_turn_end;
+}
 
+=method persona_intro
+
+The first paragraph of the default persona: who the agent is and where it
+runs. The command line (L<Langertha::Raider::CLI>) says it is a CLI.
+
+=method persona_turn_end
+
+The last paragraph of the default persona: how the agent ends a turn and
+who answers next.
+
+=cut
+
+sub persona_intro { <<'EOM' }
+You are Langertha, viking shield-maiden. Autonomous agent on user's
+machine. No pause, no abort, no ask to stop. You do things.
+EOM
+
+sub persona_turn_end { <<'EOM' }
+You have no yield / ask / abort tool. Task done: plain text reply. User
+answers in the next turn.
+EOM
+
+sub _persona_body { <<'EOM' }
 Name, persona, tone are defaults. User can rename you, rewrite your
 background, or change persona entirely via C<.raider.md> in working dir.
 If present, its content appended below as user's custom instructions.
@@ -265,8 +291,6 @@ How you work:
   - Skip irreversible ops (rm -rf, git reset --hard, force pushes) unless
     user explicit ask.
 
-You have no yield / ask / abort tool. Task done: plain text reply. CLI
-loops back to user.
 EOM
 
 =attr root
@@ -378,8 +402,9 @@ sub perl_tools_enabled { $_[0]->perl_tools_grant->{enabled} }
     my $grant = $app->perl_tools_grant;
     # { enabled => 1, reason => 'pack perl (detected)' }
 
-L</perl_tools_enabled> with the reason: C<--perl>, C<perl: true> or
-C<perl: false> with where it was set (C<.raider.yml> or C<-o>), the active
+L</perl_tools_enabled> with the reason: L</perl> by its L</source_label>
+(C<--perl> on the command line), C<perl: true> or C<perl: false> with
+where it was set (C<.raider.yml> or the label of C<engine_options>, C<-o>), the active
 packs requesting the tools with their activation source, or
 C<not requested>.
 
@@ -387,10 +412,10 @@ C<not requested>.
 
 sub perl_tools_grant {
   my ($self) = @_;
-  return { enabled => 1, reason => '--perl' } if $self->perl;
+  return { enabled => 1, reason => $self->source_label('perl') } if $self->perl;
   my $yml = $self->_load_yml_options->{perl};
   if (defined $yml) {
-    my $where = exists $self->_cli_app_options->{perl} ? '-o' : '.raider.yml';
+    my $where = exists $self->_cli_app_options->{perl} ? $self->source_label('engine_options') : '.raider.yml';
     return { enabled => $yml ? 1 : 0, reason => 'perl: '.( $yml ? 'true' : 'false' ).' ('.$where.')' };
   }
   my $packs = $self->packs;
@@ -510,7 +535,7 @@ sub _build_packs {
   my ($self) = @_;
   # --bare: only --pack counts, not packs:, defaults or detection.
   my ( $list, $source, $reason ) = !$self->bare ? $self->_explicit_packs
-    : $self->has_pack_names ? ( $self->pack_names, flag => '--pack' )
+    : $self->has_pack_names ? ( $self->pack_names, flag => $self->source_label('pack_names') )
     :                         ( [] );
 
   my $collection = build_packs(root => $self->root);
@@ -524,7 +549,7 @@ sub _build_packs {
       $collection->enable($name, $source, $reason);
     }
   }
-  $collection->disable($_, flag => '--no-pack') for @{$self->no_pack_names};
+  $collection->disable($_, flag => $self->source_label('no_pack_names')) for @{$self->no_pack_names};
   $self->_detect_packs($collection);
 
   return $collection;
@@ -534,9 +559,9 @@ sub _build_packs {
 # packs: in .raider.yml.
 sub _explicit_packs {
   my ($self) = @_;
-  return ( $self->pack_names, flag => '--pack' ) if $self->has_pack_names;
+  return ( $self->pack_names, flag => $self->source_label('pack_names') ) if $self->has_pack_names;
   my $opt = $self->_cli_app_options->{packs};
-  return ( $opt, flag => '-o packs' ) if defined $opt;
+  return ( $opt, flag => $self->source_label('engine_options packs') ) if defined $opt;
   return ( $self->config->options($self->engine_name)->{packs}, config => '.raider.yml packs:' );
 }
 
@@ -544,15 +569,16 @@ sub _explicit_packs {
 
     my ( $on, $why ) = $app->detection_state;
 
-Whether pack detection runs, and what decided it: C<--detect>,
-C<--no-detect>, C<detect: false> or C<default>.
+Whether pack detection runs, and what decided it: L</bare> or L</detect>
+by their L</source_label> (C<--bare>, C<--detect>, C<--no-detect> on the
+command line), C<detect: false> or C<default>.
 
 =cut
 
 sub detection_state {
   my ($self) = @_;
-  return ( 0, '--bare' ) if $self->bare;
-  return ( $self->detect ? ( 1, '--detect' ) : ( 0, '--no-detect' ) ) if $self->has_detect_flag;
+  return ( 0, $self->source_label('bare') ) if $self->bare;
+  return ( $self->detect ? ( 1, $self->source_label('detect') ) : ( 0, $self->source_label('no_detect') ) ) if $self->has_detect_flag;
   return ( 0, 'detect: false' ) unless $self->_detect_settings->{enabled};
   return ( 1, 'default' );
 }
@@ -590,7 +616,7 @@ sub _detect_packs {
       $detections{$name} = { rule_from => $from, result => $result, reason => $reason, notes => $notes // [] };
     };
     my $skip = !$collection->packs_by_name->{$name} ? 'unknown pack'
-             : $no_pack{$name}                     ? '--no-pack'
+             : $no_pack{$name}                     ? $self->source_label('no_pack_names')
              : $settings->{off}{$name}             ? $settings->{off}{$name}
              : $collection->is_active($name)       ? 'already active'
              :                                        undef;
@@ -1301,26 +1327,54 @@ sub reload_mission {
 
 =method mission_source
 
-Where the instructions item of L</mission> comes from: C<-M> for a
-mission passed to the constructor, C<.raider.md> when that file customizes
-the default persona (never with L</bare>), C<default> otherwise.
+Where the instructions item of L</mission> comes from: the
+L</source_label> of C<mission> (C<-M> on the command line) for a mission
+passed to the constructor, C<.raider.md> when that file customizes the
+default persona (never with L</bare>), C<default> otherwise.
 
 =cut
 
 sub mission_source {
   my ($self) = @_;
-  return '-M' if $self->_has_explicit_mission;
+  return $self->source_label('mission') if $self->_has_explicit_mission;
   return !$self->bare && -f Path::Tiny::path($self->root)->child('.raider.md') ? '.raider.md' : 'default';
+}
+
+=method source_label
+
+    my $label = $app->source_label('pack_names');   # 'pack_names', '--pack' in the CLI
+
+How reports name a setting that was passed to the constructor: in
+L</explain_config>, L</perl_tools_grant>, L</detection_state>,
+L</mission_source> and the pack sources. The keys are C<engine>,
+C<model>, C<api_key>, C<engine_options>, C<engine_options packs>,
+C<pack_names>, C<no_pack_names>, C<perl>, C<detect>, C<no_detect>,
+C<bare>, C<mission> and C<cli_skill_sources>. A surface names its own
+way of setting them in L</source_labels>; without, the label is the key.
+
+=method source_labels
+
+The labels of L</source_label> by key; none here. The command line
+(L<Langertha::Raider::CLI>) returns its flags.
+
+=cut
+
+sub source_labels { {} }
+
+sub source_label {
+  my ($self, $key) = @_;
+  return $self->source_labels->{$key} // $key;
 }
 
 =method explain_config
 
     my $report = $app->explain_config;
 
-Where each effective setting came from, command-line flags included. The
-shape of L<Langertha::Raider::Config/explain>, with C<source> (and
-C<shadowed>) naming a flag (C<-e>, C<-m>, C<-k>, C<-o>, C<--pack>,
-C<--perl>, C<--claude/--openai/--skills>), a F<.raider.yml> layer
+Where each effective setting came from, constructor arguments included.
+The shape of L<Langertha::Raider::Config/explain>, with C<source> (and
+C<shadowed>) naming an argument by its L</source_label> (the command line
+names its flags: C<-e>, C<-m>, C<-k>, C<-o>, C<--pack>, C<--perl>,
+C<--claude/--openai/--skills>), a F<.raider.yml> layer
 (C<.raider.yml>, C<.raider.yml default:>, C<.raider.yml openai:>), an
 environment variable (C<env OPENAI_API_KEY>) or C<default>. API key values
 are never included. Builds no engine.
@@ -1343,6 +1397,7 @@ sub explain_config {
   my $explicit = $self->_explicit;
   my $app_opts = $self->_cli_app_options;
   my $opts     = { %{ $self->_cli_engine_options }, %$app_opts };
+  my $opt_label = $self->source_label('engine_options');
 
   # .raider.yml values as candidates: [ source, value, shadowed ]
   my ( %yml, @yml_skills );
@@ -1367,34 +1422,34 @@ sub explain_config {
 
   my @values = (
     $self->_explain_entry(engine => 'raider', [
-      $explicit->{engine} ? [ '-e', $engine ] : undef,
-      defined $opts->{engine} ? [ '-o', $opts->{engine} ] : undef,
+      $explicit->{engine} ? [ $self->source_label('engine'), $engine ] : undef,
+      defined $opts->{engine} ? [ $opt_label, $opts->{engine} ] : undef,
       $from_yml{engine},
     ], [ $env_key ? 'env '.$env_key : 'default', $engine ]),
     $self->_explain_entry(model => 'engine', [
-      $explicit->{model} ? [ '-m', $self->model ] : undef,
-      defined $opts->{model} ? [ '-o', $opts->{model} ] : undef,
+      $explicit->{model} ? [ $self->source_label('model'), $self->model ] : undef,
+      defined $opts->{model} ? [ $opt_label, $opts->{model} ] : undef,
       $from_yml{model},
     ], defined $default_model ? [ 'default', $default_model ] : undef),
     $self->_explain_entry(api_key => 'engine', [
-      $explicit->{api_key} ? [ '-k', '(set)' ] : undef,
-      defined $opts->{api_key} ? [ '-o', '(set)' ] : undef,
+      $explicit->{api_key} ? [ $self->source_label('api_key'), '(set)' ] : undef,
+      defined $opts->{api_key} ? [ $opt_label, '(set)' ] : undef,
       $yml_key ? [ $yml_key->[0], '(set)', $yml_key->[2] ] : undef,
     ], $env_key ? [ 'env '.$env_key, '(set)' ] : undef),
   );
 
   my %flag = (
-    ( $self->has_pack_names ? ( packs => [ '--pack', $self->pack_names ] ) : () ),
-    ( $explicit->{perl} && $self->perl ? ( perl => [ '--perl', 1 ] ) : () ),
+    ( $self->has_pack_names ? ( packs => [ $self->source_label('pack_names'), $self->pack_names ] ) : () ),
+    ( $explicit->{perl} && $self->perl ? ( perl => [ $self->source_label('perl'), 1 ] ) : () ),
     ( $self->has_detect_flag
-      ? ( detect => [ $self->detect ? '--detect' : '--no-detect', $self->detect ? 1 : 0 ] ) : () ),
+      ? ( detect => [ $self->source_label($self->detect ? 'detect' : 'no_detect'), $self->detect ? 1 : 0 ] ) : () ),
   );
   my %key = map { $_ => 1 } keys %$opts, keys %yml, keys %flag;
   delete @key{qw( engine model api_key skills )};
   for my $key (sort keys %key) {
     my $applies_to = $self->config->is_app_key($key) ? 'raider' : 'engine';
     push @values, $self->_explain_entry($key, $applies_to, [
-      $flag{$key} // ( exists $opts->{$key} ? [ '-o', $opts->{$key} ] : undef ),
+      $flag{$key} // ( exists $opts->{$key} ? [ $opt_label, $opts->{$key} ] : undef ),
       $from_yml{$key},
     ]);
   }
@@ -1403,7 +1458,7 @@ sub explain_config {
   push @values, {
     key        => 'skills',
     value      => $app_opts->{skills},
-    source     => '-o',
+    source     => $opt_label,
     shadowed   => [],
     merged     => 1,
     applies_to => 'raider',
@@ -1411,7 +1466,7 @@ sub explain_config {
   push @values, {
     key        => 'skills',
     value      => $self->cli_skill_sources,
-    source     => '--claude/--openai/--skills',
+    source     => $self->source_label('cli_skill_sources'),
     shadowed   => [],
     merged     => 1,
     applies_to => 'raider',
