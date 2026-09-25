@@ -43,6 +43,11 @@ acp:
   port: 38421
   host: 127.0.0.1
 
+# Seconds a raider gets to end its run on a cancel (ACP session/cancel,
+# SIGINT) before the hall sends SIGTERM, and again before SIGKILL.
+# 0 never escalates.
+cancel_grace: 5
+
 # An MCP adapter for other agents to drive the hall is not implemented;
 # an `mcp:` section here has no effect.
 

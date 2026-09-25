@@ -97,6 +97,7 @@ C<.raider-hall.yml> in the hall root:
         ops: { token: '...', allowlist: [42], routing: { '*': lagertha } }
     acp: { port: 38421, host: 127.0.0.1 }
     logs: { keep_events: 20, max_log_size: 1048576 }
+    cancel_grace: 5
 
 C<engine> on a raider entry is optional. Without it the hall passes no
 C<--engine> and the spawned raider decides itself: the engine from its
@@ -1268,11 +1269,57 @@ ends the run as C<cancelled> (its C<run.finished>, the session journal)
 and then dies of the signal. C<kill_raider> sends C<SIGTERM> instead, a
 stop that ends the run as C<interrupted>.
 
+A raider still running L</cancel_grace> seconds later -- stuck in a call
+that holds off the signal -- gets C<SIGTERM>, and C<SIGKILL> when it is
+still there after another L</cancel_grace>.
+
 =cut
 
 sub cancel_raider {
   my ($self, $id) = @_;
-  return $self->_signal_raider(INT => $id) ? { cancelled => 1, id => $id } : { error => 'raider not found' };
+  return { error => 'raider not found' } unless $self->_signal_raider(INT => $id);
+  $self->_escalate_cancel($id, $self->raiders->{$id}->pid, qw( TERM KILL ));
+  return { cancelled => 1, id => $id };
+}
+
+=attr cancel_grace
+
+Seconds L</cancel_raider> gives a raider to end on C<SIGINT> before it
+sends C<SIGTERM>, and again before C<SIGKILL>. From C<cancel_grace: N> in
+F<.raider-hall.yml>, default 5; 0 never escalates. The default leaves
+F<raider> time for its own cancel -- ending the tool subprocesses takes it
+up to two seconds (L<Langertha::Raider::CLI::Runner/terminate_children>)
+-- and matches the grace the hall gives its raiders on shutdown.
+
+=cut
+
+has cancel_grace => (
+  is => 'ro',
+  lazy => 1,
+  builder => '_build_cancel_grace',
+);
+
+sub _build_cancel_grace { $_[0]->config->{cancel_grace} // 5 }
+
+# After cancel_grace, sends the first of @signals to raider $id if that
+# process ($pid) still runs, and goes on with the rest.
+sub _escalate_cancel {
+  my ($self, $id, $pid, @signals) = @_;
+  my $grace = $self->cancel_grace;
+  return unless @signals && $grace > 0 && $pid;
+  my $timer = IO::Async::Timer::Countdown->new(
+    delay => $grace,
+    remove_on_expire => 1,
+    on_expire => sub {
+      my $r = $self->raiders->{$id} or return;
+      return unless ($r->pid // 0) == $pid;
+      my ($signal, @rest) = @signals;
+      kill $signal, $pid;
+      $self->_escalate_cancel($id, $pid, @rest);
+    },
+  );
+  $self->loop->add($timer);
+  $timer->start;
 }
 
 # Sends $signal to the process of raider $id; false when there is no such raider.

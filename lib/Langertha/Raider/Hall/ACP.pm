@@ -43,7 +43,9 @@ to start that run without the session (C<hall.session_error>).
 
 =item * C<session/cancel> — cancel the running raider's run with a
 C<SIGINT> (L<Langertha::Raider::Hall/cancel_raider>): it ends the run as
-C<cancelled>, and its prompt is answered C<cancelled>. Prompts still
+C<cancelled>, and its prompt is answered C<cancelled>. A raider the
+signal does not end gets C<SIGTERM>, then C<SIGKILL>, each after the
+hall's C<cancel_grace>. Prompts still
 waiting are answered C<cancelled> and never run.
 
 =back
