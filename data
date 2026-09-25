@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-25T05:44:44Z
+claimed_by: worker-hall3
+class: standard
+completed: 2026-09-25T05:44:44Z
+created: 2026-09-25T05:21:20Z
+id: 75
+priority: medium
+started: 2026-09-25T05:27:31Z
+status: done
+tags:
+- hall
+- refactor
+title: Hall nutzt Application und EngineResolver statt eigener Raider-Einrichtung
+updated: 2026-09-25T05:44:44Z
+---
+
+Aus #41: Hall baut Raider-Aufrufe selbst, Hall/CLI.pm (~Z.705) fuehrt eigene API-Key-Liste. ADR 0002: Oberflaechen sind duenne Adapter auf den Application-Service. Zuerst Key-/Engine-Tabelle aus EngineResolver nutzen; wo die Hall raider als Subprozess startet, bleibt das so (ADR 0002 daemon optional), aber Konfig-/Engine-Entscheidungen kommen aus einer Quelle.
