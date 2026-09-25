@@ -141,14 +141,16 @@ Revision history for Langertha-Raider
       over in a new session (journals are kept); ACP bindings are
       forgotten on hall start; telegram_reply answers into the forum topic
       the message came from.
-    - Hall: missions a previous hall left waiting for a numbered slot run
-      first after a start, and a new mission never overtakes them; the
+    - Hall: missions a previous hall left waiting for a numbered slot or a
+      session binding run first after a start, and a new mission never
+      overtakes them; the
       spawn reply of a busy slot carries queue_depth. A start forgets the
       bindings and waiting missions of cron jobs no longer configured
       (journals stay).
     - Hall ACP: a prompt that has to wait is answered when its run ends
-      (end_turn or cancelled) instead of at once; session/cancel ends
-      waiting prompts as cancelled.
+      (end_turn or cancelled) instead of at once, also when the hall had
+      to start that run without its session (hall.session_error names the
+      run); session/cancel ends waiting prompts as cancelled.
     - A one-shot raider stopped by SIGINT or SIGTERM writes the
       "interrupted" document (or run.state/run.finished when streaming),
       then dies of the same signal (shell status 130/143), also when the
