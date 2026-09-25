@@ -187,8 +187,11 @@ Revision history for Langertha-Raider
       writes the cancelled document or run.finished, then dies of SIGINT
       (exit 130); a second SIGINT, or SIGTERM, still interrupts at once.
       ACP session/cancel cancels the running hall raider with SIGINT, so
-      its run ends as cancelled; raider hall kill still stops it with
-      SIGTERM.
+      its run ends as cancelled; if it does not end, the hall escalates to
+      SIGTERM, then SIGKILL, each after cancel_grace in .raider-hall.yml
+      (default 5 seconds, 0 never escalates). raider hall kill still stops
+      it with SIGTERM. A tool call that ends with an error after a cancel,
+      such as a bash command ended by it, is reported as cancelled.
     - New Langertha::Raider->cancel stops a raid at its next safe point and
       is safe in a signal handler; the raid returns a Result of type
       cancelled (is_cancelled), and a tool call it cut off is reported as
