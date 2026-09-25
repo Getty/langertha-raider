@@ -183,6 +183,12 @@ Revision history for Langertha-Raider
       ended, the model request is abandoned, the session journal records
       the run as cancelled, and the REPL goes on; a second Ctrl-C within
       2s quits.
+    - A one-shot raider cancels its run on the first SIGINT (Ctrl-C): it
+      writes the cancelled document or run.finished, then dies of SIGINT
+      (exit 130); a second SIGINT, or SIGTERM, still interrupts at once.
+      ACP session/cancel cancels the running hall raider with SIGINT, so
+      its run ends as cancelled; raider hall kill still stops it with
+      SIGTERM.
     - New Langertha::Raider->cancel stops a raid at its next safe point and
       is safe in a signal handler; the raid returns a Result of type
       cancelled (is_cancelled), and a tool call it cut off is reported as

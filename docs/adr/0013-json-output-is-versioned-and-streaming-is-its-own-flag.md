@@ -54,6 +54,13 @@ the thin `bin/raider` (0 success, 1 run failed, 2 usage, 3 configuration).
   SIGINT/SIGTERM is reported by writing the `interrupted` document (or `run.finished`)
   and then dying of the same signal, not by a plain exit code, so supervisors (the
   Hall, ACP) see a signalled child as before (added 2026-09-25, karr #56).
+- **Cancellation vs. interruption** (added 2026-09-25, karr #79): SIGINT to a running
+  one-shot raider is a user cancel (ADR 0009): the run ends at its next safe point and
+  raider writes its document or `run.finished` with `status: "cancelled"` (or whatever
+  the run reached if it ended anyway), then dies of SIGINT (130). A second SIGINT during
+  the cancel, a signal before `run.started`, and every SIGTERM keep the `interrupted` path.
+  SIGTERM stays the supervisor stop: the Hall answers ACP `session/cancel` with SIGINT,
+  `kill` stays SIGTERM.
 - **The model is format-independent; JSON, MessagePack and YAML are encodings of it**
   (added by the maintainer on 2026-09-25, before implementation):
 
