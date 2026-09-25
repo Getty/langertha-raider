@@ -121,6 +121,19 @@ has session => (
   predicate => 'has_session',
 );
 
+=attr notes
+
+Lines printed right after the banner: what resuming L</session> found
+(L<Langertha::Raider::CLI::Sessions/restore>).
+
+=cut
+
+has notes => (
+  is      => 'ro',
+  isa     => 'ArrayRef[Str]',
+  default => sub { [] },
+);
+
 has commands => (
   is      => 'ro',
   lazy    => 1,
@@ -255,6 +268,7 @@ sub run {
   local $SIG{TERM} = $leave;
 
   $self->banner($rl->{impl});
+  $out->say_meta($_) for @{ $self->notes };
   $self->commands->cmd_prompt if $self->customize_prompt;
   $self->run_prompt(join ' ', @first) if @first;
 
@@ -299,8 +313,7 @@ sub _session_for_run {
   my $out = $self->output;
   my $session = eval { $self->session_store->create };
   unless ($session) {
-    my $error = $@;
-    $error =~ s/ at \S+ line \d+\.?\n\z//;
+    my $error = $out->error_text($@);
     $out->say_error('session not saved: '.$error);
     return;
   }

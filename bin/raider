@@ -23,6 +23,8 @@ exit Langertha::Raider::CLI::Main->new->run(@ARGV);
     raider --json "Summarize README.md" > result.json
     raider --stream-json "Run the tests" | jq -c 'select(.type == "tool.call")'
     raider config explain -m gpt-4o
+    raider session list
+    raider --continue "Now fix the first one"
     raider hall start --acp-port 38421
     raider acp prompt 127.0.0.1:38421 --raider bjorn "Summarize status"
 
@@ -237,12 +239,39 @@ ended -- also when it failed or was interrupted. While a raider writes a
 session it holds a lock on it; a second writer fails at once instead of
 waiting.
 
+    raider session list                  # the project's sessions, newest first
+    raider session show ID               # one session, event by event
+    raider session show ID --json        # the whole journal as one document
+    raider session resume ID             # the REPL, continuing session ID
+    raider --session ID "and now ..."    # one more run in session ID
+    raider --continue "and now ..."      # the same in the newest session
+    raider -i --continue                 # the REPL on the newest session
+
+C<session list> shows id, number of runs, the state of the last run and
+the first prompt of each session; C<session show> prints every event, then
+what the crash rules found. Both read without the lock, take C<-r> for the
+project and a document format (C<--json>, C<--msgpack>, C<--yaml>). As for
+C<config explain>, the options may come first; there only
+C<session list> and C<session show|resume> followed by a session id are the
+subcommand, any other prompt starting with C<session> is sent as a prompt.
+
+Continuing a session (C<--session ID>, C<--continue>, C<session resume>)
+takes its lock, replays the conversation -- the input and answer of every
+run that got an answer, and all recorded events into the full session
+history -- and records the new runs in the same journal. Nothing recorded
+is executed again. It reports what it found on standard error (in the REPL,
+under the banner): lines that could not be read, runs that never ended
+(they count as C<interrupted>), and tool calls without a result, whose
+outcome is C<unknown>. The context (F<.raider.md>, packs, configuration) is
+built fresh, not replayed. A session another raider has open ends F<raider>
+with exit status C<4>.
+
 =head1 EXIT STATUS
 
 =over
 
-=item C<0> -- success, including C<--help>, the exports, C<config explain>
-and leaving the REPL.
+=item C<0> -- success, including C<--help>, the exports, C<config explain>,
+C<session list>, C<session show> and leaving the REPL.
 
 =item C<1> -- the run failed: the engine, a tool or the network raised an
 error. With a machine output flag, the document says C<failed>.
@@ -254,6 +283,12 @@ version.
 
 =item C<3> -- configuration error: F<.raider.yml> cannot be read, or the
 engine is unknown.
+
+=item C<4> -- the session to continue (C<--session>, C<--continue>,
+C<session resume>) is in use by another raider. A usage error
+(C<2>) is also an unknown session, a C<--session> that is no session id,
+C<--continue> without any session, or more than one of C<--session>,
+C<--continue> and C<--no-session>.
 
 =item C<130>, C<143> -- a one-shot run was interrupted by C<SIGINT> or
 C<SIGTERM>. F<raider> ends the tool commands still running, writes the

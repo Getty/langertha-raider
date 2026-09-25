@@ -11,96 +11,16 @@ use JSON::MaybeXS ();
 use Path::Tiny;
 use lib 't/lib';
 use Test::Raider::Env qw( clear_engine_env );
+use Test::Raider::SeqEngine;
 use Langertha::Raider::CLI::Main;
 use Langertha::Raider::CLI::Output;
 
 clear_engine_env();
 
-# --- a scripted engine, same shape as t/50_cli_machine_stream.t ---
-
-{
-  package SeqResponse;
-  use Moose;
-  sub is_success  { 1 }
-  sub status_line { '200 OK' }
-  sub content     { '' }
-  __PACKAGE__->meta->make_immutable;
-}
-
-{
-  package SeqHTTP;
-  use Moose;
-  use IO::Async::Loop;
-  has loop => (is => 'ro', default => sub { IO::Async::Loop->new });
-  sub do_request { return $_[0]->loop->new_future->done(SeqResponse->new) }
-  __PACKAGE__->meta->make_immutable;
-}
-
-{
-  package SeqMCP;
-  use Moose;
-  use Future;
-  sub list_tools { return Future->done([ { name => 'bash' }, { name => 'broken' } ]) }
-  sub call_tool {
-    my ( $self, $name, $input ) = @_;
-    return Future->done({ content => [ { type => 'text', text => 'x' x 1500 } ] }) if $name eq 'bash';
-    return Future->done({ content => [ { type => 'text', text => "nope: ä" } ], isError => 1 });
-  }
-  __PACKAGE__->meta->make_immutable;
-}
-
-{
-  package SeqEngine;
-  use Moose;
-  with 'Langertha::Role::Tools';
-
-  has chat_model     => (is => 'ro', default => 'seq-model');
-  has '+mcp_servers' => (default => sub { [] });
-  has turns          => (is => 'ro', default => sub { [] });
-  has _turn_idx      => (is => 'rw', default => 0);
-  has _http          => (is => 'ro', lazy => 1, default => sub { SeqHTTP->new });
-
-  sub _async_http { return $_[0]->_http }
-
-  sub format_tools            { return $_[1] }
-  sub build_tool_chat_request { return { request => 1 } }
-  sub response_tool_calls     { return $_[1]->{tool_calls} // [] }
-  sub response_text_content   { return $_[1]->{text} // 'final answer' }
-  sub extract_tool_call       { return ($_[1]->{name}, $_[1]->{input}) }
-  sub think_tag_filter        { 0 }
-  sub format_tool_results     { my ( $self, $data, $results ) = @_; return map { { role => 'tool', content => 'r' } } @$results }
-
-  # Every raid: two tool calls, then the answer.
-  sub parse_response {
-    my ( $self ) = @_;
-    my $i = $self->_turn_idx;
-    $self->_turn_idx(($i + 1) % 2);
-    return $i ? { tool_calls => [], text => 'Fertig ✓' } : { tool_calls => [
-      { name => 'bash',   input => { command => 'ls' } },
-      { name => 'broken', input => {} },
-    ] };
-  }
-
-  __PACKAGE__->meta->make_immutable;
-}
-
-package My::App {
-  use Moose;
-  extends 'Langertha::Raider::CLI';
-  sub _build_mcps { [] }
-  sub _build_engine { SeqEngine->new(mcp_servers => [ SeqMCP->new ]) }
-  around run => sub {
-    my ( $orig, $self, $text ) = @_;
-    die "kaputt\n" if $text eq 'fail';
-    return $self->$orig($text);
-  };
-  __PACKAGE__->meta->make_immutable;
-}
-
 package My::Main {
   use Moose;
   extends 'Langertha::Raider::CLI::Main';
-  sub app_class { 'My::App' }
+  sub app_class { 'Test::Raider::SeqEngine::App' }
   __PACKAGE__->meta->make_immutable;
 }
 

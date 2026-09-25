@@ -159,4 +159,20 @@ subtest 'after clear, new pushes restore aligned embedding search' => sub {
     'embedding search does not return the cleared message' );
 };
 
+# --- add_session_history (session resume) keeps the embeddings in step ---
+
+subtest 'add_session_history appends through the embedding pusher' => sub {
+  my $raider = Langertha::Raider->new(
+    engine           => MockEngine->new,
+    embedding_engine => MockEmbeddingEngine->new,
+  );
+  ok( $raider->add_session_history(
+    { role => 'user', content => 'zebra' },
+    { role => 'assistant', content => [ { type => 'tool_use', name => 'bash', input => {} } ] },
+  ), 'returns the raider' );
+  is( scalar @{$raider->session_history}, 2, 'two entries' );
+  is( scalar @{$raider->_session_embeddings}, 2, 'one embedding slot each' );
+  is( scalar @{$raider->history}, 0, 'the working history is untouched' );
+};
+
 done_testing;

@@ -14,6 +14,7 @@ use Langertha::Raider::CLI::Machine;
 use Langertha::Raider::CLI::Output;
 use Langertha::Raider::CLI::REPL;
 use Langertha::Raider::CLI::Runner;
+use Langertha::Raider::CLI::Sessions;
 use Langertha::Raider::Config;
 use Langertha::Raider::Hall::CLI;
 use Langertha::Raider::SessionStore;
@@ -28,8 +29,8 @@ use Langertha::Raider::Skill;
 
 B<Internal module.> Its interface may change without notice.
 
-Everything F<raider> does with its command line: the C<hall>, C<acp> and
-C<config explain> subcommands, option parsing, the skill exports, and
+Everything F<raider> does with its command line: the C<hall>, C<acp>,
+C<config explain> and C<session> subcommands, option parsing, the skill exports, and
 then either the REPL (L<Langertha::Raider::CLI::REPL>) or one prompt
 (L<Langertha::Raider::CLI::Runner>). L</run> returns the exit status.
 
@@ -37,8 +38,8 @@ then either the REPL (L<Langertha::Raider::CLI::REPL>) or one prompt
 
 =over
 
-=item C<0> -- success, including C<--help>, the exports, C<config explain>
-and leaving the REPL.
+=item C<0> -- success, including C<--help>, the exports, C<config explain>,
+C<session list>, C<session show> and leaving the REPL.
 
 =item C<1> -- the run failed: the engine, a tool or the network raised an
 error (with a machine format, the output is the C<failed> document).
@@ -46,10 +47,17 @@ error (with a machine format, the output is the C<failed> document).
 =item C<2> -- usage error: unknown option, a C<-o> that is not
 C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
 machine format, a machine format with C<-i>, or an unknown machine format
-version.
+version; for sessions: a C<--session> value that is no session id,
+more than one of C<--session>, C<--continue> and C<--no-session>, an unknown
+session, or C<--continue> without any session.
 
 =item C<3> -- configuration error: F<.raider.yml> cannot be read, the
 engine is unknown, or a pack detection rule is invalid.
+
+=item C<4> -- the session to continue (C<--session>, C<--continue>,
+C<session resume>) is in use: another raider has it open for writing and
+holds its lock. Unlike a usage error the same command can work later, which
+is why it has a status of its own.
 
 =item C<130>, C<143> -- a one-shot run was interrupted by C<SIGINT> or
 C<SIGTERM>. It writes the C<interrupted> document (or a note), then dies of
@@ -64,10 +72,11 @@ two-strike Ctrl-C leaves with C<0>.
 =cut
 
 use constant {
-  EXIT_OK        => 0,
-  EXIT_RUN_ERROR => 1,
-  EXIT_USAGE     => 2,
-  EXIT_CONFIG    => 3,
+  EXIT_OK             => 0,
+  EXIT_RUN_ERROR      => 1,
+  EXIT_USAGE          => 2,
+  EXIT_CONFIG         => 3,
+  EXIT_SESSION_IN_USE => 4,
 };
 
 # The machine output flags (ADR 0013): flag => [ format, stream ].
@@ -118,6 +127,7 @@ sub machine_class { 'Langertha::Raider::CLI::Machine' }
 sub repl_class    { 'Langertha::Raider::CLI::REPL' }
 sub runner_class  { 'Langertha::Raider::CLI::Runner' }
 sub session_store_class { 'Langertha::Raider::SessionStore' }
+sub sessions_class { 'Langertha::Raider::CLI::Sessions' }
 sub skill_class   { 'Langertha::Raider::Skill' }
 
 sub _warn {
@@ -143,7 +153,10 @@ The C<--help> text.
 
 sub usage { <<'USAGE' }
 Usage: raider [options] [prompt...]
-       raider config explain [options]   show each setting and its source
+       raider config explain [options]     show each setting and its source
+       raider session list [options]       the project's sessions, newest first
+       raider session show ID [--json]     one session, event by event
+       raider session resume ID [options]  continue a session in the REPL
 
 Options:
   -e, --engine NAME        anthropic, openai, deepseek, groq, mistral, gemini,
@@ -178,6 +191,9 @@ Options:
       --stream-yaml[=N]    The same events as YAML documents
       --no-session         Do not record the run(s) in a session journal
                            (default: a new one in .raider/sessions/)
+      --session ID         Continue session ID: its conversation is replayed
+                           and the run(s) recorded in it (one-shot or REPL)
+      --continue           The same with the newest session of the project
       --max-iterations N   Hard safety cap on tool rounds per raid
                            (default: 10000 — effectively unlimited)
       --no-color           Disable ANSI colors
@@ -206,7 +222,7 @@ Options:
 If no prompt is given and not interactive, reads the prompt from STDIN.
 
 Exit status: 0 success, 1 the run failed, 2 usage error,
-3 configuration error.
+3 configuration error, 4 the session is in use.
 USAGE
 
 =method parse_options
@@ -260,11 +276,24 @@ sub parse_options {
       'export-skill:s'        => \$opt{export_skill},
       'export-claude-skill:s' => \$opt{export_claude_skill},
       'no-session'            => \$opt{no_session},
+      'session=s'             => \$opt{session},
+      'continue'              => \$opt{continue},
       'h|help'                => \$opt{help},
     );
   };
   unless ($ok) {
     $self->_warn("Bad options. Try --help.\n");
+    return;
+  }
+
+  if (defined $opt{session} && !$self->session_store_class->is_id($opt{session})) {
+    $self->_warn("--session: not a session id: '".$opt{session}."'\n");
+    return;
+  }
+  my @session_flags = grep { $opt{ $_->[0] } } [ session => '--session' ], [ continue => '--continue' ],
+    [ no_session => '--no-session' ];
+  if (@session_flags > 1) {
+    $self->_warn(join(', ', map { $_->[1] } @session_flags).": only one of them at a time\n");
     return;
   }
 
@@ -365,14 +394,36 @@ sub run {
     }
   }
 
+  # raider session list | show ID | resume ID [options]. Only these words
+  # make the subcommand; any other prompt starting with "session" (raider
+  # session is lost?) stays a prompt.
+  my ( $session_cmd, $session_id );
+  if (!$config_cmd && @argv >= 2 && $argv[0] eq 'session' && $argv[1] =~ /\A(?:list|show|resume)\z/) {
+    ( undef, $session_cmd ) = splice @argv, 0, 2;
+  }
+
   my ( $opt, @prompt ) = $self->parse_options(@argv) or return EXIT_USAGE;
 
   # Behind options (raider -e openai config explain) only the exact words
   # "config explain" are the subcommand; any other prompt starting with
-  # "config" stays a prompt.
+  # "config" stays a prompt. The same for "session list" and "session
+  # show|resume ID" with a word shaped like a session id.
   if (!$config_cmd && @prompt == 2 && $prompt[0] eq 'config' && $prompt[1] eq 'explain') {
     $config_cmd = 'explain';
     @prompt = ();
+  }
+  if (!$config_cmd && !$session_cmd && @prompt >= 2 && $prompt[0] eq 'session'
+      && ( (@prompt == 2 && $prompt[1] eq 'list')
+        || (@prompt == 3 && $prompt[1] =~ /\A(?:show|resume)\z/ && $self->session_store_class->is_id($prompt[2])) )) {
+    ( undef, $session_cmd ) = splice @prompt, 0, 2;
+  }
+  if ($session_cmd) {
+    my $wants_id = $session_cmd ne 'list';
+    $session_id = shift @prompt if $wants_id;
+    if (@prompt || ($wants_id && !$self->session_store_class->is_id($session_id))) {
+      $self->_warn("Usage: raider session list | show ID | resume ID [options]\n");
+      return EXIT_USAGE;
+    }
   }
 
   $ENV{ANSI_COLORS_DISABLED} = 1 if $opt->{no_color} || $opt->{machine};
@@ -380,6 +431,20 @@ sub run {
   if ($opt->{help}) {
     $self->output->emit($self->usage);
     return EXIT_OK;
+  }
+
+  if ($session_cmd && $session_cmd ne 'resume') {
+    return $self->session_command($session_cmd, $session_id, $opt);
+  }
+  if ($session_cmd) {
+    # resume ID is the REPL on that session.
+    for my $flag (grep { $opt->{$_->[0]} } [ machine => 'a machine output format' ],
+        [ session => '--session' ], [ continue => '--continue' ], [ no_session => '--no-session' ]) {
+      $self->_warn('raider session resume: not with '.$flag->[1]."\n");
+      return EXIT_USAGE;
+    }
+    $opt->{session} = $session_id;
+    $opt->{interactive} = 1;
   }
 
   my %args = $self->app_args($opt);
@@ -471,6 +536,14 @@ sub run {
   $runner = $self->runner_class->new(app => $app, output => $self->output);
   my $store = $opt->{no_session} ? undef : $self->session_store_class->new(root => $app->root);
 
+  # --session ID, --continue, session resume ID: the session is locked
+  # and replayed before anything runs.
+  my ( $session, @notes );
+  if (defined $opt->{session} || $opt->{continue}) {
+    ( my $exit, $session, @notes ) = $self->resume_session($store, $opt->{session}, $app);
+    return $exit if defined $exit;
+  }
+
   if ($interactive) {
     my %seen;
     $self->repl_class->new(
@@ -482,6 +555,8 @@ sub run {
       active_profiles  => [ grep { !$seen{$_}++ } @cli_profiles, $config->profiles($app->engine_name) ],
       saved_profiles   => \%saved_now,
       customize_prompt => $opt->{customize_prompt} ? 1 : 0,
+      $session ? ( session => $session ) : (),
+      notes            => \@notes,
     )->run(@prompt);
     return EXIT_OK;
   }
@@ -502,9 +577,92 @@ sub run {
     $self->_warn("No prompt given.\n");
     return EXIT_USAGE;
   }
-  my $session = $store ? $self->new_session($store, $machine) : undef;
+  if ($session) {
+    $self->_warn($_."\n") for @notes;
+  }
+  elsif ($store) {
+    $session = $self->new_session($store, $machine);
+  }
   return $runner->run_prompt($text, machine => $machine, session => $session, catch_signals => 1)
     ? EXIT_OK : EXIT_RUN_ERROR;
+}
+
+=method resume_session
+
+    my ( $exit, $session, @notes ) = $main->resume_session($store, $id, $app);
+
+Opens session C<$id> (the newest one of the project when C<undef>, for
+C<--continue>) for writing and replays it into the app's raider through
+L<Langertha::Raider::CLI::Sessions/restore>. Returns C<undef>, the
+L<Langertha::Raider::Session> and the notes of the resume -- or, after
+reporting why, just the exit status: C<2> when there is no such session,
+C<4> when another raider has it open, C<1> when it cannot be opened or
+replayed otherwise.
+
+=cut
+
+sub resume_session {
+  my ( $self, $store, $id, $app ) = @_;
+  $id //= $store->latest;
+  unless (defined $id) {
+    $self->_warn('no session to continue in '.$store->dir."\n");
+    return EXIT_USAGE;
+  }
+  unless ($store->exists($id)) {
+    $self->_warn('unknown session '.$id."\n");
+    return EXIT_USAGE;
+  }
+  my $session = eval { $store->open($id) };
+  unless ($session) {
+    my $error = $self->output->error_text($@);
+    $self->_warn($error.($error =~ / is in use\z/ ? ' by another raider' : '')."\n");
+    return $error =~ / is in use\z/ ? EXIT_SESSION_IN_USE : EXIT_RUN_ERROR;
+  }
+  my @notes = eval {
+    $self->sessions_class->new(store => $store, output => $self->output)->restore($app->raider, $session);
+  };
+  if ($@) {
+    my $error = $self->output->error_text($@);
+    $self->_warn('cannot resume session '.$id.': '.$error."\n");
+    return EXIT_RUN_ERROR;
+  }
+  return ( undef, $session, @notes );
+}
+
+=method session_command
+
+    my $exit = $main->session_command(list => undef, $opt);
+    my $exit = $main->session_command(show => $id, $opt);
+
+C<raider session list> and C<raider session show ID> for the project in
+C<-r> (or the working directory), through
+L<Langertha::Raider::CLI::Sessions>; a document format (C<--json>,
+C<--msgpack>, C<--yaml>) writes them as one document.
+
+=cut
+
+sub session_command {
+  my ( $self, $cmd, $id, $opt ) = @_;
+  my $machine;
+  if (my $m = $opt->{machine}) {
+    if ($m->{stream}) {
+      $self->_warn('raider session '.$cmd.": no --stream-* output, only a document\n");
+      return EXIT_USAGE;
+    }
+    $machine = $self->machine_class->new(%$m, out => $self->output->out);
+  }
+  my $store = $self->session_store_class->new(root => $opt->{root} // Path::Tiny->cwd->stringify);
+  my $sessions = $self->sessions_class->new(store => $store, output => $self->output);
+  if ($cmd eq 'list') {
+    $sessions->list($machine);
+    return EXIT_OK;
+  }
+  unless ($store->exists($id)) {
+    $self->_warn('unknown session '.$id."\n");
+    return EXIT_USAGE;
+  }
+  $sessions->show($id, $machine);
+  return EXIT_OK;
 }
 
 =method new_session
@@ -521,8 +679,7 @@ sub new_session {
   my ( $self, $store, $machine ) = @_;
   my $session = eval { $store->create };
   unless ($session) {
-    my $error = $@;
-    $error =~ s/ at \S+ line \d+\.?\n\z//;
+    my $error = $self->output->error_text($@);
     $self->_warn('session not saved: '.$error."\n");
     return;
   }

@@ -641,6 +641,25 @@ persisted messages into a fresh Raider instance.
 
 =cut
 
+sub add_session_history {
+  my ( $self, @entries ) = @_;
+  $self->_push_session_history(@entries);
+  return $self;
+}
+
+=method add_session_history
+
+    $raider->add_session_history(
+      { role => 'user', content => 'Hello' },
+      { role => 'tool', name => 'bash', content => 'README.md' },
+    );
+
+Appends entries to C<session_history>, keeping the session embeddings in
+step. Useful for replaying a persisted session into a fresh Raider
+instance; C<history> is replayed separately with C<add_history>.
+
+=cut
+
 sub inject {
   my ( $self, @messages ) = @_;
   push @{$self->_injections}, @messages;

@@ -187,6 +187,39 @@ sub history_messages {
     grep { $_->{type} eq 'message' && $answered{ $_->{run} // '' } } @{ $self->events } ];
 }
 
+=method session_history_messages
+
+The full history to rebuild on resume, from all events, in the shapes
+L<Langertha::Raider/session_history> renders: a C<message> as
+C<< { role, content } >>, a C<tool.call> as an assistant C<tool_use>
+block, a C<tool.result> as C<< { role => 'tool', name, content } >>, and
+for a call without result an entry saying its outcome is unknown.
+
+=cut
+
+sub session_history_messages {
+  my ( $self ) = @_;
+  my %unknown = map { ($_->{run} // '').' '.($_->{call} // '') => 1 } @{ $self->unknown_calls };
+  my @entries;
+  for my $e (@{ $self->events }) {
+    if ($e->{type} eq 'message') {
+      push @entries, { role => $e->{role}, content => $e->{content} };
+    }
+    elsif ($e->{type} eq 'tool.call') {
+      push @entries, { role => 'assistant', content => [ {
+        type => 'tool_use', id => $e->{call}, name => $e->{name}, input => $e->{arguments},
+      } ] };
+      push @entries, { role => 'tool', name => $e->{name},
+        content => 'unknown: no result was recorded, the call is not run again' }
+        if $unknown{ ($e->{run} // '').' '.($e->{call} // '') };
+    }
+    elsif ($e->{type} eq 'tool.result') {
+      push @entries, { role => 'tool', name => $e->{name}, content => $e->{content} };
+    }
+  }
+  return \@entries;
+}
+
 __PACKAGE__->meta->make_immutable;
 
 1;

@@ -108,6 +108,24 @@ sub say_agent { $_[0]->emit($_[0]->c(agent => $_[0]->render_inline_code($_[1])),
 sub say_meta  { $_[0]->emit($_[0]->c(meta => $_[1]), "\n") }
 sub say_error { $_[0]->emit($_[0]->c(err => 'error: '), $_[0]->c(warn => $_[1]), "\n") }
 
+=method error_text
+
+    my $text = $out->error_text($@);
+
+An exception as one line for the user: without the trailing newline and
+the Perl source location C<croak> appends, also the form Moose adds for a
+constructor or accessor.
+
+=cut
+
+sub error_text {
+  my ( $self, $error ) = @_;
+  $error = "$error";
+  $error =~ s/ at (?:\w+ \S+ \(defined at .+ line \d+\)|(?:(?! at ).)+) line \d+\.?\n?\z//s;
+  chomp $error;
+  return $error;
+}
+
 =method render_inline_code
 
 Wraps C<`...`> spans in a darker background when colors are on. Triple
