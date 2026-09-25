@@ -442,7 +442,11 @@ sub run_logs {
   die "Hall not running (no socket found)\n" unless -e $socket;
 
   return _follow_log($socket, $id) if $opt{follow};
+  return _print_logs($socket, $id);
+}
 
+sub _print_logs {
+  my ( $socket, $id ) = @_;
   my $result = _send_command($socket, {
     type => 'command',
     payload => { cmd => 'logs', id => $id },
@@ -462,7 +466,8 @@ sub _follow_log {
   my ( $socket, $id ) = @_;
   my $attach = { type => 'command', payload => { cmd => 'attach', id => $id } };
   my $result = _send_command($socket, $attach);
-  die "Hall: $result->{error}\n" if $result->{error};
+  # Already ended: nothing to follow, print what the hall still has.
+  return _print_logs($socket, $id) if $result->{error};
   my $log_path = $result->{log_path};
 
   local $| = 1;
@@ -486,8 +491,9 @@ sub print_logs_help {
   print <<"EOF";
 raider hall logs [DIR] ID [--follow]
 
-Fetch logs for a raider. --follow keeps printing new output until the
-raider has exited.
+Fetch logs for a raider, also after its run has ended: the slot log, or
+the run's result when the slot log no longer has it. --follow keeps
+printing new output until the raider has exited.
 EOF
   exit 0;
 }

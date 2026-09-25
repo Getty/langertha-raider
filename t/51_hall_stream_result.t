@@ -251,6 +251,75 @@ subtest 'events files are kept by default, keep_events 0 keeps all' => sub {
   }
 };
 
+subtest 'a large slot log is rotated when the next run starts' => sub {
+  my ( $hall, $tmp ) = fake_hall("logs:\n  max_log_size: 100\n");
+  my $logs = $tmp->child( '.raider-hall', 'logs' );
+  $logs->mkpath;
+  my $log = $logs->child('bjorn.log');
+  $log->spew_utf8( "old run\n" x 20 );
+  $logs->child('bjorn.log.1')->spew_utf8("older\n");
+  my ($done) = run_spawns( $hall, { name => 'bjorn', mission => 'hello' } );
+  is( $logs->child('bjorn.log.1')->slurp_utf8, "old run\n" x 20, 'the full log moved to SLOT.log.1' );
+  unlike( $log->slurp_utf8, qr/old run/, 'the new log starts empty' );
+  like( $log->slurp_utf8, qr/^\[hall\] raider \Q$done->{id}\E completed/m, 'and holds the new run' );
+
+  $log->spew_utf8("small\n");
+  run_spawns( $hall, { name => 'bjorn', mission => 'hello' } );
+  like( $log->slurp_utf8, qr/^small$/m, 'a log under the limit stays' );
+  is( $logs->child('bjorn.log.1')->slurp_utf8, "old run\n" x 20, 'SLOT.log.1 untouched' );
+};
+
+subtest 'no rotation while a raider of the slot still writes the log' => sub {
+  my ( $hall, $tmp ) = fake_hall("logs:\n  max_log_size: 10\n");
+  my $logs = $tmp->child( '.raider-hall', 'logs' );
+  $logs->mkpath;
+  $logs->child('bjorn.log')->spew_utf8( "busy\n" x 10 );
+  $hall->raiders->{bjorn} = Langertha::Raider::Hall::Raider->new(
+    id => 'bjorn-1', slot_name => 'bjorn', base_name => 'bjorn', mission => 'm',
+    log_path => $logs->child('bjorn.log') );
+  $hall->_rotate_log('bjorn');
+  ok( !$logs->child('bjorn.log.1')->exists, 'occupied slot: not rotated' );
+  delete $hall->raiders->{bjorn};
+  $hall->_rotate_log('bjorn');
+  ok( $logs->child('bjorn.log.1')->exists, 'free slot: rotated' );
+};
+
+subtest 'max_log_size: default and 0' => sub {
+  my ( $hall ) = fake_hall();
+  is( $hall->max_log_size, 1024 * 1024, 'default 1 MiB' );
+  my ( $off, $tmp ) = fake_hall("logs:\n  max_log_size: 0\n");
+  my $logs = $tmp->child( '.raider-hall', 'logs' );
+  $logs->mkpath;
+  $logs->child('bjorn.log')->spew_utf8( 'x' x 5000 );
+  $off->_rotate_log('bjorn');
+  ok( !$logs->child('bjorn.log.1')->exists, '0 never rotates' );
+};
+
+subtest 'logs ID after the run ended' => sub {
+  my ( $hall, $tmp ) = fake_hall();
+  my ($done) = run_spawns( $hall, { name => 'bjorn', mission => 'hello' } );
+  my $res = $hall->logs( id => $done->{id} );
+  ok( !$res->{error}, 'found after the raider left the table' );
+  like( $res->{log}, qr/some diagnostic noise/, 'the slot log' );
+  like( $res->{log}, qr/^\[hall\] raider \Q$done->{id}\E completed: answer: hello$/m, 'with its result line' );
+
+  my ($two) = run_spawns( $hall, { name => '1ivar', mission => 'alpha' } );
+  my $logs = $tmp->child( '.raider-hall', 'logs' );
+  $logs->child('1ivar.log')->remove;
+  is( $hall->logs( id => $two->{id} )->{log},
+    '[hall] raider '.$two->{id}.' completed: answer: alpha'."\n",
+    'no slot log: the result from the events file' );
+
+  $logs->child('bjorn-7.events.jsonl')->spew_utf8("\n");
+  $logs->child('bjorn-7.2.events.jsonl')->spew_utf8("\n");
+  ok( !$hall->logs( id => 'bjorn-7.2' )->{error}, 'SLOT-TIME.N resolves to its slot' );
+  like( $hall->logs( id => 'bjorn-7.2' )->{log}, qr/answer: hello/, 'and shows the slot log' );
+
+  for my $id ( 'bjorn-8', 'nope-1', 'bjorn', '../bjorn-7', 'x/../bjorn-7', '' ) {
+    is( $hall->logs( id => $id ), { error => 'raider not found' }, 'unknown: '.$id );
+  }
+};
+
 {
   package CaptureStream;
   sub new { bless { lines => [] }, shift }

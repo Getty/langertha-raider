@@ -52,7 +52,12 @@ characters, so C<raider hall logs> shows the outcome.
 
 Run IDs are C<SLOT-TIME>, with C<.2>, C<.3>, ... appended when a run of the
 same slot started in the same second. Only the newest L</keep_events>
-events files per slot are kept.
+events files per slot are kept. A slot log larger than L</max_log_size> is
+moved to F<SLOT.log.1> when the next run of the slot starts.
+
+C<raider hall logs ID> works for ended runs too: the slot is taken from the
+ID, and the answer is the slot log, or the result line built from the run's
+events file when the slot log no longer carries it.
 
 =head1 CONFIG FILE
 
@@ -69,7 +74,7 @@ C<.raider-hall.yml> in the hall root:
       bots:
         ops: { token: '...', allowlist: [42], routing: { '*': lagertha } }
     acp: { port: 38421, host: 127.0.0.1 }
-    logs: { keep_events: 20 }
+    logs: { keep_events: 20, max_log_size: 1048576 }
 
 C<engine> on a raider entry is optional. Without it the hall passes no
 C<--engine> and the spawned raider decides itself: the engine from its
@@ -519,14 +524,19 @@ sub _reap_raider {
 # from the last run.finished event of the run. Without one (killed, crashed
 # before it could write it) the run counts as failed, with an error that
 # says so instead of whatever text the process left behind.
+sub _result_of {
+  my ($self, $doc) = @_;
+  return {
+    status => $doc->{status} // 'failed',
+    defined $doc->{response} ? ( response => $doc->{response} ) : (),
+    defined $doc->{error}    ? ( error    => $doc->{error} )    : (),
+  };
+}
+
 sub _raider_result {
   my ($self, $raider, $status) = @_;
   if (my $doc = $raider->run_finished) {
-    return {
-      status => $doc->{status} // 'failed',
-      defined $doc->{response} ? ( response => $doc->{response} ) : (),
-      defined $doc->{error}    ? ( error    => $doc->{error} )    : (),
-    };
+    return $self->_result_of($doc);
   }
   my $how = ($status & 127) ? 'killed by signal '.($status & 127)
                             : 'exit code '.($status >> 8);
@@ -541,11 +551,15 @@ sub _raider_result {
 # full response stays in raider.done and the events file.
 sub _log_result {
   my ($self, $raider, $result) = @_;
+  $raider->log_path->append_utf8($self->_result_line($raider->id, $result));
+}
+
+sub _result_line {
+  my ($self, $id, $result) = @_;
   my $text = $result->{status} eq 'completed' ? $result->{response} : $result->{error};
   $text = join ' ', split ' ', $text // '';
   $text = substr($text, 0, 300).'...' if length $text > 300;
-  $raider->log_path->append_utf8(
-    '[hall] raider '.$raider->id.' '.$result->{status}.': '.$text."\n");
+  return '[hall] raider '.$id.' '.$result->{status}.': '.$text."\n";
 }
 
 =attr keep_events
@@ -553,7 +567,7 @@ sub _log_result {
 How many F<SLOT-TIME.events.jsonl> files the hall keeps per slot; older ones
 are removed when a run of that slot ends. From C<logs: { keep_events: N }>
 in F<.raider-hall.yml>, default 20; 0 keeps all of them. Slot logs
-(F<SLOT.log>) are not pruned.
+(F<SLOT.log>) are not pruned; see L</max_log_size>.
 
 =cut
 
@@ -569,7 +583,38 @@ sub _build_keep_events {
   return $logs->{keep_events} // 20;
 }
 
+=attr max_log_size
+
+Size in bytes above which a slot log F<SLOT.log> is moved to F<SLOT.log.1>
+(replacing an older one) when the next run of that slot starts -- never
+while a raider of the slot is still writing it. From
+C<logs: { max_log_size: N }> in F<.raider-hall.yml>, default 1048576
+(1 MiB); 0 never rotates.
+
+=cut
+
+has max_log_size => (
+  is => 'ro',
+  lazy => 1,
+  builder => '_build_max_log_size',
+);
+
+sub _build_max_log_size {
+  my ($self) = @_;
+  my $logs = $self->config->{logs} // {};
+  return $logs->{max_log_size} // 1024 * 1024;
+}
+
 sub _log_dir { $_[0]->root->child('.raider-hall', 'logs') }
+
+sub _rotate_log {
+  my ($self, $slot) = @_;
+  my $max = $self->max_log_size;
+  return unless $max > 0 && !$self->raiders->{$slot};
+  my $log = $self->_log_dir->child("${slot}.log");
+  return unless -f $log && -s $log > $max;
+  $log->move($self->_log_dir->child("${slot}.log.1"));
+}
 
 sub _prune_events {
   my ($self, $slot) = @_;
@@ -668,6 +713,7 @@ sub _spawn_raider {
   # stdout is the event stream, a fresh file per run. The ID is SLOT-TIME,
   # SLOT-TIME.2 and up when that one is taken in the same second; touching
   # the file reserves it before the child opens it.
+  $self->_rotate_log($slot);
   my $log_path = $log_dir->child("${slot}.log");
   my $id = my $base_id = "$slot-" . time;
   my $n = 1;
@@ -799,20 +845,46 @@ sub kill_raider {
   return { error => 'raider not found' };
 }
 
+=method logs
+
+    my $res = $hall->logs(id => $id);   # { log => $text } or { error => ... }
+
+The slot log of a running raider. For an ended run the slot comes from the
+ID (C<SLOT-TIME> or C<SLOT-TIME.N>); the run counts as known while its
+events file or its result line in the slot log is there. The answer is the
+slot log, followed by the result line from the events file when the slot
+log does not carry it (rotated or removed).
+
+=cut
+
 sub logs {
   my ($self, %args) = @_;
-  my $id = $args{id};
-  my $slot;
-  if ($id) {
-    for my $s (keys %{$self->raiders}) {
-      $slot = $s if $self->raiders->{$s}->id eq $id;
-    }
+  my $id = $args{id} // '';
+  for my $r (values %{$self->raiders}) {
+    next unless $r->id eq $id;
+    return { log => -f $r->log_path ? $r->log_path->slurp_utf8 : '' };
   }
-  return { error => 'raider not found' } unless $slot;
+  return $self->_ended_logs($id);
+}
 
-  my $log_path = $self->raiders->{$slot}->log_path;
-  return { log => '' } unless -f $log_path;
-  return { log => $log_path->slurp_utf8 };
+sub _ended_logs {
+  my ($self, $id) = @_;
+  my $missing = { error => 'raider not found' };
+  # The ID names files in the log dir: no path parts, no leading dot.
+  return $missing unless $id =~ /\A([^\/.][^\/]*)-\d+(?:\.\d+)?\z/;
+  my $slot = $1;
+  my $dir = $self->_log_dir;
+  my $log_path = $dir->child("${slot}.log");
+  my $log = -f $log_path ? $log_path->slurp_utf8 : '';
+  my $logged = index($log, '[hall] raider '.$id.' ') >= 0;
+  my $events = $dir->child("${id}.events.jsonl");
+  return $missing unless $logged || -f $events;
+  return { log => $log } if $logged;
+  my $doc = Langertha::Raider::Hall::Raider->new(
+    id => $id, slot_name => $slot, base_name => $slot, mission => '',
+    log_path => $log_path, events_path => $events,
+  )->run_finished;
+  return { log => $log.( $doc ? $self->_result_line($id, $self->_result_of($doc)) : '' ) };
 }
 
 sub shutdown {

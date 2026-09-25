@@ -140,6 +140,30 @@ subtest 'logs --follow streams until the raider is gone' => sub {
   }
 };
 
+subtest 'logs --follow on a finished raider prints its logs' => sub {
+  my $tmp = path( tempdir( CLEANUP => 1 ) );
+  $tmp->child('.raider-hall.socket')->touch;
+  chdir "$tmp" or die "chdir $tmp: $!";
+  my @sent;
+  no warnings 'redefine';
+  local *Langertha::Raider::Hall::CLI::_send_command = sub {
+    my ( $socket, $msg ) = @_;
+    push @sent, $msg->{payload};
+    return $msg->{payload}{cmd} eq 'logs'
+      ? { log => "done log\n" } : { error => 'raider not found' };
+  };
+  local *Langertha::Raider::Hall::CLI::_follow_wait = sub { die "must not wait\n" };
+  my $out = '';
+  {
+    local *STDOUT;
+    open STDOUT, '>', \$out or die $!;
+    Langertha::Raider::Hall::CLI->main( 'logs', '--follow', 'r42' );
+  }
+  chdir $orig_cwd or die "chdir $orig_cwd: $!";
+  is( $out, "done log\n", 'the logs of the ended run' );
+  is( [ map { $_->{cmd} } @sent ], [ 'attach', 'logs' ], 'attach, then logs' );
+};
+
 subtest 'kill: ID after --' => sub {
   my $p = run_cmd( 'kill', '--', 'r42' );
   is( $p, { cmd => 'kill', id => 'r42' }, 'kill -- r42' );
