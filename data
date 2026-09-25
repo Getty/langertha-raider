@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-25T04:59:26Z
+claimed_by: worker-session-hall
+class: standard
+completed: 2026-09-25T04:59:26Z
+created: 2026-09-25T04:29:12Z
+id: 71
+priority: medium
+started: 2026-09-25T04:29:28Z
+status: done
+tags:
+- hall
+- sessions
+title: 'Hall: Eingaben pro Session-Bindung einreihen statt an Lock scheitern'
+updated: 2026-09-25T04:59:26Z
+---
+
+Aus #68: zwei schnelle Telegram-Nachrichten im selben Chat an einen unnummerierten Namen laufen parallel, die zweite scheitert am Session-Lock und die Nachricht geht verloren. ADR 0003 sagt "New input is queued" -> Queue pro Bindung (analog Singleton-Queue), Lock-Fehler bleibt nur Notbremse.
