@@ -109,14 +109,18 @@ A run that failed:
 
     { "elapsed" : 0, "error" : "...", "status" : "failed", "version" : 1 }
 
+A run stopped by C<SIGINT> or C<SIGTERM> (see L</EXIT STATUS>):
+
+    { "elapsed" : 5, "signal" : "TERM", "status" : "interrupted", "version" : 1 }
+
 =over
 
 =item C<version> -- integer, the format version (see below).
 
-=item C<status> -- how the run ended: C<completed> or C<failed>. These are
-the run states of the redesign (ADR 0009) that end a run and that the CLI
-can produce today; C<cancelled>, C<refused> and C<interrupted> are reserved
-for when it can.
+=item C<status> -- how the run ended: C<completed>, C<failed> or
+C<interrupted>. These are the run states of the redesign (ADR 0009) that
+end a run and that the CLI can produce today; C<cancelled> and C<refused>
+are reserved for when it can.
 
 =item C<response> -- the agent's final answer (C<completed> only).
 
@@ -124,6 +128,9 @@ for when it can.
 C<iterations>, C<tool_calls>, C<time_ms> (C<completed> only).
 
 =item C<error> -- the error message (C<failed> only).
+
+=item C<signal> -- the signal that stopped the run, C<INT> or C<TERM>
+(C<interrupted> only).
 
 =item C<elapsed> -- seconds the run took.
 
@@ -217,6 +224,12 @@ machine output flag, or an unknown format version.
 
 =item C<3> -- configuration error: F<.raider.yml> cannot be read, or the
 engine is unknown.
+
+=item C<130>, C<143> -- a one-shot run was interrupted by C<SIGINT> or
+C<SIGTERM>. F<raider> writes the C<interrupted> document (or its events,
+or a note), then dies of that same signal, so a shell reports 128 plus
+the signal number and a parent that waits for it sees a process killed
+by the signal.
 
 =back
 

@@ -3,6 +3,9 @@ package Langertha::Raider::CLI::Runner;
 our $VERSION = '0.503';
 use Moose;
 use namespace::autoclean;
+use Config;
+use IO::Handle;
+use POSIX qw( sigprocmask SIG_UNBLOCK );
 
 =head1 SYNOPSIS
 
@@ -46,11 +49,14 @@ has output => (
 
 =method run_prompt
 
-    my $ok = $runner->run_prompt($text, machine => $machine);
+    my $ok = $runner->run_prompt($text, machine => $machine, catch_signals => 1);
 
 Returns true when the run finished, false when it failed (the error is
 printed, or with C<machine> is the C<failed> document). An empty prompt runs
 nothing and counts as finished.
+
+With C<catch_signals>, a C<SIGINT> or C<SIGTERM> during the run ends it as
+C<interrupted>: see L</interrupt>.
 
 =cut
 
@@ -59,15 +65,20 @@ sub run_prompt {
   return 1 unless defined $text && length $text;
   my $app = $self->app;
   my $out = $self->output;
-
   my $machine = $o{machine};
+  my $t0 = time;
+
+  # Handled right in the signal handler: a die from it would be swallowed
+  # by whichever eval the run happens to be in (LWP, the raid loop).
+  local $SIG{INT}  = $o{catch_signals} ? sub { $self->interrupt(INT  => $machine, time - $t0) } : $SIG{INT};
+  local $SIG{TERM} = $o{catch_signals} ? sub { $self->interrupt(TERM => $machine, time - $t0) } : $SIG{TERM};
+
   if ($machine) {
     $machine->event('run.started', engine => $app->engine_name,
       $app->has_model ? ( model => $app->model ) : ());
     $machine->event('run.state', state => 'running');
   }
 
-  my $t0 = time;
   my $result;
   my $ok = eval { $result = $app->run($text); 1 };
   my $elapsed = time - $t0;
@@ -99,6 +110,54 @@ sub run_prompt {
   $out->say_meta(sprintf('%ds | history %d msgs, %d/%d tok (%d%%)%s',
     $elapsed, $msgs, $last, $cap, $pct, $tok_part));
   return 1;
+}
+
+=method interrupt
+
+    $runner->interrupt(TERM => $machine, $elapsed);
+
+Ends a run interrupted by the signal: prints a note, or with a C<machine>
+writes the C<interrupted> state change and document (with the C<signal>),
+then dies of that same signal through L</die_of_signal>.
+
+=cut
+
+sub interrupt {
+  my ( $self, $signal, $machine, $elapsed ) = @_;
+  # A second signal must not cut the document short.
+  local $SIG{INT}  = 'IGNORE';
+  local $SIG{TERM} = 'IGNORE';
+  if ($machine) {
+    $self->_finish_machine($machine, interrupted => signal => $signal, elapsed => $elapsed);
+  }
+  else {
+    $self->output->say_meta('interrupted (SIG'.$signal.')');
+    $self->output->out->flush;
+  }
+  return $self->die_of_signal($signal);
+}
+
+=method die_of_signal
+
+    $runner->die_of_signal('TERM');
+
+Ends the process by the signal, restored to its default action: the parent
+sees a process killed by that signal (a shell reports 130 for C<INT>, 143
+for C<TERM>; the Hall records the raider as C<signaled>). Should the
+process survive it, it exits with 128 plus the signal number.
+
+=cut
+
+sub die_of_signal {
+  my ( $self, $signal ) = @_;
+  my %number;
+  @number{ split ' ', $Config{sig_name} } = split ' ', $Config{sig_num};
+  $SIG{$signal} = 'DEFAULT';
+  # Perl blocks the signal while its handler runs; unblocked, the signal
+  # takes effect right here instead of after exit has restored the handler.
+  sigprocmask(SIG_UNBLOCK, POSIX::SigSet->new($number{$signal}));
+  kill $signal => $$;
+  exit 128 + $number{$signal};
 }
 
 # The last state change and the document; true for a completed run.

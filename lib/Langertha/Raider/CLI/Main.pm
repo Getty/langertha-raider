@@ -48,10 +48,14 @@ machine format, or an unknown machine format version.
 =item C<3> -- configuration error: F<.raider.yml> cannot be read, the
 engine is unknown, or a pack detection rule is invalid.
 
+=item C<130>, C<143> -- a one-shot run was interrupted by C<SIGINT> or
+C<SIGTERM>. It writes the C<interrupted> document (or a note), then dies of
+that same signal, which a shell reports as 128 plus the signal number; see
+L<Langertha::Raider::CLI::Runner/die_of_signal>.
+
 =back
 
-The C<hall> and C<acp> subcommands keep their own exit statuses. An
-interrupted one-shot run dies of the signal as usual. The REPL's
+The C<hall> and C<acp> subcommands keep their own exit statuses. The REPL's
 two-strike Ctrl-C leaves with C<0>.
 
 =cut
@@ -473,7 +477,7 @@ sub run {
     return EXIT_USAGE;
   }
   my $runner = $self->runner_class->new(app => $app, output => $self->output);
-  return $runner->run_prompt($text, machine => $machine) ? EXIT_OK : EXIT_RUN_ERROR;
+  return $runner->run_prompt($text, machine => $machine, catch_signals => 1) ? EXIT_OK : EXIT_RUN_ERROR;
 }
 
 __PACKAGE__->meta->make_immutable;
