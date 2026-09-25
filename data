@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-25T03:04:14Z
+claimed_by: worker-cli3
+class: standard
+completed: 2026-09-25T03:04:14Z
+created: 2026-09-25T02:55:57Z
+id: 63
+priority: low
+started: 2026-09-25T02:56:06Z
+status: done
+tags:
+- cli
+- signals
+title: 'REPL: Ctrl-C laesst evtl. bash-Befehle zurueck (ungetestet)'
+updated: 2026-09-25T03:04:14Z
+---
+
+Aus #61: Ohne catch-signals leitet MCP::Run::Bash nur unbelegte Signale weiter; ob die Zwei-Stufen-Ctrl-C-Behandlung der REPL laufende bash-Befehle hinterlaesst, ist ungetestet. Reproduzieren (PTY noetig?) und ggf. terminate_children nutzen.
