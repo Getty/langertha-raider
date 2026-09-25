@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-25T16:25:12Z
+claimed_by: worker-app
+class: standard
+completed: 2026-09-25T16:25:12Z
+created: 2026-09-25T16:07:23Z
+id: 80
+priority: medium
+started: 2026-09-25T16:25:12Z
+status: done
+tags:
+- hall
+- acp
+- runtime
+title: 'Cancel eskalieren: Hall session/cancel nach Frist TERM; von terminate_children
+  beendetes Tool als cancelled melden'
+updated: 2026-09-25T16:25:12Z
+---
+
+Aus #79: (1) Blockierender synchroner Embedding-Request (#24) haelt SIGINT-Cancel auf; Hall-Raider nach session/cancel haengt bis Request zurueck, frueher TERM sofort. -> Hall eskaliert nach Frist (z.B. 5s, konfigurierbar) auf TERM, danach KILL wie kill_raider. (2) Tool, das terminate_children beendet, kommt als failed statt cancelled ins Journal, weil es vor dem Cancel-Check zurueckkehrt -> Raid markiert Tool-Ergebnisse nach angefordertem Cancel als cancelled.
