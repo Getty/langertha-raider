@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-25T16:07:18Z
+claimed_by: worker-app
+class: standard
+completed: 2026-09-25T16:07:18Z
+created: 2026-09-25T06:00:26Z
+id: 79
+priority: low
+started: 2026-09-25T15:48:33Z
+status: done
+tags:
+- hall
+- acp
+- runtime
+title: ACP session/cancel und Hall-Abbruch ueber Application cancel_run
+updated: 2026-09-25T16:07:18Z
+---
+
+Aus #64: Sobald ACP/Hall Laeufe ueber die Application fuehren, session/cancel und Hall-Abbruch ueber cancel_run statt TERM (Journal: cancelled statt interrupted). Heute laufen Hall-Raider als Subprozesse; TERM bleibt dort korrekt (interrupted). Pruefen, ob ein Cancel-Kanal zum Subprozess (z.B. SIGINT = Turn-Abbruch im One-Shot) sinnvoll ist.
+
+Entscheidung 2026-09-25: SIGINT = Nutzer-Abbruch (One-Shot: cancel, run.finished/Dokument status cancelled, danach Tod am Signal wie #56), SIGTERM = Supervisor-Stopp (interrupted, unveraendert). Hall/ACP session/cancel sendet INT statt TERM; kill_raider bleibt TERM.
