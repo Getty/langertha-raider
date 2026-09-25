@@ -40,7 +40,8 @@ Code reference called as C<< $on_event->($type, %payload) >>. Required.
 C<c2>, ...), C<name>, C<arguments> and C<status> (C<dispatched>).
 
 =item C<tool.result> -- C<call> (the id of its C<tool.call>), C<name>,
-C<status> (C<failed> when the tool reported an error, else C<succeeded>),
+C<status> (C<cancelled> for a call cut off by L<Langertha::Raider/cancel>,
+C<failed> when the tool reported an error, else C<succeeded>),
 C<ok> (the same as a boolean), C<size> (characters of the text) and
 C<content> (the whole text).
 
@@ -83,7 +84,7 @@ async sub plugin_after_tool_call {
   $self->on_event->('tool.result',
     call    => $self->_call_id,
     name    => $name,
-    status  => $ok ? 'succeeded' : 'failed',
+    status  => ref $result eq 'HASH' && $result->{cancelled} ? 'cancelled' : $ok ? 'succeeded' : 'failed',
     ok      => $ok ? JSON::MaybeXS->true : JSON::MaybeXS->false,
     size    => length $text,
     content => $text,

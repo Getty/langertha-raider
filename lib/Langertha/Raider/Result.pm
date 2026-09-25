@@ -26,7 +26,7 @@ use overload
 
 Unified result type returned by L<Langertha::Raider> and the L<Langertha::Raid>
 orchestration nodes.
-Represents one of four high-level outcomes:
+Represents one of five high-level outcomes:
 
 =over 4
 
@@ -37,6 +37,8 @@ Represents one of four high-level outcomes:
 =item * C<pause> - intentionally paused / resumable
 
 =item * C<abort> - explicit stop / error
+
+=item * C<cancelled> - stopped from outside (L<Langertha::Raider/cancel>)
 
 =back
 
@@ -72,7 +74,7 @@ has type => (
 
 =attr type
 
-Result type: C<final>, C<question>, C<pause>, or C<abort>.
+Result type: C<final>, C<question>, C<pause>, C<abort> or C<cancelled>.
 
 =cut
 
@@ -138,6 +140,7 @@ sub is_final    { $_[0]->type eq 'final' }
 sub is_question { $_[0]->type eq 'question' }
 sub is_pause    { $_[0]->type eq 'pause' }
 sub is_abort    { $_[0]->type eq 'abort' }
+sub is_cancelled { $_[0]->type eq 'cancelled' }
 
 =method is_final
 
@@ -154,6 +157,10 @@ Returns true for C<type =E<gt> pause>.
 =method is_abort
 
 Returns true for C<type =E<gt> abort>.
+
+=method is_cancelled
+
+Returns true for C<type =E<gt> cancelled>.
 
 =cut
 
@@ -226,6 +233,15 @@ sub abort {
   );
 }
 
+sub cancelled {
+  my ( $class, $content, %args ) = @_;
+  return $class->new(
+    type    => 'cancelled',
+    content => "$content",
+    %args,
+  );
+}
+
 =method final
 
     my $r = Langertha::Raider::Result->final('ok');
@@ -249,6 +265,12 @@ Constructor helper for pause results.
     my $r = Langertha::Raider::Result->abort('Cannot continue');
 
 Constructor helper for abort results.
+
+=method cancelled
+
+    my $r = Langertha::Raider::Result->cancelled('Cancelled');
+
+Constructor helper for cancelled results.
 
 =cut
 

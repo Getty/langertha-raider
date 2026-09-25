@@ -2,15 +2,18 @@ package Langertha::Raider;
 # ABSTRACT: Autonomous agent with conversation history and MCP tools
 our $VERSION = '0.503';
 use Moose;
+use Future;
 use Future::AsyncAwait;
 use Time::HiRes qw( gettimeofday tv_interval );
 use Carp qw( croak );
 use Module::Runtime qw( use_module );
-use Scalar::Util qw( blessed refaddr );
+use Scalar::Util qw( blessed refaddr weaken );
 use JSON::MaybeXS qw( JSON );
 use MCP::Server;
 use Net::Async::MCP;
+use IO::Async::Handle;
 use IO::Async::Loop;
+use IO::Async::OS;
 use Langertha::Usage;
 use Langertha::Raider::Result;
 use Langertha::RunContext;
@@ -441,6 +444,157 @@ has _continuation => (
   predicate => 'has_continuation',
   clearer => 'clear_continuation',
 );
+
+# A requested cancel (ADR 0009): the flag, and a future completed on the
+# loop that the waits of a raid race against.
+has cancel_requested => (
+  is       => 'ro',
+  isa      => 'Bool',
+  init_arg => undef,
+  default  => 0,
+  writer   => '_set_cancel_requested',
+);
+
+has _cancel_f => (
+  is       => 'rw',
+  init_arg => undef,
+  lazy     => 1,
+  default  => sub { Future->new },
+  clearer  => '_clear_cancel_f',
+);
+
+=method cancel
+
+    $raider->cancel;
+
+Asks the raid in progress to stop (ADR 0009). It stops at its next safe
+point -- before the next model call, before the next tool call -- and a
+model response, tool call or C<raider_wait> it waits for right then is
+abandoned: that future is cancelled, which aborts an HTTP request in
+flight on L<Net::Async::HTTP>. A tool call cut off this way still gets its
+result, marked C<cancelled> (text C<Tool call 'NAME' was cancelled.>,
+C<isError>, C<< cancelled => 1 >>), through C<plugin_after_tool_call>.
+Tool subprocesses are not signalled; that is the caller's to do.
+
+The raid then resolves with a C<cancelled> L<Langertha::Raider::Result>.
+Like a failed raid it adds nothing to L</history>; the tool calls made so
+far stay in L</session_history>.
+
+It only sets a flag and writes a byte to a pipe the event loop watches,
+so it is safe to call from a signal handler: the rest happens on the loop.
+A request made while no raid runs applies to the next one
+(L</clear_cancel> drops it); each raid ends with no request pending
+(L</cancel_requested>).
+
+=attr cancel_requested
+
+True from L</cancel> until the raid it applies to has ended.
+
+=cut
+
+sub cancel {
+  my ( $self ) = @_;
+  return if $self->cancel_requested;
+  $self->_set_cancel_requested(1);
+  # Only once a raid has waited on the loop is there a wait to wake up.
+  syswrite $self->_cancel_wake->{write}, 'c' if $self->_has_cancel_wake;
+  return;
+}
+
+# A pipe on the raid's loop (ADR 0016: one loop): cancel writes to it, and
+# the loop completes the cancel future. A signal alone does not wake the
+# loop: IO::Async::Loop::Poll polls again after EINTR, with the same timeout.
+has _cancel_wake => (
+  is        => 'ro',
+  init_arg  => undef,
+  lazy      => 1,
+  builder   => '_build_cancel_wake',
+  predicate => '_has_cancel_wake',
+);
+
+sub _build_cancel_wake {
+  my ( $self ) = @_;
+  my ( $read, $write ) = IO::Async::OS->pipepair or croak "Raider cancel pipe: $!";
+  $write->blocking(0);
+  weaken(my $weak = $self);
+  my $handle = IO::Async::Handle->new(
+    read_handle   => $read,
+    on_read_ready => sub {
+      sysread $read, my $buffer, 512;
+      my $raider = $weak or return;
+      my $f = $raider->_cancel_f;
+      $f->done if $raider->cancel_requested && !$f->is_ready;
+    },
+  );
+  my $engine = $self->engine;
+  ( ( $engine->can('async_loop') && $engine->async_loop ) || IO::Async::Loop->new )->add($handle);
+  return { write => $write, handle => $handle };
+}
+
+# The cancel pipe leaves the loop with the raider; at global destruction
+# the process ends anyway.
+sub DEMOLISH {
+  my ( $self, $in_global_destruction ) = @_;
+  return if $in_global_destruction || !$self->_has_cancel_wake;
+  my $wake = $self->_cancel_wake;
+  my $handle = $wake->{handle} or return;
+  $handle->loop->remove($handle) if $handle->loop;
+  $handle->close;
+  close $wake->{write} if $wake->{write};
+  return;
+}
+
+# The future $f, or nothing as soon as a cancel is requested: then $f is
+# cancelled.
+sub _until_cancelled {
+  my ( $self, $f ) = @_;
+  $self->_cancel_wake;   # on the loop before the raid waits
+  my $cancel_f = $self->_cancel_f;
+  $cancel_f->done if $self->cancel_requested && !$cancel_f->is_ready;
+  return Future->wait_any($f, $cancel_f->without_cancel);
+}
+
+=method clear_cancel
+
+    $raider->clear_cancel;
+
+Drops a cancel request that no raid has used yet (L</cancel>). Every raid
+does this when it ends.
+
+=cut
+
+sub clear_cancel {
+  my ( $self ) = @_;
+  $self->_set_cancel_requested(0);
+  $self->_clear_cancel_f;
+  return;
+}
+
+# Ends the cancel request when a raid (or respond) has ended.
+sub _end_raid {
+  my ( $self, $f ) = @_;
+  return $f->on_ready(sub { $self->clear_cancel });
+}
+
+# The result of a raid stopped by a cancel, metrics finalized as for abort.
+sub _cancelled_result {
+  my ( $self, $state ) = @_;
+  my $m = $self->metrics;
+  $m->{iterations} += ${ $state->{raid_iterations} };
+  $m->{tool_calls} += ${ $state->{raid_tool_calls} };
+  $m->{time_ms}    += tv_interval($state->{t0}) * 1000;
+  return Langertha::Raider::Result->cancelled('Cancelled');
+}
+
+# The result of a tool call cut off by a cancel.
+sub _cancelled_tool_result {
+  my ( $self, $name ) = @_;
+  return {
+    content   => [{ type => 'text', text => "Tool call '$name' was cancelled." }],
+    isError   => JSON->true,
+    cancelled => 1,
+  };
+}
 
 has tools => (
   is => 'ro',
@@ -1570,7 +1724,12 @@ sub _check_engine_loops {
   return $loop;
 }
 
-async sub raid_f {
+sub raid_f {
+  my ( $self, @messages ) = @_;
+  return $self->_end_raid($self->_raid_f(@messages));
+}
+
+async sub _raid_f {
   my ( $self, @messages ) = @_;
   $self->_check_engine_loops;
   my $engine = $self->active_engine;
@@ -1680,6 +1839,8 @@ async sub _run_raid_loop {
   my $t0               = $state->{t0};
 
   for my $iteration ($start_iteration..$self->max_iterations) {
+    # Safe point: no model call once a cancel is requested.
+    return $self->_cancelled_result($state) if $self->cancel_requested;
     $$raid_iterations++;
 
     # Re-gather tools if catalog/engine changed
@@ -1744,7 +1905,8 @@ async sub _run_raid_loop {
     # Build and send the request
     my $request = $engine->build_tool_chat_request($conversation, $formatted_tools);
 
-    my $response = await $engine->async_request_f($request);
+    my $response = await $self->_until_cancelled($engine->async_request_f($request));
+    return $self->_cancelled_result($state) if $self->cancel_requested;
 
     unless ($response->is_success) {
       die "".(ref $engine)." raid request failed: ".$response->status_line."\n".$response->content;
@@ -1860,6 +2022,8 @@ async sub _run_raid_loop {
     # Execute each tool call
     my @results;
     for my $tc_idx (0 .. $#$tool_calls) {
+      # Safe point: no further tool call once a cancel is requested.
+      return $self->_cancelled_result($state) if $self->cancel_requested;
       my $tc = $tool_calls->[$tc_idx];
       my ( $name, $input ) = $engine->extract_tool_call($tc);
 
@@ -1930,7 +2094,8 @@ async sub _run_raid_loop {
 
         if ($self_result->{type} eq 'wait') {
           my $loop = $engine->async_loop // IO::Async::Loop->new;
-          await $loop->delay_future(after => $self_result->{seconds});
+          await $self->_until_cancelled($loop->delay_future(after => $self_result->{seconds}));
+          return $self->_cancelled_result($state) if $self->cancel_requested;
           my $result = {
             content => [{ type => 'text', text => "Waited $self_result->{seconds} seconds." }],
           };
@@ -1982,13 +2147,15 @@ async sub _run_raid_loop {
       my $mcp = $tool_server_map->{$name}
         or die "Tool '$name' not found on any MCP server";
 
-      my $result = await $mcp->call_tool($name, $input)->else(sub {
+      my $call_f = $mcp->call_tool($name, $input)->else(sub {
         my ( $error ) = @_;
         Future->done({
           content => [{ type => 'text', text => "Error calling tool '$name': $error" }],
           isError => JSON->true,
         });
       });
+      my $result = await $self->_until_cancelled($call_f);
+      $result = $self->_cancelled_tool_result($name) unless $call_f->is_done;
 
       # Plugin hook: transform tool result
       for my $plugin (@{$self->_plugin_instances}) {
@@ -2037,7 +2204,12 @@ async sub _run_raid_loop {
   die "Raider tool loop exceeded ".$self->max_iterations." iterations";
 }
 
-async sub respond_f {
+sub respond_f {
+  my ( $self, $answer ) = @_;
+  return $self->_end_raid($self->_respond_f($answer));
+}
+
+async sub _respond_f {
   my ( $self, $answer ) = @_;
   croak "No pending interaction — call raid_f first"
     unless $self->has_continuation;
@@ -2065,6 +2237,7 @@ async sub respond_f {
   # interactive self-tool can re-pause and carry the calls still queued after it.
   my $remaining = $cont->{remaining_tcs};
   for my $rem_idx (0 .. $#$remaining) {
+    return $self->_cancelled_result($state) if $self->cancel_requested;
     my $tc = $remaining->[$rem_idx];
     my ( $name, $input ) = $engine->extract_tool_call($tc);
 
@@ -2106,7 +2279,8 @@ async sub respond_f {
 
       if ($self_result->{type} eq 'wait') {
         my $loop = $engine->async_loop // IO::Async::Loop->new;
-        await $loop->delay_future(after => $self_result->{seconds});
+        await $self->_until_cancelled($loop->delay_future(after => $self_result->{seconds}));
+        return $self->_cancelled_result($state) if $self->cancel_requested;
         push @results, {
           tool_call => $tc,
           result    => { content => [{ type => 'text',
@@ -2128,13 +2302,15 @@ async sub respond_f {
     my $mcp = $state->{tool_server_map}{$name}
       or die "Tool '$name' not found on any MCP server";
 
-    my $result = await $mcp->call_tool($name, $input)->else(sub {
+    my $call_f = $mcp->call_tool($name, $input)->else(sub {
       my ( $error ) = @_;
       Future->done({
         content => [{ type => 'text', text => "Error calling tool '$name': $error" }],
         isError => JSON->true,
       });
     });
+    my $result = await $self->_until_cancelled($call_f);
+    $result = $self->_cancelled_tool_result($name) unless $call_f->is_done;
 
     for my $plugin (@{$self->_plugin_instances}) {
       $result = await $plugin->plugin_after_tool_call($name, $input, $result);
@@ -2177,7 +2353,8 @@ Returns a L<Future> resolving to a L<Langertha::Raider::Result>.
 
 The result stringifies to the final text (backward compatible), but also
 provides C<type>, C<is_final>, C<is_question>, C<is_pause>, C<is_abort>
-for programmatic handling of interactive self-tools.
+for programmatic handling of interactive self-tools, and C<is_cancelled>
+for a raid stopped by L</cancel>.
 
 All engines of a raider (C<engine>, C<compression_engine> and every
 C<engine_catalog> engine) must run on the same event loop, since one raid
