@@ -6,7 +6,7 @@ use Future::AsyncAwait;
 use Time::HiRes qw( gettimeofday tv_interval );
 use Carp qw( croak );
 use Module::Runtime qw( use_module );
-use Scalar::Util qw( blessed );
+use Scalar::Util qw( blessed refaddr );
 use JSON::MaybeXS qw( JSON );
 use MCP::Server;
 use Net::Async::MCP;
@@ -1542,8 +1542,36 @@ async sub _initialize_inline_mcp_f {
   $self->_inline_mcp($mcp);
 }
 
+# One raid awaits the futures of every engine it may use, and one ->get drives
+# exactly one IO::Async loop: engines on two loops hang the raid (core karr
+# k228). An engine without a loop (sync fallback) counts as the process-wide
+# IO::Async::Loop->new, like everywhere else in raider.
+sub _check_engine_loops {
+  my ( $self ) = @_;
+  my @engines = ( [ engine => $self->engine ] );
+  push @engines, [ compression_engine => $self->compression_engine ]
+    if $self->has_compression_engine;
+  for my $name (sort keys %{$self->engine_catalog}) {
+    my $engine = $self->engine_catalog->{$name}{engine} // next;
+    push @engines, [ "engine_catalog '$name'" => $engine ];
+  }
+  my $loop_of = sub {
+    my ( $engine ) = @_;
+    return ( $engine->can('async_loop') && $engine->async_loop ) || IO::Async::Loop->new;
+  };
+  my $loop = $loop_of->($engines[0][1]);
+  for my $entry (@engines[1..$#engines]) {
+    next if refaddr($loop_of->($entry->[1])) == refaddr($loop);
+    croak "Raider $entry->[0] runs on a different event loop than engine; "
+        . "a raid drives only one loop, so every engine of a raider must share it "
+        . "(put their HTTP clients on the same IO::Async::Loop)";
+  }
+  return $loop;
+}
+
 async sub raid_f {
   my ( $self, @messages ) = @_;
+  $self->_check_engine_loops;
   my $engine = $self->active_engine;
   my $t0 = [gettimeofday];
   my $langfuse = $engine->can('langfuse_enabled') && $engine->langfuse_enabled;
@@ -2012,6 +2040,7 @@ async sub respond_f {
   my ( $self, $answer ) = @_;
   croak "No pending interaction — call raid_f first"
     unless $self->has_continuation;
+  $self->_check_engine_loops;
 
   my $cont = $self->_continuation;
   $self->clear_continuation;
@@ -2148,6 +2177,12 @@ Returns a L<Future> resolving to a L<Langertha::Raider::Result>.
 The result stringifies to the final text (backward compatible), but also
 provides C<type>, C<is_final>, C<is_question>, C<is_pause>, C<is_abort>
 for programmatic handling of interactive self-tools.
+
+All engines of a raider (C<engine>, C<compression_engine> and every
+C<engine_catalog> engine) must run on the same event loop, since one raid
+is driven by one loop. An engine without a loop (the synchronous fallback)
+counts as the process-wide C<< IO::Async::Loop->new >>. C<raid_f> and
+C<respond_f> fail right away, naming the engine, when one runs on another loop.
 
 =method respond_f
 
