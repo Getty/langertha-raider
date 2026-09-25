@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-25T22:17:21Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-25T22:17:21Z
+created: 2026-09-24T19:41:16Z
+id: 24
+priority: low
+started: 2026-09-25T21:58:43Z
+status: done
+tags:
+- engine
+- memory
+title: Session-History-Embeddings async (uebernommen von langertha#172)
+updated: 2026-09-25T22:17:21Z
+---
+
+Ticket lag seit der Extraktion auf dem langertha-Board (#172: "Raider: session-history embeddings async (root-cause fix behind no_session_embeddings)"); Code liegt jetzt hier (Raider.pm). Details siehe langertha#172. Mit ADR 0003 abstimmen (Journal als JSONL, Embeddings nur abgeleiteter Index).
+
+Maintainer 2026-09-25: jetzt angehen. Core hat simple_embedding_f (k292). ADR 0016: embedding_engine in den Loop-Check aufnehmen, dann entfaellt der Multi-Loop-Hazard aus langertha#172.
