@@ -676,7 +676,7 @@ Version 1 beschreibt Endpunkte, Wire-Dialekte, Modell-IDs, deklarierte Fähigkei
     {
       "id": "example-model",
       "endpoint_ref": "chat",
-      "capabilities": {"tool_calling": true, "streaming": true}
+      "capabilities": {"tools_native": true, "streaming": true}
     }
   ],
   "extensions": {}
@@ -684,6 +684,8 @@ Version 1 beschreibt Endpunkte, Wire-Dialekte, Modell-IDs, deklarierte Fähigkei
 ```
 
 Diese Beispieldaten werden als eigenes Schema entworfen und validiert. `api_key` beschreibt lediglich den Mechanismus; welche lokale Credential-Referenz benutzt wird, entscheidet der Nutzer. Der Header-Vertrag gehört zum erlaubten Adapter/Dialekt, nicht zu beliebigen aus dem Netz gelieferten Programmanweisungen.
+
+Fähigkeitsnamen sind die von Langertha Core (`%ROLE_TO_CAPS`, z. B. `tools_native` statt eines eigenen `tool_calling`); ein unbekannter Name gilt als nicht vorhanden. Beim Dialekt unterscheidet Core `anthropic` (First-Party, natives `output_config.format`) von `anthropic-compat` (die `/anthropic`-Shims): Für `anthropic-compat` nimmt der Raider-Adapter den konservativen Weg und emuliert Structured Output mit einem synthetischen Tool plus erzwungenem benannten `tool_choice`, auch wenn einzelne Modelle hinter dem Shim es nativ könnten (Core ADR 0029).
 
 **Vier Zustände auseinanderhalten:** Was der Provider behauptet, was der Adapter technisch versteht, was eine Prüfung tatsächlich beobachtet hat und was lokale Policy autorisiert. Ein Provider kann Tool-Calling annoncieren; das ist noch keine Erlaubnis, lokale Tools auszuführen.
 

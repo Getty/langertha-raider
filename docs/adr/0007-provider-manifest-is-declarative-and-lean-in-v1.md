@@ -39,3 +39,19 @@ which makes a remote document able to inject tools and prompts.
 ## Source
 
 Proposal: `docs/RAIDER-REDESIGN-HANDOFF.md` §2 (10), §11.
+
+## Update (2026-09-25, core ADR 0029)
+
+Core's manifest v1 fixes the vocabulary this ADR left open. Capability names are core's
+`%ROLE_TO_CAPS` names: a tool-calling model declares `tools_native` (not a raider-invented
+`tool_calling`), and a name the client does not know counts as absent. The dialect list
+separates `anthropic` (first party, native `output_config.format`) from `anthropic-compat`
+(the `/anthropic` shims). The raider adapter takes the conservative path on
+`anthropic-compat`: structured output is a synthetic tool plus a forced named `tool_choice`,
+even where one model behind the shim could do it natively, because the dialect names the
+endpoint, not the model. Example model entry:
+
+```json
+{ "id": "example-model", "endpoint_ref": "chat",
+  "capabilities": { "tools_native": true, "streaming": true } }
+```
