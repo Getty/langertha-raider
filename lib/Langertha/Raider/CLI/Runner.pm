@@ -6,6 +6,7 @@ use namespace::autoclean;
 use Config;
 use IO::Handle;
 use POSIX qw( sigprocmask SIG_UNBLOCK );
+use Time::HiRes ();
 
 =head1 SYNOPSIS
 
@@ -66,12 +67,12 @@ sub run_prompt {
   my $app = $self->app;
   my $out = $self->output;
   my $machine = $o{machine};
-  my $t0 = time;
+  my $t0 = Time::HiRes::time();
 
   # Handled right in the signal handler: a die from it would be swallowed
   # by whichever eval the run happens to be in (LWP, the raid loop).
-  local $SIG{INT}  = $o{catch_signals} ? sub { $self->interrupt(INT  => $machine, time - $t0) } : $SIG{INT};
-  local $SIG{TERM} = $o{catch_signals} ? sub { $self->interrupt(TERM => $machine, time - $t0) } : $SIG{TERM};
+  local $SIG{INT}  = $o{catch_signals} ? sub { $self->interrupt(INT  => $machine, $self->_since($t0)) } : $SIG{INT};
+  local $SIG{TERM} = $o{catch_signals} ? sub { $self->interrupt(TERM => $machine, $self->_since($t0)) } : $SIG{TERM};
 
   if ($machine) {
     $machine->event('run.started', engine => $app->engine_name,
@@ -81,7 +82,7 @@ sub run_prompt {
 
   my $result;
   my $ok = eval { $result = $app->run($text); 1 };
-  my $elapsed = time - $t0;
+  my $elapsed = $self->_since($t0);
 
   unless ($ok) {
     my $err = $@; chomp $err;
@@ -158,6 +159,12 @@ sub die_of_signal {
   sigprocmask(SIG_UNBLOCK, POSIX::SigSet->new($number{$signal}));
   kill $signal => $$;
   exit 128 + $number{$signal};
+}
+
+# Seconds since $t0, to the millisecond.
+sub _since {
+  my ( $self, $t0 ) = @_;
+  return 0 + sprintf('%.3f', Time::HiRes::time() - $t0);
 }
 
 # The last state change and the document; true for a completed run.

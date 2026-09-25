@@ -43,7 +43,8 @@ error (with a machine format, the output is the C<failed> document).
 
 =item C<2> -- usage error: unknown option, a C<-o> that is not
 C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
-machine format, or an unknown machine format version.
+machine format, a machine format with C<-i>, or an unknown machine format
+version.
 
 =item C<3> -- configuration error: F<.raider.yml> cannot be read, the
 engine is unknown, or a pack detection rule is invalid.
@@ -267,6 +268,10 @@ sub parse_options {
     return;
   }
   if (my ( $flag ) = @machine) {
+    if ($opt{interactive}) {
+      $self->_warn('--'.$flag.": no machine output in the REPL (-i)\n");
+      return;
+    }
     my $version = $machine_version{$flag} // 1;
     unless ($version =~ /\A\d+\z/ && grep { $_ == $version } $self->machine_class->versions) {
       $self->_warn("unknown --".$flag." version '".$version."' (known: "

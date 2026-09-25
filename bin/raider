@@ -98,7 +98,7 @@ Every field and type is the same in all three encodings.
 A run that completed:
 
     {
-       "elapsed" : 3,
+       "elapsed" : 2.731,
        "metrics" : { "iterations" : 2, "raids" : 1, "time_ms" : 2710.4, "tool_calls" : 1 },
        "response" : "The README describes ...",
        "status" : "completed",
@@ -107,11 +107,11 @@ A run that completed:
 
 A run that failed:
 
-    { "elapsed" : 0, "error" : "...", "status" : "failed", "version" : 1 }
+    { "elapsed" : 0.42, "error" : "...", "status" : "failed", "version" : 1 }
 
 A run stopped by C<SIGINT> or C<SIGTERM> (see L</EXIT STATUS>):
 
-    { "elapsed" : 5, "signal" : "TERM", "status" : "interrupted", "version" : 1 }
+    { "elapsed" : 5.107, "signal" : "TERM", "status" : "interrupted", "version" : 1 }
 
 =over
 
@@ -132,7 +132,7 @@ C<iterations>, C<tool_calls>, C<time_ms> (C<completed> only).
 =item C<signal> -- the signal that stopped the run, C<INT> or C<TERM>
 (C<interrupted> only).
 
-=item C<elapsed> -- seconds the run took.
+=item C<elapsed> -- seconds the run took, to the millisecond.
 
 =back
 
@@ -189,7 +189,7 @@ A run that calls one tool, as C<--stream-json>:
     {"content":"...","name":"bash","ok":true,"seq":4,"size":42,"time":1790000001.3,"truncated":false,"type":"tool.result","version":1}
     {"content":"There are ...","role":"assistant","seq":5,"time":1790000002.4,"type":"message","version":1}
     {"seq":6,"state":"completed","time":1790000002.4,"type":"run.state","version":1}
-    {"elapsed":2,"metrics":{...},"response":"There are ...","seq":7,"status":"completed","time":1790000002.4,"type":"run.finished","version":1}
+    {"elapsed":2.312,"metrics":{...},"response":"There are ...","seq":7,"status":"completed","time":1790000002.4,"type":"run.finished","version":1}
 
 Token deltas are not part of version 1. New event types may appear within a
 version, so a consumer must skip types it does not know.
@@ -220,7 +220,8 @@ error. With a machine output flag, the document says C<failed>.
 
 =item C<2> -- usage error: unknown option, a C<-o> that is not
 C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
-machine output flag, or an unknown format version.
+machine output flag, a machine output flag with C<-i>, or an unknown format
+version.
 
 =item C<3> -- configuration error: F<.raider.yml> cannot be read, or the
 engine is unknown.

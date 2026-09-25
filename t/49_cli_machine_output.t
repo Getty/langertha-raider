@@ -10,6 +10,7 @@ use Encode qw( decode_utf8 );
 use File::Temp qw( tempdir );
 use JSON::MaybeXS ();
 use Path::Tiny;
+use Time::HiRes ();
 use YAML::PP;
 use lib 't/lib';
 use Test::Raider::Env qw( clear_engine_env );
@@ -26,6 +27,7 @@ package My::App {
   sub run {
     my ( $self, $text ) = @_;
     die "kaputt: ä\n" if $text eq 'fail';
+    Time::HiRes::sleep(0.25) if $text eq 'slow';
     return 'Grüße ✓ '.$text;
   }
   __PACKAGE__->meta->make_immutable;
@@ -146,6 +148,19 @@ subtest 'usage errors' => sub {
   ( $exit, $out, $err ) = main_run(@base, '--json', '-e', 'nope', 'hi');
   is($exit, 3, 'a configuration error');
   is($out, '', 'no document, only stderr');
+  for my $flag (qw( --json --stream-yaml )) {
+    ( $exit, $out, $err ) = main_run(@base, '-i', $flag, 'hi');
+    is($exit, 2, '-i with '.$flag);
+    is($err, $flag.": no machine output in the REPL (-i)\n", 'reported');
+    is($out, '', 'no REPL, no document');
+  }
+};
+
+subtest 'elapsed has fractions of a second' => sub {
+  my ( $exit, $out ) = main_run(@base, '--json', 'slow');
+  my $elapsed = decode_as(json => $out)->{elapsed};
+  ok($elapsed >= 0.2 && $elapsed < 5, 'measured: '.$elapsed);
+  isnt($elapsed, int $elapsed, 'not whole seconds');
 };
 
 subtest 'only the =N form carries a version' => sub {
