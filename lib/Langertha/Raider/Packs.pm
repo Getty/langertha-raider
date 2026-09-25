@@ -60,10 +60,10 @@ sub build_packs {
   #
   #   1. File::ShareDir when installed from CPAN (ShareDir plugin
   #      copies share/ into auto/share/dist/Langertha-Raider/).
-  #   2. Source-tree layout: $INC{Langertha/Raider/CLI.pm} = lib/Langertha/Raider/CLI.pm,
+  #   2. Source-tree layout: $INC{Langertha/Raider/Application.pm} = lib/Langertha/Raider/Application.pm,
   #      sibling share/packs/ is four parents up after ->absolute.
   #   3. blib layout used by `dzil test` / `make test`:
-  #      blib/lib/Langertha/Raider/CLI.pm with share/packs/ one parent less.
+  #      blib/lib/Langertha/Raider/Application.pm with share/packs/ one parent less.
   #   4. $RAIDER_PACK_DIRS env for explicit overrides.
   {
     my $sd = eval {
@@ -75,7 +75,7 @@ sub build_packs {
     }
   }
 
-  my $mod_path = path($INC{'Langertha/Raider/CLI.pm'})->absolute;
+  my $mod_path = path($INC{'Langertha/Raider/Application.pm'})->absolute;
   for my $up (qw( parent_x4 parent_x3 )) {
     my $base = $up eq 'parent_x4'
       ? $mod_path->parent->parent->parent->parent
