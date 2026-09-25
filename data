@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T22:35:22Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-25T22:35:22Z
+created: 2026-09-25T22:13:07Z
+id: 83
+priority: high
+started: 2026-09-25T22:13:14Z
+status: done
+tags:
+- hall
+- tests
+- flaky
+title: 't/51 flaky: hall stream result interrupted statt cancelled nach SIGINT'
+updated: 2026-09-25T22:35:22Z
+---
+
+t/51_hall_stream_result.t Test 21 schlaegt intermittierend fehl (auf ac883b1 3 von 6 Laeufen): Status interrupted statt cancelled nach SIGINT-Cancel. Kam mit k79/k80. Ursache finden (Race: SIGINT vor run.started? zweites Signal durch cancel_grace-Eskalation?), Fix im Code oder Test, je nachdem wo der Fehler liegt, dann 20x stabil.
