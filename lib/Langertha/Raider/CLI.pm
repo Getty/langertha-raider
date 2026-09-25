@@ -391,6 +391,21 @@ has trace_out => (
   default => sub { \*STDOUT },
 );
 
+=attr on_event
+
+Optional code reference called as C<< $on_event->($type, %payload) >> for
+every C<tool.call> and C<tool.result> of a raid, through
+L<Langertha::Raider::Plugin::Events>. Set by C<--stream-json> and its
+siblings.
+
+=cut
+
+has on_event => (
+  is        => 'ro',
+  isa       => 'CodeRef',
+  predicate => 'has_on_event',
+);
+
 =attr perl
 
 Enable the PerlTools MCP server (perl_eval, perl_check, perl_cpanm).
@@ -1017,6 +1032,8 @@ sub _build_raider {
     push @plugins, '+Langertha::Raider::Plugin::Trace', { loop => $self->loop, out => $self->trace_out };
   }
   push @plugins, '+Langertha::Raider::Plugin::Situation';
+  # Last, so it reports the tool calls that actually run.
+  push @plugins, '+Langertha::Raider::Plugin::Events', { on_event => $self->on_event } if $self->has_on_event;
   return Langertha::Raider->new(
     engine                     => $self->_engine,
     mission                    => $self->mission,

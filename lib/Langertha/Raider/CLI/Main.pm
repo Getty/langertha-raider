@@ -65,9 +65,12 @@ use constant {
 
 # The machine output flags (ADR 0013): flag => [ format, stream ].
 my %MACHINE_FLAG = (
-  json    => [ json    => 0 ],
-  msgpack => [ msgpack => 0 ],
-  yaml    => [ yaml    => 0 ],
+  json             => [ json    => 0 ],
+  msgpack          => [ msgpack => 0 ],
+  yaml             => [ yaml    => 0 ],
+  'stream-json'    => [ json    => 1 ],
+  'stream-msgpack' => [ msgpack => 1 ],
+  'stream-yaml'    => [ yaml    => 1 ],
 );
 
 =attr output
@@ -161,6 +164,10 @@ Options:
                            (format version N; 1 is the only one)
       --msgpack[=N]        The same document as MessagePack
       --yaml[=N]           The same document as YAML
+      --stream-json[=N]    Print the run as JSON Lines events as it happens,
+                           ending with the document (run.finished)
+      --stream-msgpack[=N] The same events as MessagePack objects
+      --stream-yaml[=N]    The same events as YAML documents
       --max-iterations N   Hard safety cap on tool rounds per raid
                            (default: 10000 — effectively unlimited)
       --no-color           Disable ANSI colors
@@ -361,6 +368,10 @@ sub run {
   }
 
   my %args = $self->app_args($opt);
+  my $machine = $opt->{machine}
+    ? $self->machine_class->new(%{ $opt->{machine} }, out => $self->output->out)
+    : undef;
+  $args{on_event} = sub { $machine->event(@_) } if $machine && $machine->stream;
 
   # The one reader/writer of .raider.yml. Parsed up front so a broken file
   # stops raider here, with its path in the message.
@@ -462,9 +473,6 @@ sub run {
     return EXIT_USAGE;
   }
   my $runner = $self->runner_class->new(app => $app, output => $self->output);
-  my $machine = $opt->{machine}
-    ? $self->machine_class->new(%{ $opt->{machine} }, out => $self->output->out)
-    : undef;
   return $runner->run_prompt($text, machine => $machine) ? EXIT_OK : EXIT_RUN_ERROR;
 }
 
