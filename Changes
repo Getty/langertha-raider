@@ -109,6 +109,18 @@ Revision history for Langertha-Raider
     - A plain hall raider name (bjorn) runs its missions in parallel and
       each run is tracked and reported on its own; numbered names (1bjorn)
       stay singletons with a queue.
+    - Every run is recorded in a session journal (ADR 0015),
+      .raider/sessions/<id>.jsonl in the project: the input, every tool
+      call with its whole result, the answer and how the run ended, also
+      when it failed or was interrupted. .raider/.gitignore keeps journals
+      out of git; --no-session switches recording off.
+    - New raider session list, session show ID [--json] and session resume
+      ID, and --session ID / --continue for one-shot and REPL: the
+      conversation is replayed, nothing recorded is run again, and runs
+      without an end or tool calls without a result are reported. A
+      session another raider has open ends raider with exit status 4.
+    - The machine output document (and run.finished) names its session;
+      stream tool.call/tool.result events carry call and status.
     - A one-shot raider stopped by SIGINT or SIGTERM writes the
       "interrupted" document (or run.state/run.finished when streaming),
       then dies of the same signal (shell status 130/143), also when the
