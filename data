@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T06:00:13Z
+claimed_by: worker-app
+class: standard
+completed: 2026-09-25T06:00:13Z
+created: 2026-09-25T05:21:25Z
+id: 76
+priority: low
+started: 2026-09-25T05:21:37Z
+status: done
+tags:
+- refactor
+- sessions
+title: Run-Journal und session-Kommandos in die Application; CLI-Spuren in explain/Persona
+  trennen
+updated: 2026-09-25T06:00:13Z
+---
+
+Aus #41: (1) run.started..run.finished-Journalisierung steckt in CLI::Runner, vermischt mit Stream und Signalen -> in Application (ADR 0002/0009). (2) Main::session_command baut SessionStore direkt statt ueber die App. (3) explain_config nennt CLI-Flags, Default-Persona sagt "Autonomous CLI agent" -> trennen, sobald zweite Oberflaeche die Application nutzt.
