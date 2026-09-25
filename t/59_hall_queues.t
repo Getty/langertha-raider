@@ -107,6 +107,36 @@ subtest 'a new mission never overtakes a loaded singleton queue' => sub {
   is( [ map { $_->{response} } @done ], [ 'answer: old', 'answer: new' ], 'waiting mission first' );
 };
 
+subtest 'a new mission never overtakes a loaded binding queue' => sub {
+  my ( undef, $tmp ) = fake_hall();
+  write_state( $tmp, 'binding_queues.json', { 'cron:nightly' => [
+    { name => 'bjorn', mission => 'old1', binding => 'cron:nightly' },
+    { name => 'bjorn', mission => 'old2', binding => 'cron:nightly' } ] } );
+  my $hall = Langertha::Raider::Hall->new( root => $tmp );
+  is( $hall->spawn( name => 'bjorn', mission => 'new', binding => 'cron:nightly' ),
+    { queued => 1, slot => 'bjorn', binding => 'cron:nightly', queue_depth => 2 },
+    'queued behind the waiting missions, the first of which started' );
+  my @done = run_spawns( $hall, 3 );
+  is( [ map { $_->{response} } @done ], [ 'answer: old1', 'answer: old2', 'answer: new' ], 'in order' );
+  is( messages_of( $tmp, $hall->session_bindings->{'cron:nightly'} ), [qw( old1 old2 new )],
+    'in the binding session' );
+  is( $hall->binding_queues, {}, 'queue drained' );
+};
+
+subtest 'a waiting binding queue follows its missions into a busy slot, in order' => sub {
+  my ( undef, $tmp ) = fake_hall();
+  write_state( $tmp, 'binding_queues.json', { 'cron:nightly' => [
+    { name => '1ivar', mission => 'old1', binding => 'cron:nightly' },
+    { name => '1ivar', mission => 'old2', binding => 'cron:nightly' } ] } );
+  my $hall = Langertha::Raider::Hall->new( root => $tmp );
+  busy_slot( $hall, $tmp, '1ivar' );
+  is( $hall->spawn( name => '1ivar', mission => 'new', binding => 'cron:nightly' ),
+    { queued => 1, slot => '1ivar', queue_depth => 3 }, 'behind both in the slot queue' );
+  is( [ map { $_->{mission} } @{ $hall->singleton_queues->{'1ivar'} } ], [qw( old1 old2 new )],
+    'slot queue in order' );
+  is( $hall->binding_queues, {}, 'nothing left on the binding' );
+};
+
 subtest 'run: drains loaded queues, forgets bindings of removed cron jobs' => sub {
   my ( undef, $tmp ) = fake_hall( yml => "cron:\n  - { id: nightly, name: 1ivar, cron: '0 3 * * *', mission: ping }\n" );
   my $store = Langertha::Raider::SessionStore->new( root => "$tmp" );
@@ -175,6 +205,30 @@ for my $name (qw( bjorn 1ivar )) {
     is( messages_of( $tmp, $hall->session_bindings->{'acp:s1'} ), [qw( hold p2 )], 'in the ACP session' );
   };
 }
+
+subtest 'ACP: a waiting prompt whose run starts without its session is answered' => sub {
+  my ( $hall, $tmp ) = fake_hall();
+  my $events = hall_events($hall);
+  my ( $acp, $stream ) = acp_for( $hall, '1ivar' );
+  prompt( $acp, $stream, 1, 'hold' );
+  prompt( $acp, $stream, 2, 'p2' );
+  wait_until( $hall, sub { @{ ran_missions() } } );
+  {
+    no warnings 'redefine';
+    local *Langertha::Raider::Hall::session_for = sub { die "no journal today\n" };
+    path( $ENV{FAKE_RELEASE} )->touch;
+    wait_until( $hall, sub { grep { $_->[0] eq 'hall.session_error' } @$events } );
+  }
+  wait_until( $hall, sub { reply_to( $stream, 2 ) && !%{ $hall->raiders } } );
+  my ($error) = grep { $_->[0] eq 'hall.session_error' } @$events;
+  is( $error->[1]{binding}, 'acp:s1', 'the run lost its binding' );
+  ok( $error->[1]{id}, 'hall.session_error names the run' );
+  is( ( reply_to( $stream, 2 ) // {} )->{result}, { stopReason => 'end_turn' }, 'the waiting prompt got its answer' );
+  my @chunks = map { $_->{params}{update}{content}{text} }
+    grep { ( $_->{method} // '' ) eq 'session/update' } @{ $stream->{lines} };
+  is( $chunks[-1], 'answer: p2', 'with the output of its run' );
+  is( ran_missions(), [qw( hold p2 )], 'both ran' );
+};
 
 subtest 'ACP: cancel answers a waiting prompt and drops it' => sub {
   my ( $hall, $tmp ) = fake_hall();

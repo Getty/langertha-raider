@@ -73,7 +73,9 @@ for a binding that already has a running raider waits in that binding's
 queue and starts when the run ends (see L</binding_queues>). Only when the
 session is held by a writer outside the hall does a bound run fail at
 once, as C<raider.done> with status C<failed> and an error naming the
-session and binding; its mission is not run.
+session and binding; its mission is not run. When the hall cannot get the
+binding's session at all, the run starts unbound, and
+C<hall.session_error> names the C<binding>, the C<error> and the run C<id>.
 
 C<raider hall logs ID> shows the part of the slot log from that run's start
 line to its result line, and works for ended runs too: the slot is taken
@@ -534,17 +536,20 @@ sub _queue_on_binding {
   return { queued => 1, slot => $entry->{name}, binding => $binding, queue_depth => scalar @$queue };
 }
 
-# Start the next mission waiting for a binding, once nothing runs on it.
+# Start the missions waiting for a binding, once nothing runs on it. One
+# that has to wait for its slot moves on to the slot queue, and the next
+# one follows it there.
 sub _drain_binding_queue {
   my ($self, $binding) = @_;
-  return if $self->_binding_busy($binding);
   my $queues = $self->binding_queues;
-  my $queue = $queues->{$binding} or return;
-  my $next = shift @$queue;
-  delete $queues->{$binding} unless @$queue;
-  $self->_persist_binding_queues;
-  return unless $next;
-  return $self->spawn(%$next);
+  while (!$self->_binding_busy($binding)) {
+    my $queue = $queues->{$binding} or return;
+    my $next = shift @$queue;
+    delete $queues->{$binding} unless @$queue;
+    $self->_persist_binding_queues;
+    $self->_spawn(%$next) if $next;
+  }
+  return;
 }
 
 sub _drain_binding_queues {
@@ -1017,6 +1022,13 @@ sub _spawn_next_in_queue {
 
 sub spawn {
   my ($self, %args) = @_;
+  # Missions already waiting for the binding go first.
+  $self->_drain_binding_queue($args{binding}) if defined $args{binding};
+  return $self->_spawn(%args);
+}
+
+sub _spawn {
+  my ($self, %args) = @_;
   my $name = $args{name} // '';
   my $mission = $args{mission} // '';
   my $attach = $args{attach} // 0;
@@ -1085,12 +1097,11 @@ sub _spawn_raider {
   # A bound run resumes its binding's session; an unbound one gets a
   # fresh session from the raider itself.
   $binding = $self->_binding_key($slot, $binding);
-  my $session_id;
+  my ($session_id, $session_error);
   if (defined $binding) {
     $session_id = eval { $self->session_for($binding) };
     unless (defined $session_id) {
-      my $error = $@ =~ s/\s+\z//r;
-      $self->_emit('hall.session_error', { binding => $binding, error => $error });
+      $session_error = { binding => $binding, error => $@ =~ s/\s+\z//r };
       undef $binding;
     }
   }
@@ -1173,6 +1184,8 @@ sub _spawn_raider {
     base_name => $base_name,
     $self->_session_fields($raider),
   });
+  # The binding's session could not be had: the run goes on unbound.
+  $self->_emit('hall.session_error', { %$session_error, id => $id }) if $session_error;
 
   return { id => $id, pid => $process->pid, slot => $slot, $self->_session_fields($raider) };
 }

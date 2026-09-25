@@ -38,7 +38,8 @@ session run in one raider session, bound as C<acp:SESSION> until the
 client disconnects (see L<Langertha::Raider::Hall/session_bindings>).
 A prompt that has to wait -- its C<1name> slot or its session is busy --
 gets no answer until its run has started and ended; then it is answered
-like any other, with C<end_turn> or C<cancelled>.
+like any other, with C<end_turn> or C<cancelled>, also when the hall had
+to start that run without the session (C<hall.session_error>).
 
 =item * C<session/cancel> — send the running raider a TERM; prompts still
 waiting are answered C<cancelled> and never run.
@@ -275,14 +276,17 @@ sub _session_prompt {
 }
 
 # Waiting prompts start in order on the session's binding: each
-# raider.spawned there takes the oldest one and streams its run to it.
+# raider.spawned there takes the oldest one and streams its run to it. So
+# does a hall.session_error there, for the run it started unbound.
 sub _watch_spawns {
   my ($self, $session, $session_id, $stream) = @_;
   return if $session->{_spawn_watch};
   my $binding = $self->_binding_of($session_id);
-  $session->{_spawn_watch} = $self->_subscribe('raider.spawned', sub {
+  $session->{_spawn_watch} = $self->_subscribe('', sub {
     my ($evt) = @_;
-    return unless ($evt->{binding} // '') eq $binding;
+    my $t = $evt->{type} // '';
+    return unless $t eq 'raider.spawned' || $t eq 'hall.session_error';
+    return unless ($evt->{binding} // '') eq $binding && defined $evt->{id};
     my $rid = shift @{ $session->{waiting} // [] };
     return unless defined $rid;
     $session->{current_raider_id} = $evt->{id};
