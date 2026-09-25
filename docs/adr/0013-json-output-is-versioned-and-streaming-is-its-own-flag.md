@@ -50,7 +50,10 @@ the thin `bin/raider` (0 success, 1 run failed, 2 usage, 3 configuration).
     last line.
   - Token deltas (`text.delta`) are left out of version 1; they can be added later
     without a new version, because consumers ignore unknown types.
-- **Same exit codes** for every machine format and for human output.
+- **Same exit codes** for every machine format and for human output. Cancellation by
+  SIGINT/SIGTERM is reported by writing the `interrupted` document (or `run.finished`)
+  and then dying of the same signal, not by a plain exit code, so supervisors (the
+  Hall, ACP) see a signalled child as before (added 2026-09-25, karr #56).
 - **The model is format-independent; JSON, MessagePack and YAML are encodings of it**
   (added by the maintainer on 2026-09-25, before implementation):
 

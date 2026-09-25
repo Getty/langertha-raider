@@ -87,6 +87,16 @@ Revision history for Langertha-Raider
       response or error from run.finished; a raider killed before its
       result is a clear failure, and ACP forwards that instead of raw log
       text.
+    - The hall ends each run in the slot log with one "[hall] raider ID
+      STATUS: TEXT" line, so raider hall logs and logs --follow show the
+      answer or error. Run IDs stay unique (SLOT-TIME.2, .3, ...), and only
+      the newest 20 events files per slot are kept (logs.keep_events in
+      .raider-hall.yml, 0 keeps all).
+    - A one-shot raider stopped by SIGINT or SIGTERM writes the
+      "interrupted" document (or run.state/run.finished when streaming),
+      then dies of the same signal (shell status 130/143).
+    - -i together with a machine output flag is a usage error (exit 2);
+      the document's elapsed has millisecond resolution.
     - /reload, the banner and the generated raider skill name a -M
       mission as the persona; the generated skill lists /config, /model,
       /packs and /pack.
