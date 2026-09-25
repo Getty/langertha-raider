@@ -36,6 +36,11 @@ The L<Langertha::Raider::CLI> to run on. Required.
 
 The L<Langertha::Raider::CLI::Output> to print to. Required.
 
+=attr err
+
+Filehandle for warnings that must not end up in machine output (a
+session journal that cannot be written). Defaults to C<STDERR>.
+
 =cut
 
 has app => (
@@ -48,6 +53,11 @@ has output => (
   is       => 'ro',
   isa      => 'Langertha::Raider::CLI::Output',
   required => 1,
+);
+
+has err => (
+  is      => 'ro',
+  default => sub { \*STDERR },
 );
 
 # The run in progress: { machine, session, run, t0 }.
@@ -70,7 +80,8 @@ its journal as the session's next run (ADR 0015): C<run.started>, the user
 input as C<message>, every C<tool.call> and C<tool.result> with the whole
 result text, the final answer as C<message>, and C<run.finished> with the
 end state -- also when the run failed or was interrupted. A machine
-document then names the session in C<session> (C<id>, C<path>).
+document then names the session in C<session> (C<id>, C<path>). A journal
+write that fails is a warning (L</record>); the run goes on.
 
 With C<catch_signals>, a C<SIGINT> or C<SIGTERM> during the run ends it as
 C<interrupted>: see L</interrupt>.
@@ -212,9 +223,38 @@ sub event {
 sub _journal {
   my ( $self, $type, %payload ) = @_;
   my $current = $self->_current or return;
-  my $session = $current->{session} or return;
-  $session->append($type, run => $current->{run}, %payload);
+  return unless $current->{session};
+  $self->_append($current, $type, run => $current->{run}, %payload);
   return;
+}
+
+=method record
+
+    $runner->record($session, 'history.cleared');
+
+Appends one event outside a run to the session journal. Like every
+journal write of the runner, a write that fails (a full disk) is a warning
+on L</err>, C<warning: session ID not fully saved: ...>, and returns false
+-- it never stops the run; within a run only the first failure is
+reported.
+
+=cut
+
+sub record {
+  my ( $self, $session, $type, %fields ) = @_;
+  return $self->_append({ session => $session }, $type, %fields);
+}
+
+# Appends to the session of $current (a run, or just { session }); warns
+# once per $current when it fails.
+sub _append {
+  my ( $self, $current, $type, %fields ) = @_;
+  my $session = $current->{session};
+  return 1 if eval { $session->append($type, %fields); 1 };
+  my $error = $self->output->error_text($@);
+  return 0 if $current->{journal_failed}++;
+  print { $self->err } 'warning: session '.$session->id.' not fully saved: '.$error."\n";
+  return 0;
 }
 
 =method die_of_signal
@@ -330,7 +370,7 @@ sub _finish {
   $self->_clear_current;
   if (my $session = $current->{session}) {
     my $metrics = $fields{metrics} // eval { $self->app->raider->metrics };
-    $session->append('run.finished', run => $current->{run}, status => $status,
+    $self->_append($current, 'run.finished', run => $current->{run}, status => $status,
       ( map { defined $fields{$_} ? ( $_ => $fields{$_} ) : () } qw( error signal elapsed ) ),
       $metrics ? ( metrics => $metrics ) : ());
     $fields{session} = { id => $session->id, path => ''.$session->path };

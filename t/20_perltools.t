@@ -296,6 +296,24 @@ subtest perl_cpanm_failed_install_not_recorded => sub {
   unlike($cpanfile, qr/\Q$module\E/, 'failed install not appended to cpanfile');
 };
 
+subtest perl_cpanm_raider_dir_gets_gitignore => sub {
+  my $fresh = tempdir(CLEANUP => 1);
+  my $fresh_server = build_perl_tools_server(root => $fresh);
+  my ($tool) = grep { $_->name eq 'perl_cpanm' } @{ $fresh_server->tools };
+  $tool->code->($tool, { module => 'Acme::Ignored' });
+  ok(-f path($fresh)->child('.raider', 'lib', 'cpanfile'), 'default target created');
+  is(path($fresh)->child('.raider', '.gitignore')->slurp_utf8, "sessions/\nlib/\n",
+    '.raider/.gitignore keeps the local::lib out of git');
+  ok(!-e path($fresh)->child('.raider', 'sessions'), 'no sessions directory');
+
+  my $other = tempdir(CLEANUP => 1);
+  my $vendor_server = build_perl_tools_server(root => $other, lib_target => 'vendor');
+  ($tool) = grep { $_->name eq 'perl_cpanm' } @{ $vendor_server->tools };
+  $tool->code->($tool, { module => 'Acme::Vendor' });
+  ok(-f path($other)->child('vendor', 'cpanfile'), 'a target outside .raider');
+  ok(!-e path($other)->child('.raider'), 'creates no .raider');
+};
+
 # Leave the tempdirs before File::Temp cleans them up.
 chdir $orig_cwd or die "chdir $orig_cwd: $!";
 

@@ -235,9 +235,16 @@ never enter it.
 A run is recorded as C<run.started>, the input as C<message>, every
 C<tool.call> and C<tool.result> (with the whole result text, where the
 stream cuts it), the answer as C<message>, and C<run.finished> with how it
-ended -- also when it failed or was interrupted. While a raider writes a
+ended -- also when it failed or was interrupted. A C</clear> in the REPL
+is recorded as C<history.cleared>. While a raider writes a
 session it holds a lock on it; a second writer fails at once instead of
-waiting.
+waiting. A journal that cannot be written in the middle of a run (a full
+disk) is a warning on standard error; the run goes on.
+
+Wherever a command takes a session C<ID>, a shorter form names it too: a
+unique start of the id (C<20260925-08>) or its four hex digits at the end
+(C<3f2a>). A form that fits more than one session is refused with the
+candidates listed.
 
     raider session list                  # the project's sessions, newest first
     raider session show ID               # one session, event by event
@@ -258,7 +265,8 @@ subcommand, any other prompt starting with C<session> is sent as a prompt.
 Continuing a session (C<--session ID>, C<--continue>, C<session resume>)
 takes its lock, replays the conversation -- the input and answer of every
 run that got an answer, and all recorded events into the full session
-history -- and records the new runs in the same journal. Nothing recorded
+history; after a C<history.cleared> only what came later -- and records
+the new runs in the same journal. Nothing recorded
 is executed again. It reports what it found on standard error (in the REPL,
 under the banner): lines that could not be read, runs that never ended
 (they count as C<interrupted>), and tool calls without a result, whose
@@ -286,7 +294,8 @@ engine is unknown.
 
 =item C<4> -- the session to continue (C<--session>, C<--continue>,
 C<session resume>) is in use by another raider. A usage error
-(C<2>) is also an unknown session, a C<--session> that is no session id,
+(C<2>) is also an unknown or ambiguous session, a C<--session> that is no
+session id,
 C<--continue> without any session, or more than one of C<--session>,
 C<--continue> and C<--no-session>.
 

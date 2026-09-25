@@ -24,7 +24,7 @@ use utf8;
 
 Every raid of C<Test::Raider::SeqEngine::App> runs the real raid loop
 against a scripted engine without network: the first request answers with
-calls of C<bash> (1500 characters of output) and C<broken> (a tool error),
+calls of C<bash> (1500 characters of output) and C<broken> (a two-line tool error),
 the second with the text C<Fertig ✓>. The prompt C<fail> makes the run die
 with C<kaputt>.
 
@@ -59,7 +59,7 @@ our ( @REQUESTS, @CALLS, $APP );
     my ( $self, $name, $input ) = @_;
     push @Test::Raider::SeqEngine::CALLS, [ $name, $input ];
     return Future->done({ content => [ { type => 'text', text => 'x' x 1500 } ] }) if $name eq 'bash';
-    return Future->done({ content => [ { type => 'text', text => "nope: ä" } ], isError => 1 });
+    return Future->done({ content => [ { type => 'text', text => "nope: ä\nline 2" } ], isError => 1 });
   }
   __PACKAGE__->meta->make_immutable;
 }

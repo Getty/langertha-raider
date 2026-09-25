@@ -8,6 +8,7 @@ use Path::Tiny;
 use MCP::Server;
 use IPC::Run qw( start timeout );
 use JSON::MaybeXS ();
+use Langertha::Raider::SessionStore;
 
 use Exporter 'import';
 our @EXPORT_OK = qw( build_perl_tools_server );
@@ -21,7 +22,10 @@ our @EXPORT_OK = qw( build_perl_tools_server );
     );
 
 Returns an L<MCP::Server> instance with the tools C<perl_eval>, C<perl_check>,
-and C<perl_cpanm> registered.
+and C<perl_cpanm> registered. A lib target inside the project's F<.raider/>
+(the default, F<.raider/lib>) is created through
+L<Langertha::Raider::SessionStore/prepare_base>, which writes
+F<.raider/.gitignore> when there is none.
 
 =cut
 
@@ -83,6 +87,9 @@ sub build_perl_tools_server {
     my $dir = path($target);
     return if -d $dir && -f $dir->child('cpanfile');
 
+    # A target in the project's .raider/ comes with its .gitignore.
+    my $store = Langertha::Raider::SessionStore->new(root => $root->stringify);
+    $store->prepare_base if $store->base->subsumes($dir->absolute($root));
     $dir->mkpath;
     $dir->child('perl-version')->spew_utf8("$]\n");
     $dir->child('cpanfile')->spew_utf8(";\n");

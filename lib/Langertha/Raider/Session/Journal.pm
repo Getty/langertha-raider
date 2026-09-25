@@ -26,7 +26,9 @@ A session journal as read from disk (ADR 0015), with the crash rules
 applied: a line that is not a complete JSON object is skipped and its
 number listed in L</damaged>; a run without C<run.finished> counts as
 C<interrupted>; a C<tool.call> without its C<tool.result> is C<unknown>.
-Unknown event types and fields are kept but not interpreted.
+Unknown event types and fields are kept but not interpreted. Beside the
+event types of ADR 0015 it knows C<history.cleared> (no fields, no run):
+the REPL's C</clear> emptied the working history there.
 
 =attr id
 
@@ -176,15 +178,23 @@ sub unknown_calls {
 The working history to rebuild on resume, as C<< { role, content } >>
 hashes: the user input and final assistant text of every run that has a
 final assistant text. A run that failed or was interrupted before its
-answer adds nothing, as a live raid adds nothing to C<history> then.
+answer adds nothing, as a live raid adds nothing to C<history> then. A
+C<history.cleared> event (C</clear> in the REPL) empties it: only the
+messages after the last one count.
 
 =cut
 
 sub history_messages {
   my ( $self ) = @_;
   my %answered = map { $_->{run} => 1 } grep { defined $_->{response} } @{ $self->runs };
-  return [ map { { role => $_->{role}, content => $_->{content} } }
-    grep { $_->{type} eq 'message' && $answered{ $_->{run} // '' } } @{ $self->events } ];
+  my @messages;
+  for my $e (@{ $self->events }) {
+    if ($e->{type} eq 'history.cleared') { @messages = () }
+    elsif ($e->{type} eq 'message' && $answered{ $e->{run} // '' }) {
+      push @messages, { role => $e->{role}, content => $e->{content} };
+    }
+  }
+  return \@messages;
 }
 
 =method session_history_messages

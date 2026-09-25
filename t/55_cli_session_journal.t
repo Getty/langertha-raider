@@ -75,7 +75,7 @@ subtest 'one-shot: the whole run in a new session' => sub {
   like($e[4], { call => 'c1', name => 'bash', status => 'succeeded', size => 1500 }, 'tool.result');
   is(length $e[4]{content}, 1500, 'with the whole content, not cut like the stream');
   like($e[5], { call => 'c2', name => 'broken', status => 'dispatched' }, 'second call');
-  like($e[6], { call => 'c2', name => 'broken', status => 'failed', content => 'nope: ä' }, 'a failed tool');
+  like($e[6], { call => 'c2', name => 'broken', status => 'failed', content => "nope: ä\nline 2" }, 'a failed tool');
   like($e[7], { role => 'assistant', content => 'Fertig ✓' }, 'the final answer');
   like($e[8], { status => 'completed', metrics => { tool_calls => 2 }, elapsed => T() }, 'run.finished');
   unlike($file->slurp_raw, qr/\Q$secret\E/, 'no API key in the journal');
@@ -143,6 +143,37 @@ subtest 'a session that cannot be written does not stop the run' => sub {
   is($exit, 0, 'the run went on');
   like($err, qr/\Asession not saved: /, 'reported');
   like($out, qr/Fertig/, 'answered');
+};
+
+subtest 'a journal write failing mid-run is a warning, the run goes on' => sub {
+  my $root = tempdir(CLEANUP => 1);
+  my $append = \&Langertha::Raider::Session::append;
+  no warnings 'redefine';
+  # From the first tool call on the disk is full.
+  local *Langertha::Raider::Session::append = sub {
+    my ( $session, $type, %fields ) = @_;
+    Carp::croak('cannot write '.$session->path.': No space left on device')
+      if $type =~ /\A(?:tool\.|run\.finished)/ || ($type eq 'message' && $fields{role} eq 'assistant');
+    goto &$append;
+  };
+  my ( $exit, $out, $err ) = main_run('', base($root), 'hi');
+  is($exit, 0, 'the run completed');
+  like($out, qr/Fertig/, 'answered');
+  my ( $file ) = journals($root);
+  my @warnings = grep { /not fully saved/ } split /\n/, $err;
+  is(scalar @warnings, 1, 'one warning for the run, not one per event');
+  like($warnings[0], qr/\Awarning: session \S+ not fully saved: cannot write \Q$file\E: No space left on device\z/,
+    'names the session and the error');
+  is([ map { $_->{type} } events($file) ], [qw( session.created run.started message )], 'what could be written');
+
+  ( $exit, $out, $err ) = main_run('', base($root), '--json', 'hi');
+  is($exit, 0, 'with --json too');
+  is($json->decode(Encode::encode_utf8($out))->{status}, 'completed', 'the document is intact');
+  like($err, qr/^warning: session \S+ not fully saved: /m, 'the warning on stderr');
+
+  ( $exit, $out, $err ) = main_run("hi\nzwei\n", base($root), '-i');
+  is(scalar(my @w = $err =~ /not fully saved/g), 2, 'REPL: one warning per run');
+  like($out, qr/Fertig.*Fertig/s, 'both runs answered');
 };
 
 done_testing;

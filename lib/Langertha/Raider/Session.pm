@@ -83,6 +83,7 @@ has _lock_fh => ( is => 'rw', init_arg => undef );
 has _fh      => ( is => 'rw', init_arg => undef );
 has _seq     => ( is => 'rw', init_arg => undef, default => 0 );
 has _runs    => ( is => 'rw', init_arg => undef, default => 0 );
+has _torn    => ( is => 'rw', init_arg => undef, default => 0 );
 
 has _json => (
   is      => 'ro',
@@ -152,7 +153,9 @@ sub next_run {
     my $event = $session->append('tool.call', run => 'r1', call => 'c1', name => 'bash', ...);
 
 Writes one event as one line and flushes it: the fields plus C<v> (1),
-C<seq>, C<time> and C<type>. Returns the event.
+C<seq>, C<time> and C<type>. Returns the event. Croaks C<cannot write
+FILE: ...> when the line cannot be written; the next event then starts on
+a fresh line, so a partly written one damages only itself.
 
 =cut
 
@@ -161,7 +164,13 @@ sub append {
   my $fh = $self->_fh or croak 'session '.$self->id.' is closed';
   $self->_seq($self->_seq + 1);
   my $event = { %fields, v => 1, seq => $self->_seq, time => $self->clock->(), type => $type };
-  print {$fh} $self->_json->encode($event)."\n" or croak 'cannot write '.$self->path.': '.$!;
+  # After a failed write part of that line may be in the file: start anew.
+  my $line = ($self->_torn ? "\n" : '').$self->_json->encode($event)."\n";
+  unless (print {$fh} $line) {
+    $self->_torn(1);
+    croak 'cannot write '.$self->path.': '.$!;
+  }
+  $self->_torn(0);
   return $event;
 }
 

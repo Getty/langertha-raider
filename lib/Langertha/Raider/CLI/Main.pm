@@ -49,7 +49,7 @@ C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
 machine format, a machine format with C<-i>, or an unknown machine format
 version; for sessions: a C<--session> value that is no session id,
 more than one of C<--session>, C<--continue> and C<--no-session>, an unknown
-session, or C<--continue> without any session.
+or ambiguous session, or C<--continue> without any session.
 
 =item C<3> -- configuration error: F<.raider.yml> cannot be read, the
 engine is unknown, or a pack detection rule is invalid.
@@ -136,15 +136,6 @@ sub _warn {
   return;
 }
 
-# A configuration error as the user reads it: one line, without the Perl
-# source location croak appended (also the Moose accessor form).
-sub _config_error {
-  my ( $self, $error ) = @_;
-  $error =~ s/ at (?:reader \S+ \(defined at .+ line \d+\)|(?:(?! at ).)+) line \d+\.\n\z/\n/s;
-  $self->_warn($error =~ /\n\z/ ? $error : $error."\n");
-  return;
-}
-
 =method usage
 
 The C<--help> text.
@@ -220,6 +211,8 @@ Options:
   -h, --help               Show this help
 
 If no prompt is given and not interactive, reads the prompt from STDIN.
+A session ID may be shortened to a unique start of it or to its last four
+hex digits (3f2a).
 
 Exit status: 0 success, 1 the run failed, 2 usage error,
 3 configuration error, 4 the session is in use.
@@ -286,7 +279,7 @@ sub parse_options {
     return;
   }
 
-  if (defined $opt{session} && !$self->session_store_class->is_id($opt{session})) {
+  if (defined $opt{session} && !$self->session_store_class->is_ref($opt{session})) {
     $self->_warn("--session: not a session id: '".$opt{session}."'\n");
     return;
   }
@@ -414,13 +407,13 @@ sub run {
   }
   if (!$config_cmd && !$session_cmd && @prompt >= 2 && $prompt[0] eq 'session'
       && ( (@prompt == 2 && $prompt[1] eq 'list')
-        || (@prompt == 3 && $prompt[1] =~ /\A(?:show|resume)\z/ && $self->session_store_class->is_id($prompt[2])) )) {
+        || (@prompt == 3 && $prompt[1] =~ /\A(?:show|resume)\z/ && $self->session_store_class->is_ref($prompt[2])) )) {
     ( undef, $session_cmd ) = splice @prompt, 0, 2;
   }
   if ($session_cmd) {
     my $wants_id = $session_cmd ne 'list';
     $session_id = shift @prompt if $wants_id;
-    if (@prompt || ($wants_id && !$self->session_store_class->is_id($session_id))) {
+    if (@prompt || ($wants_id && !$self->session_store_class->is_ref($session_id))) {
       $self->_warn("Usage: raider session list | show ID | resume ID [options]\n");
       return EXIT_USAGE;
     }
@@ -468,7 +461,7 @@ sub run {
   # stops raider here, with its path in the message.
   my $config = $self->config_class->new(root => $opt->{root} // Path::Tiny->cwd->stringify);
   unless (eval { $config->data; 1 }) {
-    $self->_config_error($@);
+    $self->_warn($self->output->error_text($@)."\n");
     return EXIT_CONFIG;
   }
   $args{config} = $config;
@@ -501,7 +494,7 @@ sub run {
   # Unknown engine or an invalid detection rule: stop before anything runs.
   my $app = $self->app_class->new(%args);
   unless (eval { $app->_engine_class; $app->packs; 1 }) {
-    $self->_config_error($@);
+    $self->_warn($self->output->error_text($@)."\n");
     return EXIT_CONFIG;
   }
 
@@ -533,7 +526,7 @@ sub run {
   # given on argv / piped in / requested as one-shot machine output.
   my $in = $self->in;
   my $interactive = $opt->{interactive} || (!$opt->{machine} && !@prompt && -t $in);
-  $runner = $self->runner_class->new(app => $app, output => $self->output);
+  $runner = $self->runner_class->new(app => $app, output => $self->output, err => $self->err);
   my $store = $opt->{no_session} ? undef : $self->session_store_class->new(root => $app->root);
 
   # --session ID, --continue, session resume ID: the session is locked
@@ -589,27 +582,24 @@ sub run {
 
 =method resume_session
 
-    my ( $exit, $session, @notes ) = $main->resume_session($store, $id, $app);
+    my ( $exit, $session, @notes ) = $main->resume_session($store, $ref, $app);
 
-Opens session C<$id> (the newest one of the project when C<undef>, for
-C<--continue>) for writing and replays it into the app's raider through
+Opens the session C<$ref> names (L</resolve_session>; the newest one of
+the project when C<undef>, for C<--continue>) for writing and replays it
+into the app's raider through
 L<Langertha::Raider::CLI::Sessions/restore>. Returns C<undef>, the
 L<Langertha::Raider::Session> and the notes of the resume -- or, after
-reporting why, just the exit status: C<2> when there is no such session,
-C<4> when another raider has it open, C<1> when it cannot be opened or
-replayed otherwise.
+reporting why, just the exit status: C<2> when there is no such session
+or C<$ref> is ambiguous, C<4> when another raider has it open, C<1> when
+it cannot be opened or replayed otherwise.
 
 =cut
 
 sub resume_session {
-  my ( $self, $store, $id, $app ) = @_;
-  $id //= $store->latest;
+  my ( $self, $store, $ref, $app ) = @_;
+  my $id = defined $ref ? $self->resolve_session($store, $ref) : $store->latest;
   unless (defined $id) {
-    $self->_warn('no session to continue in '.$store->dir."\n");
-    return EXIT_USAGE;
-  }
-  unless ($store->exists($id)) {
-    $self->_warn('unknown session '.$id."\n");
+    $self->_warn('no session to continue in '.$store->dir."\n") unless defined $ref;
     return EXIT_USAGE;
   }
   my $session = eval { $store->open($id) };
@@ -657,12 +647,27 @@ sub session_command {
     $sessions->list($machine);
     return EXIT_OK;
   }
-  unless ($store->exists($id)) {
-    $self->_warn('unknown session '.$id."\n");
-    return EXIT_USAGE;
-  }
+  $id = $self->resolve_session($store, $id) // return EXIT_USAGE;
   $sessions->show($id, $machine);
   return EXIT_OK;
+}
+
+=method resolve_session
+
+    my $id = $main->resolve_session($store, '3f2a');
+
+The whole id of the session a command-line reference names -- the id, a
+unique start of it or its four hex digits
+(L<Langertha::Raider::SessionStore/resolve>). An unknown or ambiguous
+reference is reported on L</err> and gives C<undef>.
+
+=cut
+
+sub resolve_session {
+  my ( $self, $store, $ref ) = @_;
+  my $id = eval { $store->resolve($ref) };
+  $self->_warn($self->output->error_text($@)."\n") unless defined $id;
+  return $id;
 }
 
 =method new_session

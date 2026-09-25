@@ -191,21 +191,72 @@ The id of the newest session, or C<undef>.
 
 sub latest { ( $_[0]->ids )[0] }
 
-=method prepare
+=method is_ref
 
-Creates L</dir>. In the C<project> scope it also writes
-F<.raider/.gitignore> excluding C<sessions/> and C<lib/> when there is
-none, so journals are never committed by default.
+    $store->is_ref('3f2a');            # true
+    $store->is_ref('20260925-0815');   # true
+
+Whether the string can name a session on the command line: a whole id, the
+start of one (at least four characters), or the four hex digits at its end.
+Also works as a class method. L</resolve> finds the session it names.
 
 =cut
 
-sub prepare {
+sub is_ref {
+  my ( $self, $ref ) = @_;
+  return 0 unless defined $ref && length $ref >= 4 && length $ref <= 20;
+  return 1 if $ref =~ /\A[0-9a-f]{4}\z/;
+  return $self->is_id($ref.substr('00000000-000000-0000', length $ref));
+}
+
+=method resolve
+
+    my $id = $store->resolve('3f2a');
+
+The id of the one session a reference (L</is_ref>) names: the session with
+that id, else the one whose id starts with it or ends in C<-REF>. Croaks
+C<unknown session REF> when there is none, and C<session REF is
+ambiguous: ID, ID> (newest first) when there is more than one.
+
+=cut
+
+sub resolve {
+  my ( $self, $ref ) = @_;
+  croak 'unknown session '.($ref // '(undef)') unless $self->is_ref($ref);
+  return $ref if $self->exists($ref);
+  my @ids = grep { index($_, $ref) == 0 || substr($_, -5) eq '-'.$ref } $self->ids;
+  croak 'unknown session '.$ref unless @ids;
+  croak 'session '.$ref.' is ambiguous: '.join(', ', @ids) if @ids > 1;
+  return $ids[0];
+}
+
+=method prepare_base
+
+Creates L</base>. In the C<project> scope it also writes
+F<.raider/.gitignore> excluding C<sessions/> and C<lib/> when there is
+none, so journals and the local::lib of the Perl tools are never committed
+by default. Whatever creates F<.raider/> goes through here.
+
+=method prepare
+
+L</prepare_base>, then creates L</dir>.
+
+=cut
+
+sub prepare_base {
   my ( $self ) = @_;
-  $self->dir->mkpath;
+  $self->base->mkpath;
   if ($self->scope eq 'project') {
     my $ignore = $self->base->child('.gitignore');
     $ignore->spew_utf8("sessions/\nlib/\n") unless -e $ignore;
   }
+  return;
+}
+
+sub prepare {
+  my ( $self ) = @_;
+  $self->prepare_base;
+  $self->dir->mkpath;
   return;
 }
 

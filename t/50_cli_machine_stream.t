@@ -8,12 +8,12 @@ use Test2::V0;
 use Data::MessagePack;
 use Encode qw( decode_utf8 );
 use File::Temp qw( tempdir );
-use Future;
 use JSON::MaybeXS ();
 use Path::Tiny;
 use YAML::PP;
 use lib 't/lib';
 use Test::Raider::Env qw( clear_engine_env );
+use Test::Raider::SeqEngine;
 use Langertha::Raider::CLI::Machine;
 use Langertha::Raider::CLI::Main;
 use Langertha::Raider::CLI::Output;
@@ -21,99 +21,10 @@ use Langertha::Raider;
 
 clear_engine_env();
 
-# --- a scripted engine, same shape as t/86_raider_self_tools.t ---
-
-{
-  package SeqResponse;
-  use Moose;
-  sub is_success  { 1 }
-  sub status_line { '200 OK' }
-  sub content     { '' }
-  __PACKAGE__->meta->make_immutable;
-}
-
-{
-  package SeqHTTP;
-  use Moose;
-  use IO::Async::Loop;
-  has loop => (is => 'ro', default => sub { IO::Async::Loop->new });
-  sub do_request { return $_[0]->loop->new_future->done(SeqResponse->new) }
-  __PACKAGE__->meta->make_immutable;
-}
-
-{
-  package SeqMCP;
-  use Moose;
-  use Future;
-  sub list_tools { return Future->done([ { name => 'bash' }, { name => 'broken' } ]) }
-  sub call_tool {
-    my ( $self, $name, $input ) = @_;
-    return Future->done({ content => [ { type => 'text', text => 'x' x 1500 } ] }) if $name eq 'bash';
-    return Future->done({ content => [ { type => 'text', text => "nope: ä\nline 2" } ], isError => 1 });
-  }
-  __PACKAGE__->meta->make_immutable;
-}
-
-{
-  package SeqEngine;
-  use Moose;
-  with 'Langertha::Role::Tools';
-
-  has chat_model     => (is => 'ro', default => 'seq-model');
-  has '+mcp_servers' => (default => sub { [] });
-  has turns          => (is => 'ro', default => sub { [] });
-  has _turn_idx      => (is => 'rw', default => 0);
-  has _http          => (is => 'ro', lazy => 1, default => sub { SeqHTTP->new });
-
-  sub async_request_f { return $_[0]->_http->do_request }
-  sub async_loop      { return $_[0]->_http->loop }
-
-  sub format_tools            { return $_[1] }
-  sub build_tool_chat_request { return { request => 1 } }
-  sub response_tool_calls     { return $_[1]->{tool_calls} // [] }
-  sub response_text_content   { return $_[1]->{text} // 'final answer' }
-  sub extract_tool_call       { return ($_[1]->{name}, $_[1]->{input}) }
-  sub think_tag_filter        { 0 }
-  sub format_tool_results     { my ( $self, $data, $results ) = @_; return map { { role => 'tool', content => 'r' } } @$results }
-
-  sub parse_response {
-    my ( $self ) = @_;
-    my $i = $self->_turn_idx;
-    $self->_turn_idx($i + 1);
-    return $self->turns->[$i] // { tool_calls => [] };
-  }
-
-  __PACKAGE__->meta->make_immutable;
-}
-
-# A raider CLI running the real raid loop against SeqEngine; the prompt
-# 'fail' makes the engine die mid-run.
-package My::App {
-  use Moose;
-  extends 'Langertha::Raider::CLI';
-  sub _build_mcps { [] }
-  sub _build_engine {
-    my ( $self ) = @_;
-    return SeqEngine->new(mcp_servers => [ SeqMCP->new ], turns => [
-      { tool_calls => [
-        { name => 'bash',   input => { command => 'ls' } },
-        { name => 'broken', input => {} },
-      ] },
-      { tool_calls => [], text => 'Fertig ✓' },
-    ]);
-  }
-  around run => sub {
-    my ( $orig, $self, $text ) = @_;
-    die "kaputt\n" if $text eq 'fail';
-    return $self->$orig($text);
-  };
-  __PACKAGE__->meta->make_immutable;
-}
-
 package My::Main {
   use Moose;
   extends 'Langertha::Raider::CLI::Main';
-  sub app_class { 'My::App' }
+  sub app_class { 'Test::Raider::SeqEngine::App' }
   __PACKAGE__->meta->make_immutable;
 }
 
@@ -191,7 +102,7 @@ subtest 'events: fields, seq, framing in every encoding' => sub {
 
 subtest 'Events plugin: tool.call and tool.result' => sub {
   my @got;
-  my $plugin = Langertha::Raider->new(engine => SeqEngine->new, plugins => [ '+Langertha::Raider::Plugin::Events' =>
+  my $plugin = Langertha::Raider->new(engine => Test::Raider::SeqEngine::Engine->new, plugins => [ '+Langertha::Raider::Plugin::Events' =>
     { on_event => sub { push @got, [ @_ ] } } ])->_plugin_instances->[0];
   my @tc = $plugin->plugin_before_tool_call('bash', { command => 'ls' })->get;
   is(\@tc, [ 'bash', { command => 'ls' } ], 'the call passes through');

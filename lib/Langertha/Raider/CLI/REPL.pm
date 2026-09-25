@@ -104,7 +104,8 @@ the first prompt. Without one (C<--no-session>) nothing is recorded.
 =attr session
 
 The L<Langertha::Raider::Session> the prompts are recorded in, once there
-is one.
+is one. A C</clear> is recorded there too, as C<history.cleared>, so
+resuming the session starts with an empty history again.
 
 =cut
 
@@ -283,6 +284,9 @@ sub run {
     $call->(add => $line);
     if ($line =~ m{^/}) {
       $self->commands->dispatch($line);
+      # A resume must not bring back what /clear removed (ADR 0015).
+      $self->runner->record($self->session, 'history.cleared')
+        if $self->has_session && $line =~ m{\A/clear(?:\s|\z)};
       next;
     }
     $self->run_prompt($line);

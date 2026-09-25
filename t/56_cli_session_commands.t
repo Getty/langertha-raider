@@ -110,7 +110,7 @@ subtest 'session show' => sub {
   like($out, qr/^r1 user\s+hallo$/m, 'the input');
   like($out, qr/^r1 tool\s+c1 bash \{"command":"ls"\}$/m, 'the tool call');
   like($out, qr/^r1 result\s+c1 succeeded, 1500 chars: x+\.\.\.$/m, 'its result, short');
-  like($out, qr/^r1 result\s+c2 failed, 7 chars: nope: ä$/m, 'a failed tool');
+  like($out, qr/^r1 result\s+c2 failed, 14 chars: nope: ä line 2$/m, 'a failed tool');
   like($out, qr/^r1 assistant Fertig ✓$/m, 'the answer');
   like($out, qr/^r1 finished\s+completed, [\d.]+s$/m, 'the end');
 
@@ -252,6 +252,59 @@ subtest 'session resume ID: the REPL on the session' => sub {
 
   ( $exit, $out ) = main_run("drei\n", '-r', $root, engine(), '-i', '--continue');
   like($out, qr/^resumed session \Q$id\E: 2 runs/m, '-i --continue');
+};
+
+subtest 'short ids: a unique prefix or the four hex digits' => sub {
+  my $root = tempdir(CLEANUP => 1);
+  my $dir = path($root, '.raider', 'sessions');
+  main_run('', '-r', $root, engine(), 'eins');
+  my $store = Langertha::Raider::SessionStore->new(root => $root);
+  my ( $id ) = $store->ids;
+  my ( $tail ) = $id =~ /-([0-9a-f]{4})\z/;
+  # two more sessions of another day, told apart only by their time
+  my $other = $tail eq 'beef' ? 'cafe' : 'beef';
+  $dir->child('20200101-000000-'.$other.'.jsonl')->spew_raw('');
+  $dir->child('20200101-000001-'.$other.'.jsonl')->spew_raw('');
+
+  my ( $exit, $out, $err ) = main_run('', 'session', 'show', $tail, '-r', $root);
+  is($exit, 0, 'session show TAIL');
+  like($out, qr/^session\s+\Q$id\E$/m, 'the whole id');
+  ( $exit, $out ) = main_run('', '-r', $root, 'session', 'show', substr($id, 0, 11), '--json');
+  is(doc($out)->{id}, $id, 'a prefix, behind options');
+
+  ( $exit, $out, $err ) = main_run('', '-r', $root, engine(), '--session', $tail, 'zwei');
+  is($exit, 0, '--session TAIL');
+  like($err, qr/\Aresumed session \Q$id\E: 1 run/, 'resumed the whole id');
+
+  ( $exit, $out, $err ) = main_run('', 'session', 'show', '20200101', '-r', $root);
+  is($exit, 2, 'ambiguous: usage error');
+  is($err, "session 20200101 is ambiguous: 20200101-000001-$other, 20200101-000000-$other\n", 'names the candidates');
+  ( $exit, $out, $err ) = main_run('', '-r', $root, engine(), '--session', $other, 'hi');
+  is($exit, 2, 'an ambiguous tail for --session');
+  like($err, qr/\Asession \Q$other\E is ambiguous: /, 'reported');
+  is(scalar @Test::Raider::SeqEngine::REQUESTS, 0, 'nothing ran');
+  ( $exit, $out, $err ) = main_run('', 'session', 'show', '0000', '-r', $root);
+  is($exit, 2, 'no match');
+  is($err, "unknown session 0000\n", 'reported');
+};
+
+subtest '/clear is recorded, and a resume starts after it' => sub {
+  my $root = tempdir(CLEANUP => 1);
+  main_run("eins\n/clear\nzwei\n", '-r', $root, engine(), '-i');
+  my $store = Langertha::Raider::SessionStore->new(root => $root);
+  my ( $id ) = $store->ids;
+  my @e = events($store->path_of($id));
+  is([ map { $_->{type} eq 'message' ? $_->{content} : $_->{type} } grep { $_->{type} =~ /\A(?:message|history\.cleared)\z/ } @e ],
+    [ 'eins', 'Fertig ✓', 'history.cleared', 'zwei', 'Fertig ✓' ], 'history.cleared between the runs');
+  ok(!exists((grep { $_->{type} eq 'history.cleared' } @e)[0]{run}), 'outside any run');
+
+  my ( $exit, $out, $err ) = main_run('', '-r', $root, engine(), '--session', $id, 'drei');
+  is($err, "resumed session $id: 2 runs, 2 messages in the history\n", 'only what came after /clear');
+  is([ map { $_->{content} } grep { $_->{role} eq 'user' } @{ $Test::Raider::SeqEngine::REQUESTS[0] } ],
+    [ 'zwei', match qr/\ndrei\z/ ], 'the cleared input is not sent again');
+
+  main_run("/clear\n/help\n", '-r', $root, engine(), '-i');
+  is(scalar(my @ids = $store->ids), 1, '/clear before any prompt starts no session');
 };
 
 done_testing;
