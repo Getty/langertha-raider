@@ -94,7 +94,12 @@ Revision history for Langertha-Raider
       .raider-hall.yml, 0 keeps all).
     - The hall moves a slot log over logs.max_log_size (default 1 MiB, 0
       off) to SLOT.log.1 when the slot's next run starts; raider hall logs
-      ID works after the run has ended, with or without --follow.
+      ID works after the run has ended, with or without --follow. Each
+      run marks its start in the slot log, and logs ID shows only that
+      run's part.
+    - A plain hall raider name (bjorn) runs its missions in parallel and
+      each run is tracked and reported on its own; numbered names (1bjorn)
+      stay singletons with a queue.
     - A one-shot raider stopped by SIGINT or SIGTERM writes the
       "interrupted" document (or run.state/run.finished when streaming),
       then dies of the same signal (shell status 130/143), also when the
