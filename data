@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-25T01:52:02Z
+claimed_by: worker-json
+class: standard
+completed: 2026-09-25T01:52:02Z
+created: 2026-09-25T01:35:03Z
+id: 54
+priority: medium
+started: 2026-09-25T01:52:02Z
+status: done
+tags:
+- cli
+- json
+title: 'JSON 2: --stream-json (JSONL-Events, ADR 0013)'
+updated: 2026-09-25T01:52:02Z
+---
+
+ADR 0013, nach JSON 1. Events run.started, run.state, message, tool.call, tool.result (gekuerzt, truncated-Flag), run.finished (= --json-Dokument, immer letzte Zeile, auch bei Fehler). version/type/seq/time pro Event, flush pro Event, schliesst --json aus. Quelle fuer tool.call: Trace-Plugin bzw. Plugin-Hooks. Keine text.delta in v1.
+
+ADR 0013 erweitert: auch --stream-msgpack (konkatenierte MessagePack-Objekte, binaer) und --stream-yaml (--- pro Event). Alle sechs Flags schliessen sich gegenseitig aus.
