@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T04:29:06Z
+claimed_by: worker-session-hall
+class: standard
+completed: 2026-09-25T04:29:06Z
+created: 2026-09-25T03:14:41Z
+id: 68
+priority: medium
+started: 2026-09-25T04:29:06Z
+status: done
+tags:
+- sessions
+- hall
+title: 'Session 4: Hall bindet Laeufe an Sessions (Telegram-Chat, Singleton-Slot,
+  Cron)'
+updated: 2026-09-25T04:29:06Z
+---
+
+ADR 0015 Hall bindings, nach Session 3. Map Binding->Session-ID im Hall-Verzeichnis; Telegram (bot+chat_id[+thread]) und nummerierte Slots setzen fort, Cron-Job eigene Session, unnummerierte Laeufe frische Session. Hall startet raider mit --session ID (bzw. neue). Session-Lock-Kollision -> raider.done failed mit klarer Meldung. Session-Scope: Hall-Root als Projekt. ACP-Sessions (Hall/ACP.pm) auf dieselbe Bindung abbilden, falls klein; sonst Folgeticket.
