@@ -52,7 +52,7 @@ subtest 'init: writes .raider-hall.yml with the given/default values' => sub {
 
   my $yml = YAML::PP->new->load_string( path($tmp)->child('.raider-hall.yml')->slurp_utf8 );
   is( $yml->{longhouse}, 0, 'longhouse off by default' );
-  is( $yml->{raiders}{Bjorn}{engine}, 'anthropic', 'default engine' );
+  ok( !exists $yml->{raiders}{Bjorn}{engine}, 'no engine: the raider decides itself' );
   is( $yml->{raiders}{Bjorn}{persona}, 'caveman', 'default persona' );
 };
 
@@ -99,6 +99,17 @@ subtest 'add-raider: appends to an existing config, keeps the other raider' => s
   is( $yml->{raiders}{Astrid}{packs}, ['git-guru', 'polite'], 'repeated --pack collected in order' );
   is( $yml->{raiders}{Astrid}{isolated}, 1, 'isolated flag' );
   ok( exists $yml->{raiders}{Bjorn}, 'existing raider preserved' );
+};
+
+subtest 'add-raider: without --engine, no engine key is written' => sub {
+  my $tmp = tempdir( CLEANUP => 1 );
+  path($tmp)->child('.raider-hall.yml')->spew_utf8( YAML::PP->new->dump({ raiders => {} }) );
+  my ( $rv, $out, $died ) = run_hall_cli_in( $tmp, undef, 'add-raider', 'Ivar' );
+  is( $died, undef, 'lives' );
+  my $yml = YAML::PP->new->load_string( path($tmp)->child('.raider-hall.yml')->slurp_utf8 );
+  ok( exists $yml->{raiders}{Ivar}, 'raider added' );
+  ok( !exists $yml->{raiders}{Ivar}{engine}, 'no engine: the raider decides itself' );
+  is( $yml->{raiders}{Ivar}{persona}, 'caveman', 'default persona' );
 };
 
 subtest 'add-raider: dies without an existing hall' => sub {

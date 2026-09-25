@@ -108,15 +108,15 @@ sub run_init {
     exit 1 unless length $name;
   }
 
-  my $engine = $opt{engine} // 'anthropic';
   my $persona = $opt{persona} // 'caveman';
   my $dir = cwd;
 
+  # No --engine: no engine key, the spawned raider decides itself.
   my %yml;
   $yml{longhouse} = 0;
   $yml{preferred_lib_target} = '.raider-hall/lib';
   $yml{raiders}{$name} = {
-    engine => $engine,
+    ($opt{engine} ? (engine => $opt{engine}) : ()),
     persona => $persona,
     packs => [],
     mcp => [],
@@ -157,7 +157,7 @@ sub run_add_raider {
   }
 
   $yml->{raiders}{$name} = {
-    engine   => $opt{engine}  // 'anthropic',
+    ($opt{engine} ? (engine => $opt{engine}) : ()),
     persona  => $opt{persona} // 'caveman',
     ($opt{model} ? (model => $opt{model}) : ()),
     packs    => $opt{pack} // [],
@@ -177,7 +177,7 @@ raider hall add-raider NAME [options]
 Append a raider entry to .raider-hall.yml.
 
 Options:
-  --engine NAME      Engine (default: anthropic)
+  --engine NAME      Engine (default: none, the raider decides)
   --persona NAME     Persona pack (default: caveman)
   --model NAME       Model override
   --pack NAME        Additional pack (repeatable)
