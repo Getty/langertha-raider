@@ -5,7 +5,8 @@ use Moose;
 use namespace::autoclean;
 use Config;
 use IO::Handle;
-use POSIX qw( sigprocmask SIG_UNBLOCK );
+use POSIX qw( sigprocmask SIG_UNBLOCK WNOHANG );
+use Path::Tiny;
 use Time::HiRes ();
 
 =head1 SYNOPSIS
@@ -71,8 +72,8 @@ sub run_prompt {
 
   # Handled right in the signal handler: a die from it would be swallowed
   # by whichever eval the run happens to be in (LWP, the raid loop).
-  local $SIG{INT}  = $o{catch_signals} ? sub { $self->interrupt(INT  => $machine, $self->_since($t0)) } : $SIG{INT};
-  local $SIG{TERM} = $o{catch_signals} ? sub { $self->interrupt(TERM => $machine, $self->_since($t0)) } : $SIG{TERM};
+  local $SIG{INT}  = $o{catch_signals} ? sub { $self->interrupt(INT  => $machine, $self->elapsed_since($t0)) } : $SIG{INT};
+  local $SIG{TERM} = $o{catch_signals} ? sub { $self->interrupt(TERM => $machine, $self->elapsed_since($t0)) } : $SIG{TERM};
 
   if ($machine) {
     $machine->event('run.started', engine => $app->engine_name,
@@ -82,7 +83,7 @@ sub run_prompt {
 
   my $result;
   my $ok = eval { $result = $app->run($text); 1 };
-  my $elapsed = $self->_since($t0);
+  my $elapsed = $self->elapsed_since($t0);
 
   unless ($ok) {
     my $err = $@; chomp $err;
@@ -117,9 +118,15 @@ sub run_prompt {
 
     $runner->interrupt(TERM => $machine, $elapsed);
 
-Ends a run interrupted by the signal: prints a note, or with a C<machine>
+Ends a run interrupted by the signal: ends the tool subprocesses still
+running (L</terminate_children>), prints a note, or with a C<machine>
 writes the C<interrupted> state change and document (with the C<signal>),
 then dies of that same signal through L</die_of_signal>.
+
+With a C<machine> it also works as a class method, which
+L<Langertha::Raider::CLI::Main> uses for a signal during startup, before
+there is an app to run: the stream then has no C<run.started>, only the
+C<interrupted> state change and C<run.finished>.
 
 =cut
 
@@ -128,6 +135,7 @@ sub interrupt {
   # A second signal must not cut the document short.
   local $SIG{INT}  = 'IGNORE';
   local $SIG{TERM} = 'IGNORE';
+  $self->terminate_children;
   if ($machine) {
     $self->_finish_machine($machine, interrupted => signal => $signal, elapsed => $elapsed);
   }
@@ -161,8 +169,82 @@ sub die_of_signal {
   exit 128 + $number{$signal};
 }
 
-# Seconds since $t0, to the millisecond.
-sub _since {
+=method terminate_children
+
+    $runner->terminate_children;
+
+Ends the processes this raider started that still run -- a C<bash>
+command (L<MCP::Run::Bash> puts it into a process group of its own, so a
+signal aimed at raider alone never reaches it), a C<perl_eval> or
+C<perl_cpanm> child: C<SIGTERM> to each child's process group, or to the
+child when it leads none, and C<SIGKILL> to what is left after
+L</terminate_grace> seconds.
+
+=cut
+
+sub terminate_grace { 2 }
+
+sub terminate_children {
+  my ( $self ) = @_;
+  my @pids = $self->child_pids or return;
+  $self->_signal_group_or_pid(TERM => $_) for @pids;
+  my %left = map { $_ => 1 } @pids;
+  my $deadline = Time::HiRes::time() + $self->terminate_grace;
+  while (%left && Time::HiRes::time() < $deadline) {
+    delete @left{ grep { waitpid($_, WNOHANG) != 0 } keys %left };
+    Time::HiRes::sleep(0.05) if %left;
+  }
+  for my $pid (keys %left) {
+    $self->_signal_group_or_pid(KILL => $pid);
+    waitpid $pid, 0;
+  }
+  return;
+}
+
+=method child_pids
+
+The process IDs of this process's children, from F</proc>, or from C<ps>
+where there is none.
+
+=cut
+
+sub child_pids {
+  my ( $self ) = @_;
+  my @children;
+  if (-d '/proc/'.$$) {
+    for my $dir (path('/proc')->children(qr/\A\d+\z/)) {
+      # "pid (comm) state ppid ...": comm may hold spaces and parens.
+      my $stat = eval { $dir->child('stat')->slurp } // next;
+      my ( $ppid ) = substr($stat, rindex($stat, ')') + 2) =~ /\A\S+ (\d+)/ or next;
+      push @children, 0 + $dir->basename if $ppid == $$;
+    }
+    return @children;
+  }
+  my $ps_pid = open(my $ps, '-|', 'ps', '-A', '-o', 'pid=', '-o', 'ppid=') or return;
+  while (my $line = <$ps>) {
+    my ( $pid, $ppid ) = $line =~ /(\d+)\s+(\d+)/ or next;
+    push @children, 0 + $pid if $ppid == $$ && $pid != $ps_pid;
+  }
+  close $ps;
+  return @children;
+}
+
+# The child's process group when it leads one, else the child alone.
+sub _signal_group_or_pid {
+  my ( $self, $signal, $pid ) = @_;
+  return kill($signal => -$pid) || kill($signal => $pid);
+}
+
+=method elapsed_since
+
+    my $elapsed = $runner->elapsed_since($t0);
+
+Seconds since the L<Time::HiRes> time C<$t0>, to the millisecond: the
+C<elapsed> of a document.
+
+=cut
+
+sub elapsed_since {
   my ( $self, $t0 ) = @_;
   return 0 + sprintf('%.3f', Time::HiRes::time() - $t0);
 }

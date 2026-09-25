@@ -7,6 +7,7 @@ use utf8;
 use Getopt::Long ();
 use IO::Prompt::Tiny qw( prompt );
 use Path::Tiny;
+use Time::HiRes ();
 use Langertha::Raider::ACP::CLI;
 use Langertha::Raider::CLI;
 use Langertha::Raider::CLI::Machine;
@@ -382,6 +383,13 @@ sub run {
     : undef;
   $args{on_event} = sub { $machine->event(@_) } if $machine && $machine->stream;
 
+  # A machine consumer gets its interrupted document also for a signal
+  # during startup (configuration, reading the prompt); the runner takes
+  # the signals over once the run starts.
+  my $t0 = Time::HiRes::time();
+  local $SIG{INT}  = $machine ? sub { $self->interrupt_startup(INT  => $machine, $t0) } : $SIG{INT};
+  local $SIG{TERM} = $machine ? sub { $self->interrupt_startup(TERM => $machine, $t0) } : $SIG{TERM};
+
   # The one reader/writer of .raider.yml. Parsed up front so a broken file
   # stops raider here, with its path in the message.
   my $config = $self->config_class->new(root => $opt->{root} // Path::Tiny->cwd->stringify);
@@ -483,6 +491,23 @@ sub run {
   }
   my $runner = $self->runner_class->new(app => $app, output => $self->output);
   return $runner->run_prompt($text, machine => $machine, catch_signals => 1) ? EXIT_OK : EXIT_RUN_ERROR;
+}
+
+=method interrupt_startup
+
+    $main->interrupt_startup(TERM => $machine, $t0);
+
+Ends raider on a C<SIGINT> or C<SIGTERM> that arrives with a machine
+format before the run starts: the C<interrupted> document (or its
+C<run.finished>), then death by the signal, as for an interrupted run
+(L<Langertha::Raider::CLI::Runner/interrupt>).
+
+=cut
+
+sub interrupt_startup {
+  my ( $self, $signal, $machine, $t0 ) = @_;
+  my $runner = $self->runner_class;
+  return $runner->interrupt($signal => $machine, $runner->elapsed_since($t0));
 }
 
 __PACKAGE__->meta->make_immutable;

@@ -101,4 +101,67 @@ subtest 'human output: a note, no Perl error, death by the signal' => sub {
   unlike($stderr, qr/ at \S+ line \d+/, 'no Perl error on stderr') or diag $stderr;
 };
 
+# Spawns bin/raider with @flags and no prompt, its stdin a pipe the test
+# keeps open: raider blocks reading the prompt, before run.started. Waits
+# until the kernel reports it blocked on that pipe, sends $signal and
+# returns ( wait status, stdout, stderr ).
+sub startup_interrupted_run {
+  my ( $signal, @flags ) = @_;
+  my $out = path($root)->child('out');
+  my $err = path($root)->child('err');
+  pipe my $stdin_r, my $stdin_w or die 'pipe: '.$!;
+  my $pid = fork // die 'fork: '.$!;
+  unless ($pid) {
+    close $stdin_w;
+    open STDIN,  '<&', $stdin_r or die $!;
+    open STDOUT, '>', "$out"    or die $!;
+    open STDERR, '>', "$err"    or die $!;
+    exec $^X, '-I'.$repo->child('lib'), "$bin", '-r', $root, '-e', 'openai', '-k', 'test',
+      '-m', 'stub-model', '-o', 'url='.$url, '--no-trace', @flags;
+    die 'exec: '.$!;
+  }
+  close $stdin_r;
+  my $wchan = path('/proc', $pid, 'wchan');
+  my $blocked;
+  for (1 .. 300) {
+    $blocked = ( eval { $wchan->slurp } // '' ) =~ /pipe/ and last;
+    select undef, undef, undef, 0.1;
+  }
+  $blocked ? kill $signal => $pid : kill KILL => $pid;
+  local $SIG{ALRM} = sub { kill KILL => $pid };
+  alarm 30;
+  waitpid $pid, 0;
+  my $status = $?;
+  alarm 0;
+  close $stdin_w;
+  return ( $status, $out->slurp_raw, $err->slurp_utf8 );
+}
+
+SKIP: {
+  skip 'needs /proc/PID/wchan to see raider wait for its prompt', 2
+    unless -r path('/proc', $$, 'wchan');
+
+  subtest '--json: SIGTERM during startup writes the interrupted document' => sub {
+    my ( $status, $stdout, $stderr ) = startup_interrupted_run(TERM => '--json');
+    died_of($status, 'TERM', '--json at startup');
+    my $doc = eval { JSON::MaybeXS->new(utf8 => 1)->decode($stdout) };
+    is($doc, { version => 1, status => 'interrupted', signal => 'TERM', elapsed => D() },
+      'one document, status interrupted') or diag 'stdout: '.$stdout."\nstderr: ".$stderr;
+    unlike($stderr, qr/ at \S+ line \d+/, 'no Perl error on stderr') or diag $stderr;
+  };
+
+  subtest '--stream-json: SIGINT during startup ends with run.finished' => sub {
+    my ( $status, $stdout, $stderr ) = startup_interrupted_run(INT => '--stream-json');
+    died_of($status, 'INT', '--stream-json at startup');
+    my $json = JSON::MaybeXS->new(utf8 => 1);
+    my @events = map { $json->decode($_) } split /\n/, $stdout;
+    is([ map { $_->{type} } @events ], [qw( run.state run.finished )],
+      'no run.started: the state change and run.finished')
+      or diag 'stdout: '.$stdout."\nstderr: ".$stderr;
+    is($events[0]{state}, 'interrupted', 'state is interrupted');
+    like($events[-1], { status => 'interrupted', signal => 'INT', elapsed => D(), seq => 2 },
+      'run.finished carries the interrupted document');
+  };
+}
+
 done_testing;

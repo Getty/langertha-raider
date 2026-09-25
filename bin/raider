@@ -157,7 +157,9 @@ The types of version 1, with the fields each adds:
 
 =over
 
-=item C<run.started> -- C<engine> and, when there is one, C<model>.
+=item C<run.started> -- C<engine> and, when there is one, C<model>. A run
+interrupted during startup (reading the configuration or the prompt) has
+none: its stream is the C<interrupted> state change and C<run.finished>.
 
 =item C<run.state> -- C<state>: C<running> when the run starts, then the
 C<status> it ends with (see L</The document>).
@@ -227,8 +229,10 @@ version.
 engine is unknown.
 
 =item C<130>, C<143> -- a one-shot run was interrupted by C<SIGINT> or
-C<SIGTERM>. F<raider> writes the C<interrupted> document (or its events,
-or a note), then dies of that same signal, so a shell reports 128 plus
+C<SIGTERM>. F<raider> ends the tool commands still running, writes the
+C<interrupted> document (or its events, or a note; with a machine format
+also for a signal during startup), then dies of that same signal, so a
+shell reports 128 plus
 the signal number and a parent that waits for it sees a process killed
 by the signal.
 
