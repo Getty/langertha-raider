@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-09-25T22:28:56Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-25T22:28:56Z
+created: 2026-09-25T21:58:25Z
+id: 82
+priority: medium
+started: 2026-09-25T21:58:52Z
+status: done
+tags:
+- packs
+title: 'Packs: Discovery aus ~/.raider/packs und .raider/packs, tote Pack-Felder streichen'
+updated: 2026-09-25T22:28:56Z
+---
+
+Aus #22, Maintainer-Entscheid 2026-09-25: Packs zusaetzlich aus ~/.raider/packs/<name>/ und <project>/.raider/packs/<name>/ laden (gleiches Layout wie share/packs: pack.yml + SKILL.md). Projekt vor Home vor share bei gleichem Namen. Projekt-Packs nur wenn der Workspace trusted ist (ADR 0004/0012; wenn es noch keinen Trust-Mechanismus gibt: wie bei detect-Regeln aus .raider/ verfahren). raider config explain zeigt die Quelle. Pack-Felder extra_mcp/add_allowed_commands/engine_options (Packs.pm) entfernen, bis ADR 0005 Capability-Anfragen regelt. Tests.
