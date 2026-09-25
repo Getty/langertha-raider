@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-25T02:38:17Z
+claimed_by: worker-cli3
+class: standard
+completed: 2026-09-25T02:38:17Z
+created: 2026-09-25T01:52:16Z
+id: 58
+priority: low
+started: 2026-09-25T02:22:14Z
+status: done
+tags:
+- cli
+- json
+title: 'Kleinkram Machine output: -i mit Maschinenformat, elapsed ganzzahlig'
+updated: 2026-09-25T02:38:17Z
+---
+
+Aus #54: (1) -i zusammen mit --json/--stream-* startet die REPL mit menschlicher Ausgabe -> Usage-Fehler. (2) elapsed ist ganzzahlig (Runner misst mit time), ADR-Beispiel zeigt Bruchteil -> Time::HiRes.
