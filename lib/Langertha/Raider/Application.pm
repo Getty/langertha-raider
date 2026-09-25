@@ -8,7 +8,7 @@ use Future::AsyncAwait;
 use Net::Async::MCP;
 use MCP::Run::Bash;
 use Path::Tiny;
-use Scalar::Util qw( weaken );
+use Scalar::Util qw( blessed weaken );
 use Time::HiRes ();
 use Langertha::Raider::HallTools qw( build_hall_tools_server );
 
@@ -861,7 +861,7 @@ has loop => (
 );
 
 has _engine => (is => 'ro', lazy => 1, builder => '_build_engine');
-has _raider => (is => 'ro', lazy => 1, builder => '_build_raider');
+has _raider => (is => 'ro', lazy => 1, builder => '_build_raider', predicate => '_has_raider');
 has _mcps   => (is => 'ro', lazy => 1, builder => '_build_mcps');
 
 sub _build_api_key { $_[0]->engine_resolver->api_key }
@@ -968,7 +968,10 @@ async sub raid_f {
   for my $mcp (@{$self->_mcps}) {
     await $mcp->initialize;
   }
-  return await $self->_raider->raid_f(@messages);
+  my $raider = $self->_raider;
+  # A cancel_run that came before the raider was there.
+  $raider->cancel if $self->_run && $self->_run->{cancelled};
+  return await $raider->raid_f(@messages);
 }
 
 =method run
@@ -1006,11 +1009,12 @@ Every event of the run goes to C<on_event> (and L</on_event>) through
 L</event>: the journal types and C<run.state> (C<running>, then the end
 state), as ADR 0013 names them.
 
-Returns the outcome as a hash reference: C<status> (C<completed> or
-C<failed>), C<elapsed> (seconds, to the millisecond), C<result> (the
-L<Langertha::Raider::Result>), C<response> (its text) and C<metrics> of a
-completed run, C<error> of a failed one, and C<session> (C<id>, C<path>)
-when there is one. An empty C<$text> runs nothing and returns nothing.
+Returns the outcome as a hash reference: C<status> (C<completed>,
+C<failed>, or C<cancelled> after L</cancel_run>), C<elapsed> (seconds, to
+the millisecond), C<result> (the L<Langertha::Raider::Result>, also of a
+cancelled run), C<response> (its text) and C<metrics> of a completed run,
+C<error> of a failed one, and C<session> (C<id>, C<path>) when there is
+one. An empty C<$text> runs nothing and returns nothing.
 
 =cut
 
@@ -1037,6 +1041,9 @@ sub run_prompt {
     my $error = $@;
     chomp $error;
     return $self->end_run(failed => error => $error);
+  }
+  if (blessed $result && $result->can('is_cancelled') && $result->is_cancelled) {
+    return { %{ $self->end_run('cancelled') }, result => $result };
   }
   $self->event('message', role => 'assistant', content => "$result");
   my $metrics = $self->raider->metrics;
@@ -1098,7 +1105,31 @@ sub end_run {
   }
   $self->event('run.state', state => $status);
   $self->_clear_run;
+  # A cancel that came too late for the raid must not hit the next run.
+  $self->_raider->clear_cancel if $self->_has_raider;
   return \%end;
+}
+
+=method cancel_run
+
+    $app->cancel_run;
+
+Cancels the run in progress (ADR 0009): its raid stops at the next safe
+point (L<Langertha::Raider/cancel>) and L</run_prompt> ends the run as
+C<cancelled> -- C<run.finished> with that status, and a tool call cut off
+gets its C<tool.result> with status C<cancelled>. Tool subprocesses are
+not signalled here; that is the surface's to do. Only records the
+request, so a signal handler may call it. Outside a run it does nothing
+and returns false.
+
+=cut
+
+sub cancel_run {
+  my ( $self ) = @_;
+  my $run = $self->_run or return 0;
+  $run->{cancelled} = 1;
+  $self->_raider->cancel if $self->_has_raider;
+  return 1;
 }
 
 =method event

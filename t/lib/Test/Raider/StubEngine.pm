@@ -15,16 +15,19 @@ our @EXPORT_OK = qw( stub_engine alive );
 =func stub_engine
 
     my ( $pid, $url ) = stub_engine($tool, \%arguments);
+    my ( $pid, $url ) = stub_engine($tool, \%arguments, delay => 30);
 
-Starts the stub engine endpoint in its own process: every chat completion
-answers with one call of C<$tool> with C<%arguments>; anything else (the
+Starts the stub engine endpoint in its own process: a chat completion
+answers with one call of C<$tool> with C<%arguments>, or with the text
+C<done> once the conversation holds a tool result; anything else (the
 session embedding request) gets a 404. Returns its pid (kill and reap it
-when done) and the base URL for C<-o url=...>.
+when done) and the base URL for C<-o url=...>. With C<delay>, the first
+chat completion is answered only after that many seconds.
 
 =cut
 
 sub stub_engine {
-  my ( $tool, $arguments ) = @_;
+  my ( $tool, $arguments, %o ) = @_;
   my $json = JSON::MaybeXS->new(utf8 => 1, canonical => 1);
   my $server = IO::Socket::INET->new(
     LocalAddr => '127.0.0.1', LocalPort => 0, Listen => 5, ReuseAddr => 1,
@@ -39,6 +42,11 @@ sub stub_engine {
     } } ],
     usage => { prompt_tokens => 1, completion_tokens => 1, total_tokens => 2 },
   });
+  my $answer = $json->encode({
+    id => 'stub', object => 'chat.completion', created => time, model => 'stub-model',
+    choices => [ { index => 0, finish_reason => 'stop', message => { role => 'assistant', content => 'done' } } ],
+    usage => { prompt_tokens => 1, completion_tokens => 1, total_tokens => 2 },
+  });
   my $pid = fork // die 'fork: '.$!;
   unless ($pid) {
     while (IO::Select->new($server)->can_read(60)) {
@@ -48,9 +56,11 @@ sub stub_engine {
       my ( $head, $rest ) = split /\r\n\r\n/, $req, 2;
       my ( $length ) = $head =~ /^Content-Length:\s*(\d+)/mi;
       sysread($conn, $rest, 65536, length $rest) or last while length($rest) < ($length // 0);
+      my $reply = $rest =~ /"role"\s*:\s*"tool"/ ? $answer : $body;
+      sleep delete $o{delay} if $o{delay} && $head =~ m{\APOST \S*/chat/completions };
       print {$conn} $head =~ m{\APOST \S*/chat/completions }
         ? "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
-          .length($body)."\r\nConnection: close\r\n\r\n".$body
+          .length($reply)."\r\nConnection: close\r\n\r\n".$reply
         : "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
       close $conn;
     }

@@ -11,6 +11,7 @@ use Path::Tiny;
 use lib 't/lib';
 use Test::Raider::Env qw( clear_engine_env );
 use Test::Raider::SeqEngine;
+use IO::Async::Loop;
 use Langertha::Raider::Application;
 
 clear_engine_env();
@@ -92,6 +93,61 @@ subtest 'a run a surface ends itself' => sub {
   like($end, { status => 'interrupted', signal => 'TERM', session => { id => $session->id } }, 'ended');
   like((events($session->path))[-1], { type => 'run.finished', status => 'interrupted', signal => 'TERM' }, 'journal');
   is($app->end_run('interrupted'), undef, 'nothing to end outside a run');
+};
+
+package My::HangMCP {
+  use Moose;
+  has calls => (is => 'ro', default => sub { [] });
+  sub list_tools { Future->done([ { name => 'bash' }, { name => 'broken' } ]) }
+  sub call_tool {
+    my ( $self, $name ) = @_;
+    push @{ $self->calls }, $name;
+    return IO::Async::Loop->new->new_future;   # never completes
+  }
+  __PACKAGE__->meta->make_immutable;
+}
+
+package My::HangApp {
+  use Moose;
+  extends 'My::App';
+  has mcp => (is => 'ro', default => sub { My::HangMCP->new });
+  sub _build_engine { Test::Raider::SeqEngine::Engine->new(mcp_servers => [ $_[0]->mcp ]) }
+  __PACKAGE__->meta->make_immutable;
+}
+
+subtest 'cancel_run: the run ends cancelled, the tool call too' => sub {
+  my $root = tempdir(CLEANUP => 1);
+  my $app = My::HangApp->new(root => $root, engine => 'openai', api_key => 'test', model => 'seq-model');
+  my $session = $app->create_session;
+  ok(!$app->cancel_run, 'nothing to cancel outside a run');
+  $app->loop->watch_time(after => 0.3, code => sub { ok($app->cancel_run, 'cancel_run during the run') });
+  my @got;
+  my $end = do {
+    local $SIG{ALRM} = sub { die "TIMEOUT: run hung\n" };
+    alarm 10;
+    my $e = $app->run_prompt('hi', session => $session, on_event => sub { push @got, [ @_ ] });
+    alarm 0;
+    $e;
+  };
+  like($end, { status => 'cancelled', result => T(), session => { id => $session->id } }, 'the outcome');
+  ok($end->{result}->is_cancelled, 'with the cancelled result');
+  is($app->mcp->calls, [ 'bash' ], 'the second tool never ran');
+  my @e = events($session->path);
+  is([ map { $_->{type} } @e ], [qw( session.created run.started message tool.call tool.result run.finished )],
+    'no answer in the journal');
+  like($e[4], { name => 'bash', status => 'cancelled' }, 'tool.result cancelled');
+  like($e[5], { run => 'r1', status => 'cancelled' }, 'run.finished cancelled');
+  is(( map { { @$_[1 .. $#$_] }->{state} } grep { $_->[0] eq 'run.state' } @got )[-1], 'cancelled', 'run.state cancelled');
+  ok(!$app->raider->cancel_requested, 'nothing left pending');
+};
+
+subtest 'cancel_run before the raider exists' => sub {
+  my $root = tempdir(CLEANUP => 1);
+  my $app = app($root);
+  my $end = $app->run_prompt('hi', on_event => sub { $app->cancel_run if $_[0] eq 'run.started' });
+  is($end->{status}, 'cancelled', 'cancelled');
+  is(scalar @{ $app->raider->history }, 0, 'no history');
+  is($app->run_prompt('hi')->{status}, 'completed', 'the next run is not cancelled');
 };
 
 subtest 'a journal that cannot be written: reported once per run' => sub {

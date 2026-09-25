@@ -27,9 +27,13 @@ C<quit>, C<exit> or the end of input.
 On a terminal, lines come from L<Term::ReadLine::Gnu> (line editing,
 F<~/.raider_history>) or L<IO::Prompt::Tiny>.
 
-The first C<SIGINT> (Ctrl-C) only warns, also while a prompt runs; a second
-one within two seconds, or a C<SIGTERM>, leaves the REPL with exit status 0,
-after ending the tool commands still running
+The first C<SIGINT> (Ctrl-C) while a prompt runs cancels that turn
+(L<Langertha::Raider::CLI::Runner/cancel_run>): the tool commands still
+running are ended, the raid stops at its next safe point, C<turn
+cancelled> is printed, the session journal ends the run as C<cancelled>,
+and the REPL reads the next line. At the prompt the first Ctrl-C only
+warns. A second one within two seconds, or a C<SIGTERM>, leaves the REPL
+with exit status 0, after ending the tool commands still running
 (L<Langertha::Raider::CLI::Runner/terminate_children>). When L</in>
 is not a terminal, lines are read from it as they are, without prompt, so
 piped input ends the REPL at its end.
@@ -243,9 +247,10 @@ sub run {
   };
   my $call = sub { my $cb = $rl->{ $_[0] }; $cb->(@_[ 1 .. $#_ ]) if $cb };
 
-  # Two-strike Ctrl-C: first press warns, second within 2s exits. Saves the
-  # user from accidentally killing a running raid and removes the old
-  # "Ctrl-C + Return" Docker quirk. Leaving ends the tool commands still
+  # Two-strike Ctrl-C: first press cancels the turn in progress (or only
+  # warns at the prompt), second within 2s exits. Saves the user from
+  # accidentally killing raider and removes the old "Ctrl-C + Return"
+  # Docker quirk. Cancelling and leaving end the tool commands still
   # running: a bash command sits in a process group of its own and would
   # outlive raider.
   my $leave = sub {
@@ -263,6 +268,11 @@ sub run {
     my $now = time;
     $leave->('INT') if $last_sigint && $now - $last_sigint <= 2;
     $last_sigint = $now;
+    # Only a flag and signals: a die here would be swallowed by an eval.
+    if ($self->runner->cancel_run) {
+      $out->emit($out->c(meta => "\n(cancelling the turn; press Ctrl-C again within 2s to quit)"), "\n");
+      return;
+    }
     $out->emit($out->c(meta => "\n(press Ctrl-C again within 2s to quit)"), "\n");
     $call->('redisplay');
   };

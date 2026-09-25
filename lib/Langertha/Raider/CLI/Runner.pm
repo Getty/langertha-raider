@@ -108,7 +108,9 @@ sub run_prompt {
   $self->_clear_current;
 
   if ($end->{status} ne 'completed') {
-    $out->say_error($end->{error}) unless $machine;
+    unless ($machine) {
+      $end->{status} eq 'cancelled' ? $out->say_meta('turn cancelled') : $out->say_error($end->{error});
+    }
     return $self->_document($machine, $end);
   }
   return $self->_document($machine, $end) if $machine;
@@ -164,6 +166,28 @@ sub interrupt {
     $self->output->out->flush;
   }
   return $self->die_of_signal($signal);
+}
+
+=method cancel_run
+
+    my $cancelling = $runner->cancel_run;
+
+Cancels the run in progress without leaving the process -- the REPL's
+first Ctrl-C: asks the application to cancel it
+(L<Langertha::Raider::Application/cancel_run>), then ends the tool
+subprocesses still running (L</terminate_children>). The run ends as
+C<cancelled> at its next safe point and L</run_prompt> returns false,
+after C<turn cancelled> (or with a machine, the C<cancelled> document).
+Only records and signals, so the signal handler calls it. Returns false
+when no run is in progress.
+
+=cut
+
+sub cancel_run {
+  my ( $self ) = @_;
+  return 0 unless $self->_current && $self->app->cancel_run;
+  $self->terminate_children;
+  return 1;
 }
 
 =method abandon
