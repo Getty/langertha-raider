@@ -1546,6 +1546,7 @@ async sub _initialize_inline_mcp_f {
 # exactly one IO::Async loop: engines on two loops hang the raid (core karr
 # k228). An engine without a loop (sync fallback) counts as the process-wide
 # IO::Async::Loop->new, like everywhere else in raider.
+# Tradeoff: async_loop builds each engine's HTTP client now, so a sync-fallback warning may show at raid start.
 sub _check_engine_loops {
   my ( $self ) = @_;
   my @engines = ( [ engine => $self->engine ] );

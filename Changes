@@ -20,13 +20,14 @@ Revision history for Langertha-Raider
       (async_request_f, async_loop, langfuse_timestamp,
       Langertha::Usage->from_raw). Inline MCP tools and raider_wait run on
       the engine's event loop, so an engine on its own loop no longer
-      hangs a raid; a raider whose engines (engine, compression_engine,
-      engine_catalog) sit on different event loops fails at raid start
-      naming the odd one out instead of hanging; the trace and Langfuse count tokens from Gemini,
+      hangs a raid; the trace and Langfuse count tokens from Gemini,
       Ollama and AKI native responses too. Usage follows Langertha's
       reading: input_tokens wins over prompt_tokens when a response has
       both, and a count missing from a usage block goes to Langfuse as 0
       instead of null.
+    - A raider whose engines (engine, compression_engine, engine_catalog)
+      sit on different event loops fails at the start of raid_f and
+      respond_f, naming the engine, instead of hanging.
     - Fix filesystem confinement to reject symlink escapes for read and
       write operations, with regression tests.
     - Fix WebTools sync wrappers to await IO::Async futures through the
