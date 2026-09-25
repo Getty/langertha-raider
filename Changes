@@ -192,6 +192,14 @@ Revision history for Langertha-Raider
       (default 5 seconds, 0 never escalates). raider hall kill still stops
       it with SIGTERM. A tool call that ends with an error after a cancel,
       such as a bash command ended by it, is reported as cancelled.
+    - A hall raider's persona is now used: persona: X in .raider-hall.yml
+      starts that raider with the pack X as well. The never-used raider
+      keys mcp and isolated are gone (raider hall add-raider --isolated is
+      removed; old configs get a one-time note in the slot log).
+      preferred_lib_target in .raider-hall.yml is now read (default
+      .raider/lib): each hall raider installs modules there and gets
+      <target>/lib/perl5 on PERL5LIB, instead of a per-raider lib
+      directory nothing installed into.
     - New Langertha::Raider->cancel stops a raid at its next safe point and
       is safe in a signal handler; the raid returns a Result of type
       cancelled (is_cancelled), and a tool call it cut off is reported as
