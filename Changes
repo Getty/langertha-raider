@@ -338,8 +338,11 @@ Revision history for Langertha-Raider
       loudly instead of silently with "". Gemini thoughts and truncated
       tool calls are dropped as in core, and an unknown tool returns an
       error result instead of aborting the raid.
+    - Raider compresses its context inside a single long raid, dropping the
+      oldest tool exchanges first, not only between raids. The mission and
+      system prompt carrying activated skill content is never compacted.
 
-0.003     2026-04-21 01:46:09Z
+0.003    2026-04-21 01:46:09Z
 
     - Switch bash tool from the retired MCP::Server::Run::Bash to
       MCP::Run::Bash (same API, renamed upstream distribution).

@@ -173,7 +173,12 @@ has max_context_tokens => (
 
 Optional. Enables auto-compression when set. When prompt token usage
 exceeds C<context_compress_threshold * max_context_tokens>, the working
-history is summarized via LLM before the next raid.
+history is summarized via LLM before the next raid, and B<within> a single
+long raid the oldest tool-call exchanges are dropped from the in-flight
+conversation as the tool loop runs, oldest first, so one long-running
+mission cannot outgrow the context window. The mission (system prompt,
+including any activated skill instructions) is never compacted — an agent
+must not lose its instructions mid-raid.
 
 =cut
 
@@ -1901,6 +1906,9 @@ async sub _raid_f {
     raid_iterations  => \$raid_iterations,
     raid_tool_calls  => \$raid_tool_calls,
     injected_history => \@injected_history,
+    # The tool exchanges appended each iteration, tracked so in-loop compaction
+    # can drop the oldest ones as whole units (karr k89).
+    tool_segments    => [],
   };
 
   return await $self->_run_raid_loop($state, 1);
@@ -1942,6 +1950,69 @@ sub _tool_call_name_input {
   return $engine->extract_tool_call($tc);
 }
 
+# Rough token estimate for one tracked tool exchange (a list of wire messages):
+# the JSON-encoded byte length over four, the usual ~4-chars-per-token rule. It
+# only has to rank exchanges by size and say roughly how much dropping one sheds,
+# never to be exact — the provider's real usage count drives the threshold, this
+# only decides how many of the oldest exchanges to drop to get back under it.
+sub _estimate_message_tokens {
+  my ( $self, $segment ) = @_;
+  my $chars = 0;
+  for my $msg (@$segment) {
+    my $encoded = eval { $history_json->encode($msg) };
+    $chars += defined $encoded ? length $encoded : length "$msg";
+  }
+  return int( $chars / 4 ) || 1;
+}
+
+# In-loop context compaction (karr k89). Between raids _raid_f compresses the
+# working history via compress_history_f, but within one long raid the growth is
+# the assistant tool-call echoes and tool results appended to $conversation on
+# every iteration — messages _raid_f never sees and history never keeps. Left
+# alone a single mission with many tool calls blows past max_context_tokens on
+# smaller models. So when the last real prompt-token count (the provider's usage,
+# tracked in _last_prompt_tokens) has crossed the threshold, drop the OLDEST tool
+# exchanges from the in-flight conversation, oldest first, until the estimate is
+# back under the threshold — always keeping the most recent exchange, whose
+# results the model still has to act on. Each exchange is dropped as a whole unit
+# (the assistant echo carrying the tool_calls together with its tool results), so
+# no tool_use is ever left without its tool_result (a 400 on strict providers).
+# The header — mission/system prompt with its skill instructions, the pre-raid
+# history and the user turn — is never a tracked exchange, so activated skill
+# content always survives.
+sub _compact_conversation {
+  my ( $self, $state ) = @_;
+  return unless $self->has_max_context_tokens && $self->has_last_prompt_tokens;
+  my $target = $self->max_context_tokens * $self->context_compress_threshold;
+  return unless $self->_last_prompt_tokens > $target;
+  my $segments = $state->{tool_segments};
+  return unless $segments && @$segments > 1;   # always keep the most recent exchange
+
+  # Only exchanges still present in the live conversation may be dropped: a
+  # plugin_before_llm_call hook may return a freshly built conversation arrayref
+  # (see the write-back below), detaching the tracked messages — then there is
+  # nothing safe to drop and compaction is a no-op.
+  my %live = map { refaddr($_) => 1 } @{$state->{conversation}};
+
+  my $over = $self->_last_prompt_tokens - $target;
+  my $shed = 0;
+  my @drop;
+  while ( @$segments > 1 && $shed < $over ) {
+    last unless grep { $live{ refaddr($_) } } @{ $segments->[0] };
+    my $seg = shift @$segments;
+    $shed += $self->_estimate_message_tokens($seg);
+    push @drop, @$seg;
+  }
+  return unless @drop;
+
+  my %drop = map { refaddr($_) => 1 } @drop;
+  @{$state->{conversation}} = grep { !$drop{ refaddr($_) } } @{$state->{conversation}};
+  $log->debugf(
+    'Raider in-loop compaction: dropped %d older tool message(s), ~%d est. tokens (%d over threshold %d)',
+    scalar @drop, $shed, $self->_last_prompt_tokens, $target );
+  return $shed;
+}
+
 async sub _run_raid_loop {
   my ( $self, $state, $start_iteration ) = @_;
   my $engine           = $state->{engine};
@@ -1961,6 +2032,13 @@ async sub _run_raid_loop {
     # Safe point: no model call once a cancel is requested.
     return $self->_cancelled_result($state) if $self->cancel_requested;
     $$raid_iterations++;
+
+    # Keep one long raid inside the context window: before building the next
+    # request, drop the oldest tool exchanges if the last prompt crossed the
+    # threshold (karr k89). Runs before injections and the plugin hook so both
+    # see the compacted conversation.
+    $self->_compact_conversation($state);
+    $conversation = $state->{conversation};
 
     # Re-gather tools if catalog/engine changed
     if ($self->_tools_dirty) {
@@ -2327,6 +2405,7 @@ async sub _run_raid_loop {
     # truncated, so the next turn never carries a call without a result.
     my @tool_msgs = $engine->format_tool_results($echo_data, \@results);
     push @$conversation, @tool_msgs;
+    push @{$state->{tool_segments}}, [ @tool_msgs ];   # track for in-loop compaction (k89)
     $self->_push_session_history(@tool_msgs);
   }
 
@@ -2470,6 +2549,7 @@ async sub _respond_f {
   # Format tool results and append to conversation
   my @tool_msgs = $engine->format_tool_results($data, \@results);
   push @{$state->{conversation}}, @tool_msgs;
+  push @{$state->{tool_segments} //= []}, [ @tool_msgs ];   # track for in-loop compaction (k89)
   $self->_push_session_history(@tool_msgs);
 
   # Continue the raid loop from the next iteration
