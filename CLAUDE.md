@@ -34,4 +34,7 @@ principle and lane are in `.claude/rules/raider-rules.md`.
 | Commits, `Changes`, card → done, pre-release audit | `raider-release-manager` |
 
 The agents carry their skills via `briefing.skills` (see `.claude/agents/`); the main
-agent delegates rather than loading them. Skill sources live under `.claude/skills/`.
+agent delegates rather than loading them. The skills are installed by skilletor from
+`.claude/skilletor.json` (sources getty, karr, langertha) into `.claude/skills/` —
+gitignored build artifacts; change a skill in its source repo and `skilletor sync`,
+never edit the installed copy.
