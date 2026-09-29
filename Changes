@@ -381,6 +381,9 @@ Revision history for Langertha-Raider
     - Switching the perl pack on or off with /pack (or /reload) now mounts or
       unmounts the perl_* tools, so what raider reports as granted is what
       the model can call.
+    - The how-to-use-raider doc (/skill, /skill-claude) lists the tools raider
+      actually has mounted, with their real parameters; the Perl and Hall
+      tools are included when they are on.
 
 0.003    2026-04-21 01:46:09Z
 

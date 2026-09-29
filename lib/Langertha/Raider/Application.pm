@@ -237,11 +237,16 @@ sub _instructions_text {
 # never replaces it (ADR 0014).
 sub _tools_text {
   my ($self) = @_;
-  my @tools = map { @{ $_->tools } } @{ $self->_tool_servers };
+  my @tools = $self->_mounted_tools;
   return 'Working directory: '.$self->root."\n\n"
     ."Tools (MCP):\n"
     .join('', map { '  - '.$self->_tool_signature($_)."\n" } @tools);
 }
+
+# The MCP::Tool objects of the mounted tool servers, in mount order --
+# what the prompt describes, the engine offers and Langertha::Raider::Skill
+# documents.
+sub _mounted_tools { map { @{ $_->tools } } @{ $_[0]->_tool_servers } }
 
 # name(required, ..., [optional], ...) from the tool's input schema: the
 # required parameters in their schema order, then the optional ones sorted.

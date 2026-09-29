@@ -23,7 +23,10 @@ L<Langertha::Raider::CLI> instance. The generated text reflects the actual live
 configuration: selected engine and model, which web-search providers are
 currently enabled based on environment variables, which persona layer is
 active (default Langertha, a custom C<.raider.md>, or a C<-M> mission),
-and so on.
+and so on. Its tool table lists the tools the app mounts -- the same set
+its prompt describes and its engine offers (ADR 0005) -- each with its
+signature and the first sentence of its description, so the Perl tools
+appear only when granted and the Hall tools only under a Hall.
 
 Two output variants are supported:
 
@@ -82,6 +85,29 @@ sub _active_web_providers {
   return join(', ', @p);
 }
 
+# The tool table: the tools the app mounts -- the same set its prompt
+# describes and its engine offers (ADR 0005) -- each with its signature and
+# the first sentence of its description.
+sub _tools_table {
+  my ($self) = @_;
+  my $app = $self->app;
+  my @rows = map {
+    my $purpose = $_->description // '';
+    $purpose =~ s/\.(?:\s.*)?\z//s;
+    [ '`'.$app->_tool_signature($_).'`', $purpose =~ s/\|/\\|/gr ];
+  } $app->_mounted_tools;
+  my @width = ( length 'Tool', length 'Purpose' );
+  for my $row (@rows) {
+    for my $col (0, 1) {
+      $width[$col] = length $row->[$col] if length $row->[$col] > $width[$col];
+    }
+  }
+  my $line = sub { '| '.join(' | ', map { sprintf '%-'.$width[$_].'s', $_[$_] } 0, 1)." |\n" };
+  return $line->('Tool', 'Purpose')
+    .'|'.join('|', map { '-' x ($_ + 2) } @width)."|\n"
+    .join('', map { $line->(@$_) } @rows);
+}
+
 =method markdown
 
 Returns the plain markdown document (no frontmatter).
@@ -138,16 +164,7 @@ cheap model is selected automatically.
 
 ## Tools the agent has
 
-| Tool                                            | Purpose                                  |
-|-------------------------------------------------|------------------------------------------|
-| `list_files(path)`                              | Directory listing                        |
-| `read_file(path)`                               | Full text file                           |
-| `write_file(path, content)`                     | Overwrite, creates parents               |
-| `edit_file(path, old_string, new_string)`       | Exact unique-match substitution          |
-| `bash(command, [working_directory], [timeout])` | `bash -c \$command`                      |
-| `web_search(query, [limit])`                    | Rank-fused multi-provider search         |
-| `web_fetch(url, [as_html])`                     | HTTP GET, HTML flattened to text         |
-
+@{[ $self->_tools_table ]}
 Filesystem tools are confined to the working root. `bash` inherits it.
 
 ## Telling the agent what to do
