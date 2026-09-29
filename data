@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-29T18:26:02Z
+claimed_by: release
+class: standard
+completed: 2026-09-29T18:26:02Z
+created: 2026-09-29T18:23:39Z
+id: 110
+priority: medium
+started: 2026-09-29T18:24:29Z
+status: done
+tags:
+- cpanfile
+- deps
+title: 'cpanfile: IO::Async::SSL als requires'
+updated: 2026-09-29T18:26:02Z
+---
+
+Aus #107. Jede Cloud-Engine und web_search laufen ueber https, IO::Async::SSL steht aber nicht in der cpanfile (nur build-binary.sh packt es). Ohne es scheitert jeder https-Request (seit k107 mit klarer Meldung statt Haenger). requires IO::Async::SSL (+ ggf. IO::Socket::SSL) aufnehmen.
+
+Committed c99f166
