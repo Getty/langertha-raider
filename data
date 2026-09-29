@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-29T02:39:04Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-29T02:39:04Z
+created: 2026-09-29T01:15:17Z
+id: 91
+priority: low
+started: 2026-09-29T02:30:03Z
+status: done
+tags:
+- bug
+- tools
+title: 'Raider: ToolCall mit nicht-dekodierbaren Argumenten laeuft auf {} statt Fehler-Result
+  (k345)'
+updated: 2026-09-29T02:39:04Z
+---
+
+Aus k85-Analyse (adjacent, pre-existing, kein Regress durch k85): Ein Call, dessen Argumente nicht dekodieren, auf einer Reply die NICHT ans Token-Limit stiess, laeuft das Tool weiterhin auf {} (vor und nach k85). Core beantwortet das mit einem "arguments are not valid JSON" Fehler-Result. Ein per-call Guard (blessed $tc && $tc->arguments_undecodable) koennte das uebernehmen. Fertig wenn: nicht-dekodierbare Argumente ergeben ein isError-Result statt Ausfuehrung auf {}, Test.
+
+Committed 77821b8
