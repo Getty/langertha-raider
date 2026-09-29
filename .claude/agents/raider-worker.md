@@ -54,4 +54,8 @@ The installed Langertha is usually stale — run against the dev tree:
 `prove -I/home/getty/dev/langertha/lib -Ilib -r t` (same `-I` for `bin/raider`).
 Public vs internal API: ADR 0017.
 
+Anything that changes what the standalone binary carries — a new dependency,
+something loaded by name, code that starts perl or raider — load the
+`raider-single-binary` skill first and finish with `scripts/verify-binary.sh`.
+
 Never run `dzil release` — release is the maintainer's call (see house rules).
