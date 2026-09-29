@@ -7,6 +7,7 @@ requires 'Getopt::Long';
 requires 'HTML::TreeBuilder';
 requires 'HTTP::Request::Common';
 requires 'IO::Async';
+requires 'IO::Async::SSL';
 requires 'IO::Prompt::Tiny';
 requires 'IPC::Run';
 requires 'JSON::MaybeXS';

@@ -28,6 +28,8 @@ Revision history for Langertha-Raider
     - A raider whose engines (engine, compression_engine, engine_catalog)
       sit on different event loops fails at the start of raid_f and
       respond_f, naming the engine, instead of hanging.
+    - IO::Async::SSL is a requirement: every cloud engine and web_search
+      speak https, and without it every request fails.
     - perl_eval and perl_check run the perl on PATH inside the standalone
       binary, whose $^X is no usable interpreter, and return a tool error
       saying so when there is none.
