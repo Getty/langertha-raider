@@ -39,7 +39,12 @@ Revision history for Langertha-Raider
       module's name when IO::Async::Internals::Connector, or for https
       IO::Async::SSL (IO::Socket::SSL, Net::SSLeay, libssl), does not load.
       Before, the first request failed and every later one to that host
-      hung (a Net::Async::HTTP 0.50 connection-slot leak).
+      hung (a Net::Async::HTTP 0.50 connection-slot leak). web_fetch checks
+      each redirect target too, so an http to https redirect without
+      IO::Async::SSL is a tool error and no longer blocks later fetches
+      from that host. The hall's Telegram bots stop polling with a warning
+      and a telegram.poll_error event naming the module, and their replies
+      return an error, instead of hanging on the Bot API.
     - Raider fixes that landed in Langertha core before the extraction and
       reach CPAN with this release:
       - A raid paused by an interactive self-tool (raider_ask_user etc.)

@@ -53,7 +53,8 @@ Both tools return a tool error, and send nothing, when a module
 L<Net::Async::HTTP> needs to connect does not load
 (L<IO::Async::Internals::Connector>; for https L<IO::Async::SSL>, which
 needs L<IO::Socket::SSL>, L<Net::SSLeay> and the system libssl). The error
-names the module.
+names the module. For C<web_fetch> that holds for every redirect it follows
+as well: an http URL that redirects to https is the same tool error.
 
 =cut
 
@@ -173,7 +174,16 @@ sub build_web_tools_server {
       }
       my $req = GET($url);
       $req->header('User-Agent' => 'raider/0.001');
-      my $f = $http->do_request(request => $req);
+      # The same holds for every hop of a redirect: a redirect to https
+      # fails here, before Net::Async::HTTP connects to it.
+      my $f = $http->do_request(
+        request     => $req,
+        on_redirect => sub {
+          my ( undef, $location ) = @_;
+          my $error = connect_error($location);
+          die $error."\n" if $error;
+        },
+      );
       my $resp = eval {
         $loop->await($f);
         $f->get;

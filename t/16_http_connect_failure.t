@@ -1,9 +1,10 @@
 #!/usr/bin/env perl
-# ABSTRACT: A module Net::Async::HTTP loads to connect is missing: the raid and the web tools fail, they do not hang (k107)
+# ABSTRACT: A module Net::Async::HTTP loads to connect is missing: the raid and the web tools fail, they do not hang (k107, k109)
 use strict;
 use warnings;
 use Test2::V0;
 use Future;
+use IO::Async::Listener;
 use IO::Async::Loop;
 use IO::Socket::INET;
 
@@ -119,6 +120,38 @@ subtest 'web tools: IO::Async::SSL cannot load' => sub {
   ok( !$res->{hung}, 'web_search ends instead of hanging' );
   ok( $res->{isError}, 'web_search is a tool error' );
   like( $res->{content}[0]{text}, qr/IO::Async::SSL/, 'web_search names the module' );
+
+  # An http URL that redirects to https: the check of the URL itself passes,
+  # the redirect must not reach Net::Async::HTTP either (k109).
+  my $redirector = IO::Async::Listener->new(
+    on_stream => sub {
+      my ( undef, $stream ) = @_;
+      $stream->configure(
+        on_read => sub {
+          my ( $s, $buffref ) = @_;
+          return 0 unless $$buffref =~ /\r\n\r\n/;
+          $$buffref = '';
+          $s->write( "HTTP/1.1 302 Found\r\nLocation: https://127.0.0.1:$port/\r\n"
+            ."Content-Length: 0\r\nConnection: close\r\n\r\n" );
+          $s->close_when_empty;
+          return 0;
+        },
+      );
+      $loop->add($stream);
+    },
+  );
+  $loop->add($redirector);
+  my $listening = $redirector->listen( addr => { family => 'inet', socktype => 'stream', ip => '127.0.0.1', port => 0 } )->get;
+  my $http_port = $listening->read_handle->sockport;
+
+  for my $round (1, 2) {
+    my $res = $call->( web_fetch => { url => "http://127.0.0.1:$http_port/" } );
+    ok( !$res->{hung}, "redirected web_fetch $round ends instead of hanging" );
+    ok( $res->{isError}, "redirected web_fetch $round is a tool error" );
+    like( $res->{content}[0]{text}, qr/IO::Async::SSL/, "redirected web_fetch $round names the module" );
+    like( $res->{content}[0]{text}, qr{https://127\.0\.0\.1:$port}, "redirected web_fetch $round names the redirect target" );
+  }
+  $loop->remove($redirector);
 };
 
 done_testing;

@@ -33,6 +33,12 @@ C</new> (or C</new@BOTNAME>) from an accepted sender is not a mission: the
 chat's (topic's) next message starts a new session, and the bot confirms
 with a short message. The old journal stays.
 
+When a module the https connection to the Bot API needs does not load
+(L<IO::Async::SSL> and what it needs, see L<Langertha::Raider::ConnectCheck>),
+a bot does not poll: the hall warns and emits C<telegram.poll_error> with the
+module's name, and a reply is an C<error> result. Nothing is sent, so
+nothing waits for a connection that cannot open.
+
 =cut
 
 use Moose;
@@ -43,6 +49,7 @@ use HTTP::Request::Common ();
 use IO::Async::Timer::Countdown;
 use Scalar::Util qw( weaken );
 use Net::Async::HTTP;
+use Langertha::Raider::ConnectCheck qw( connect_error );
 
 has hall => (
   is => 'ro',
@@ -133,10 +140,23 @@ sub _reject_reason {
   return;
 }
 
+# Why no request can reach the Bot API, or undef. A module that fails to
+# load while Net::Async::HTTP connects keeps the host's only connection
+# slot taken, and every later request waits forever (karr k107).
+sub _connect_error { connect_error('https://api.telegram.org') }
+
 sub _poll {
   my ($self, $name) = @_;
   my $worker = $self->_workers->{$name} or return;
   return unless $worker->{active};
+
+  # A module that does not load now will not later: stop polling, loudly.
+  if (my $error = $self->_connect_error) {
+    $worker->{active} = 0;
+    warn 'Telegram bot '.$name.': '.$error."\n";
+    $self->hall->_emit('telegram.poll_error', { bot => $name, error => $error });
+    return;
+  }
 
   my $ua = $worker->{ua};
   my $token = $worker->{token};
@@ -265,6 +285,10 @@ sub send_message {
   my $worker = $self->_workers->{$bot_name} or return { error => "bot $bot_name not running" };
   my $token = $worker->{token};
   my $ua = $worker->{ua};
+
+  if (my $error = $self->_connect_error) {
+    return { error => $error };
+  }
 
   my $uri = URI->new("https://api.telegram.org/bot$token/sendMessage");
   my $req = HTTP::Request::Common::POST($uri, [
