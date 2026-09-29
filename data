@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-29T02:29:44Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-29T02:29:44Z
+created: 2026-09-29T01:15:13Z
+id: 90
+priority: medium
+started: 2026-09-29T02:22:44Z
+status: done
+tags:
+- bug
+- tools
+- core-sync
+title: 'Raider _gather_tools_f: doppelte Tool-Namen werden zweimal an den Provider
+  gesendet'
+updated: 2026-09-29T02:29:44Z
+---
+
+Aus k85-Analyse: _gather_tools_f (lib/Langertha/Raider.pm ~1707) mappt jeden Namen last-wins, pusht aber ALLE Tools nach @all_tools. Ein von zwei Quellen (engine mcp_servers + inline MCP + catalog MCPs + self-tools) angebotener Name geht so doppelt an den Provider -> Provider lehnt eine Anfrage ab, die dieselbe Funktion zweimal deklariert. Core loeste das in Role::Tools->_tool_loop_tools (first-wins + carp), aber Raider baut sein eigenes Tool-Set zusammen und braucht eigenen Dedup. Fertig wenn: doppelte Namen werden einmal gesendet (first-wins + carp wie core), Test mit zwei Quellen gleichen Namens.
+
+Committed 77c2240
