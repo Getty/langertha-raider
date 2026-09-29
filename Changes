@@ -74,6 +74,9 @@ Revision history for Langertha-Raider
       raider exits; raider hall spawn --attach spawns and then attaches (the
       run ID line goes to stderr, a queued mission is not attached). The
       spawn reply names events_path.
+    - Standalone Linux binaries (x86_64, aarch64) are attached to each GitHub
+      release by the release-binaries workflow; the build, verify and
+      runtime-library scripts are in scripts/ and not shipped to CPAN.
     - telegram.in events carry the sender's first_name and username, also
       in group chats.
     - Document that engine: is optional for hall raiders, and the hall
