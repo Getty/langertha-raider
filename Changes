@@ -341,6 +341,10 @@ Revision history for Langertha-Raider
     - Raider compresses its context inside a single long raid, dropping the
       oldest tool exchanges first, not only between raids. The mission and
       system prompt carrying activated skill content is never compacted.
+    - Added an opt-in live task suite (t/live, RAIDER_LIVE_TASKS=1) that
+      drives bin/raider as a user against a fresh workspace and isolated
+      home, then checks the result and session journal; a provider error
+      fails the run instead of being skipped.
 
 0.003    2026-04-21 01:46:09Z
 
