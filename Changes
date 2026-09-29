@@ -68,6 +68,8 @@ Revision history for Langertha-Raider
       that is a plain directory stays a name.
     - raider hall logs --follow prints new log output until the raider
       exits.
+    - A hall cron job with coalesce: true drops an occurrence (cron.coalesced)
+      while its previous run is still running or waiting.
     - telegram.in events carry the sender's first_name and username, also
       in group chats.
     - Document that engine: is optional for hall raiders, and the hall

@@ -9,15 +9,18 @@ B<Internal module.> Its interface may change without notice.
 Arms an L<IO::Async::Timer::Absolute> per configured cron entry of a
 L<Langertha::Raider::Hall> and spawns the named raider when it fires.
 Every job runs in a session of its own, bound as C<cron:ID>, which each
-occurrence continues.
+occurrence continues. An occurrence whose previous run has not ended yet
+waits for it in the hall's queues; with C<coalesce: true> it is dropped
+instead and the hall emits C<cron.coalesced>.
 
 =cut
 
 # Non-blocking cron: for each entry we compute the next execution time via
 # Schedule::Cron and arm an IO::Async::Timer::Absolute. When it fires we
 # spawn the raider, then re-arm for the following occurrence. Overlap is
-# controlled per-entry: default is hall's 1name queue (opt-in coalesce
-# drops the run if the previous is still in-flight).
+# controlled per-entry: by default an occurrence waits in the hall's queues
+# behind the previous run; opt-in coalesce drops it while the previous run
+# is still running or waiting.
 
 use Moose;
 use namespace::autoclean;
@@ -59,7 +62,6 @@ sub add_job {
     name => $name,
     mission => $mission,
     coalesce => $coalesce,
-    running => 0,
   };
   $self->_arm($id);
   return $id;
@@ -85,20 +87,31 @@ sub _fire {
   my ($self, $id) = @_;
   my $t = $self->_jobs->{$id};
   return unless $t;  # cancelled
-  if ($t->{coalesce} && $t->{running}) {
+  if ($t->{coalesce} && $self->_in_flight($id)) {
     $self->hall->_emit('cron.coalesced', { id => $id, name => $t->{name} });
   } else {
-    $t->{running} = 1;
     my $res = eval { $self->hall->spawn(name => $t->{name}, mission => $t->{mission}, binding => 'cron:'.$id) };
+    $t->{raider_id} = $res && $res->{id};
     $self->hall->_emit('cron.fired', {
       id => $id, name => $t->{name},
       ($res && $res->{id} ? (raider_id => $res->{id}) : ()),
     });
-    # Clear running once the spawn returned a handle; 1name queueing
-    # owns overlap protection when coalesce is off.
-    $t->{running} = 0;
   }
   $self->_arm($id);  # re-schedule next occurrence
+}
+
+# Whether the job's previous occurrence has not ended yet, as the hall sees
+# it: the raider it spawned is still running (also when the binding's
+# session could not be had and it runs unbound), or a run on the job's
+# binding is running or waiting in a queue.
+sub _in_flight {
+  my ($self, $id) = @_;
+  my $hall = $self->hall;
+  my $raider_id = $self->_jobs->{$id}{raider_id};
+  return 1 if defined $raider_id && $hall->raiders->{$raider_id};
+  my $binding = 'cron:'.$id;
+  return 1 if $hall->_binding_busy($binding);
+  return scalar grep { $_ eq $binding } $hall->_waiting_bindings;
 }
 
 sub start {

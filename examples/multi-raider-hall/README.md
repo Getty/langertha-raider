@@ -132,8 +132,9 @@ A few things worth knowing:
 - `longhouse: true` adds `longhouse/lib` of the hall to every
   raider's `PERL5LIB`.
 - `coalesce: true` on a cron entry drops a run if the previous one is
-  still going. Default (off) falls through to 1name queueing — safer
-  for idempotent jobs, louder for pile-ups.
+  still running or waiting (the hall emits `cron.coalesced`). Default
+  (off) queues the run behind the previous one, on the job's `cron:ID`
+  binding — every occurrence runs, louder for pile-ups.
 - `preferred_lib_target` in `.raider-hall.yml` is the `local::lib`
   every raider of the hall installs into with `perl_cpanm` (default
   `.raider/lib`); its `lib/perl5` is on each raider's `PERL5LIB`.
