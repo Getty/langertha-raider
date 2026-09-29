@@ -258,10 +258,14 @@ subtest '--help lists every option the parser takes (k104)' => sub {
   my ($spec) = path($INC{'Langertha/Raider/CLI/Main.pm'})->slurp_utf8
     =~ /getoptionsfromarray\(\\\@argv,\n(.*?)\n    \);/s;
   ok($spec, 'found the Getopt spec') or return;
-  my @long = map { my ( $names, $neg ) = @$_;
+  my @long;
+  for my $entry ( $spec =~ /^\s+('[^']+')\s+=>/mg ) {
+    # names, an optional =/: type spec, an optional ! (negatable)
+    my ( $names, $neg ) = $entry =~ /\A'([A-Za-z|-]+)(?:[=:][^'!]*)?(!)?'\z/;
+    ok(defined $names, 'spec entry '.$entry.' parses') or next;
     my @n = grep { length > 1 } split /\|/, $names;
-    ( @n, $neg ? ( map { 'no-'.$_ } @n ) : () );
-  } map { [ /\A'([a-z|-]+)[=:]?[^'!]*(!)?'/ ] } $spec =~ /^\s+('[^']+')\s+=>/mg;
+    push @long, @n, $neg ? ( map { 'no-'.$_ } @n ) : ();
+  }
   push @long, qw( json msgpack yaml stream-json stream-msgpack stream-yaml );   # %MACHINE_FLAG
   ok(scalar(@long) > 25, 'options collected');
   for my $name (@long) {
