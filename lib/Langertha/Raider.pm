@@ -1970,6 +1970,25 @@ sub _tool_call_name_input {
   return $engine->extract_tool_call($tc);
 }
 
+# The error result a call whose arguments the model did not send as valid JSON
+# is answered with -- running the tool on the {} such a call decodes to is wrong
+# (karr k345). undef for a call whose arguments decoded, and for a raw wire
+# structure (the fallback path, where arguments_undecodable is not tracked). The
+# text matches core's Langertha::Role::Tools->_undecodable_arguments_result, so
+# the model sees the same error whichever loop ran it. A call whose arguments
+# were cut off by the token limit was already dropped upstream by
+# _read_tool_loop_reply (tool_loop_calls); this is the OTHER case -- a reply that
+# did not hit its token limit but still sent arguments that do not decode.
+sub _undecodable_tool_result {
+  my ( $self, $tc ) = @_;
+  return undef unless blessed $tc && $tc->arguments_undecodable;
+  return {
+    content => [{ type => 'text',
+      text => "arguments are not valid JSON: " . ( $tc->arguments_error // 'not a JSON object' ) }],
+    isError => JSON->true,
+  };
+}
+
 # Rough token estimate for one tracked tool exchange (a list of wire messages):
 # the JSON-encoded byte length over four, the usual ~4-chars-per-token rule. It
 # only has to rank exchanges by size and say roughly how much dropping one sheds,
@@ -2243,6 +2262,15 @@ async sub _run_raid_loop {
       my $tc = $tool_calls->[$tc_idx];
       my ( $name, $input ) = $self->_tool_call_name_input($engine, $tc);
 
+      # A call whose arguments the model did not send as valid JSON must not run
+      # the tool on {} -- answer it with an error result the model can retry, as
+      # core does (karr k345). Truncated calls were dropped upstream already.
+      if ( my $bad = $self->_undecodable_tool_result($tc) ) {
+        push @results, { tool_call => $tc, result => $bad };
+        $$raid_tool_calls++;
+        next;
+      }
+
       # Plugin hook: inspect/transform before tool execution
       my @plugin_tc = await $self->plugin_pipeline_tool_call_f($name, $input);
       unless (@plugin_tc) {
@@ -2468,6 +2496,13 @@ async sub _respond_f {
     return $self->_cancelled_result($state) if $self->cancel_requested;
     my $tc = $remaining->[$rem_idx];
     my ( $name, $input ) = $self->_tool_call_name_input($engine, $tc);
+
+    # An undecodable call must not run the tool on {} either (karr k345).
+    if ( my $bad = $self->_undecodable_tool_result($tc) ) {
+      push @results, { tool_call => $tc, result => $bad };
+      ${$state->{raid_tool_calls}}++;
+      next;
+    }
 
     if ($name =~ /^raider_/ && $self->has_raider_mcp) {
       my $self_result = await $self->_execute_self_tool_f($name, $input);

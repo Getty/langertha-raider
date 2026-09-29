@@ -349,6 +349,10 @@ Revision history for Langertha-Raider
       sources (engine mcp_servers, inline MCP, catalog MCPs, self-tools)
       offer it; the first source wins and a warning names both, matching
       core's tool-loop dedup.
+    - Raider: a tool call whose arguments do not decode (on a reply that did
+      not hit its token limit) is answered with an "arguments are not valid
+      JSON" isError result the model can retry, instead of running the tool
+      on {}; guarded in both the raid loop and respond_f.
 
 0.003    2026-04-21 01:46:09Z
 
