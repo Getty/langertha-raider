@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-29T17:58:30Z
+claimed_by: worker-misc
+class: standard
+completed: 2026-09-29T17:58:30Z
+created: 2026-09-29T17:48:43Z
+id: 103
+priority: medium
+started: 2026-09-29T17:49:55Z
+status: done
+tags:
+- raid
+- cancel
+- defect
+title: Raid::Parallel reicht cancelled-Branch nicht weiter
+updated: 2026-09-29T17:58:35Z
+---
+
+Aus #98. Ein cancelled-Branch wird in Raid::Parallel ins Endergebnis gefaltet als Branch ohne Text, statt das cancelled-Result weiterzugeben (vgl. Raid::Sequential / ADR 0009).
+
+2026-09-29 17:51 Cause: Parallel.pm winner selection only checked abort/question/pause; a cancelled branch fell through to the final text join. Fix: cancelled joins the winner chain, ranked abort > cancelled > question > pause (an abort is an error that must not be masked; a question/pause after cancellation would invite resuming a run the user stopped). Sequential/Loop already propagate any non-final; regression tests for all three in t/96_raid_orchestration.t.
+
+2026-09-29 17:51 Done: Raid::Parallel propagates a cancelled branch (abort > cancelled > question > pause), POD aggregation list updated. Regression tests in t/96_raid_orchestration.t (Parallel cancelled + priority vs abort/question/pause; Sequential/Loop cancelled propagation). Red before fix, green after: prove -I dev langertha t/96_raid_orchestration.t.
+
+Commit 49ec05f
