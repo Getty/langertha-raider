@@ -2075,417 +2075,503 @@ sub _compact_conversation {
   return $shed;
 }
 
+# The raid loop: one iteration per model turn. Each prepares the conversation
+# (_prepare_iteration_f), sends it (_send_turn_f) and reads the reply
+# (_read_turn_f); a reply without tool calls ends the raid (_finish_raid_f),
+# otherwise the batch of tool calls runs (_execute_tool_calls_f) and the tool
+# exchange is appended for the next turn (_append_tool_turn). The cancel safe
+# points before each model call and each tool call sit here and in the batch
+# (ADR 0009). $state is the continuation respond_f resumes from; $iter is one
+# iteration's bookkeeping (number, Langfuse span and usage).
 async sub _run_raid_loop {
   my ( $self, $state, $start_iteration ) = @_;
-  my $engine           = $state->{engine};
-  my $langfuse         = $state->{langfuse};
-  my $trace_id         = $state->{trace_id};
-  my $tool_server_map  = $state->{tool_server_map};
-  my $formatted_tools  = $state->{formatted_tools};
-  my $model_params     = $state->{model_params};
-  my $user_msgs        = $state->{user_msgs};
-  my $conversation     = $state->{conversation};
-  my $raid_iterations  = $state->{raid_iterations};
-  my $raid_tool_calls  = $state->{raid_tool_calls};
-  my $injected_history = $state->{injected_history};
-  my $t0               = $state->{t0};
 
   for my $iteration ($start_iteration..$self->max_iterations) {
     # Safe point: no model call once a cancel is requested.
     return $self->_cancelled_result($state) if $self->cancel_requested;
-    $$raid_iterations++;
+    ${$state->{raid_iterations}}++;
 
-    # Keep one long raid inside the context window: before building the next
-    # request, drop the oldest tool exchanges if the last prompt crossed the
-    # threshold (karr k89). Runs before injections and the plugin hook so both
-    # see the compacted conversation.
-    $self->_compact_conversation($state);
-    $conversation = $state->{conversation};
+    await $self->_prepare_iteration_f($state, $iteration, $start_iteration);
+    my $iter = $self->_start_iteration_trace($state, $iteration);
 
-    # Re-gather tools if catalog/engine changed
-    if ($self->_tools_dirty) {
-      $engine = $self->active_engine;
-      $state->{engine} = $engine;
-      my ( $all_tools, $new_map ) = await $self->_gather_tools_f;
-      $formatted_tools = $engine->format_tools($all_tools);
-      $tool_server_map = $new_map;
-      $state->{formatted_tools} = $formatted_tools;
-      $state->{tool_server_map} = $tool_server_map;
-      if ($langfuse) {
-        $model_params = $self->_langfuse_model_parameters($engine);
-        $state->{model_params} = $model_params;
-      }
-
-      $self->_tools_dirty(0);
-    }
-
-    # Drain injections for iterations 2+
-    if ($iteration > $start_iteration || $start_iteration > 1) {
-      my @injected;
-      if (@{$self->_injections}) {
-        push @injected, splice @{$self->_injections};
-      }
-      if ($self->has_on_iteration) {
-        my $cb_msgs = $self->on_iteration->($self, $iteration);
-        push @injected, @$cb_msgs if $cb_msgs && @$cb_msgs;
-      }
-      if (@injected) {
-        my @msgs = map {
-          ref $_ ? $_ : { role => 'user', content => $_ }
-        } @injected;
-        push @$conversation, @msgs;
-        push @$injected_history, @msgs;
-        $self->_push_session_history(@msgs);
-      }
-    }
-
-    # Plugin hook: transform conversation before each LLM call
-    for my $plugin (@{$self->plugin_instances}) {
-      $conversation = await $plugin->plugin_before_llm_call($conversation, $iteration);
-    }
-    # A plugin may return a fresh arrayref. Keep the continuation state pointing
-    # at whatever the loop now works with, because respond_f resumes from
-    # $state->{conversation}: without this write-back a paused raid reverts to
-    # the pre-plugin array and drops every message accumulated after divergence.
-    $state->{conversation} = $conversation;
-
-    my $iter_t0 = $langfuse ? $engine->langfuse_timestamp : undef;
-
-    # Langfuse: create iteration span
-    my $iter_span_id;
-    if ($langfuse) {
-      $iter_span_id = $engine->langfuse_span(
-        trace_id   => $trace_id,
-        name       => "iteration-$iteration",
-        start_time => $iter_t0,
-      );
-    }
-
-    # Build and send the request
-    my $request = $engine->build_tool_chat_request($conversation, $formatted_tools);
-
-    my $response = await $self->_until_cancelled($engine->async_request_f($request));
+    my $response = await $self->_send_turn_f($state);
     return $self->_cancelled_result($state) if $self->cancel_requested;
-
-    unless ($response->is_success) {
-      die "".(ref $engine)." raid request failed: ".$response->status_line."\n".$response->content;
-    }
-
-    my $data = $engine->parse_response($response);
-
-    # Plugin hook: inspect/transform LLM response
-    for my $plugin (@{$self->plugin_instances}) {
-      $data = await $plugin->plugin_after_llm_response($data, $iteration);
-    }
-
-    # Track prompt tokens for auto-compression. from_raw is undef when the
-    # body reports no usage, but a Usage without a prompt count still has
-    # input_tokens 0: treat 0 as not reported, so it never resets the count.
-    my $usage = Langertha::Usage->from_raw($data);
-    $self->_last_prompt_tokens($usage->input_tokens)
-      if $usage && $usage->input_tokens > 0;
-
-    # Extract usage for Langfuse
-    my $langfuse_usage = $langfuse && $usage ? {
-      input  => $usage->input_tokens,
-      output => $usage->output_tokens,
-      total  => $usage->total_tokens,
-    } : undef;
+    my $data = await $self->_read_turn_f($state, $iter, $response);
 
     # Read this turn's reply (see _read_tool_loop_reply): a 200 body that is an
     # error croaks instead of silently ending the raid with '', Gemini thought
     # parts stay out of the final text, and truncated calls are dropped.
-    my ( $tool_calls, $final_text, $echo_data ) = $self->_read_tool_loop_reply($engine, $data);
+    my ( $tool_calls, $final_text, $echo_data ) = $self->_read_tool_loop_reply($state->{engine}, $data);
 
     # No tool calls means done — use the reply's final text
     unless (@$tool_calls) {
-      my $text = $final_text;
-
-      my $iter_t1 = $langfuse ? $engine->langfuse_timestamp : undef;
-
-      # Langfuse: generation nested under iteration span
-      if ($langfuse) {
-        $engine->langfuse_generation(
-          trace_id              => $trace_id,
-          parent_observation_id => $iter_span_id,
-          name                  => 'llm-call',
-          model                 => $engine->chat_model,
-          input                 => $conversation,
-          output                => $text,
-          start_time            => $iter_t0,
-          end_time              => $iter_t1,
-          $langfuse_usage  ? ( usage            => $langfuse_usage )  : (),
-          $model_params    ? ( model_parameters => $model_params )    : (),
-        );
-
-        # Close iteration span
-        $engine->langfuse_update_span(
-          id       => $iter_span_id,
-          end_time => $iter_t1,
-          output   => $text,
-        );
-
-        # Update trace with final output
-        $engine->langfuse_update_trace(
-          id     => $trace_id,
-          output => $text,
-        );
-      }
-
-      # Persist user messages, injections, and final assistant response in history
-      push @{$self->history}, @$user_msgs;
-      push @{$self->history}, @$injected_history if @$injected_history;
-      push @{$self->history}, { role => 'assistant', content => $text };
-
-      # Push final assistant response to session_history
-      $self->_push_session_history({ role => 'assistant', content => $text });
-
-      # Update metrics
-      my $elapsed = tv_interval($t0) * 1000;
-      my $m = $self->metrics;
-      $m->{raids}++;
-      $m->{iterations}  += $$raid_iterations;
-      $m->{tool_calls}  += $$raid_tool_calls;
-      $m->{time_ms}     += $elapsed;
-
-      my $result = Langertha::Raider::Result->new(type => 'final', text => $text);
-
-      # Plugin hook: transform final result before return
-      for my $plugin (@{$self->plugin_instances}) {
-        $result = await $plugin->plugin_after_raid($result);
-      }
-
-      return $result;
+      return await $self->_finish_raid_f($state, $iter, $final_text);
     }
 
-    # Langfuse: generation for the LLM call that produced tool calls
-    my $post_llm_t = $langfuse ? $engine->langfuse_timestamp : undef;
-    if ($langfuse) {
-      $engine->langfuse_generation(
-        trace_id              => $trace_id,
-        parent_observation_id => $iter_span_id,
-        name                  => 'llm-call',
-        model                 => $engine->chat_model,
-        input                 => $conversation,
-        output                => $engine->json->encode([map {
-          ($self->_tool_call_name_input($engine, $_))[0]
-        } @$tool_calls]),
-        start_time            => $iter_t0,
-        end_time              => $post_llm_t,
-        $langfuse_usage  ? ( usage            => $langfuse_usage )  : (),
-        $model_params    ? ( model_parameters => $model_params )    : (),
-      );
-    }
-
-    # Execute each tool call
+    $self->_trace_tool_turn($state, $iter, $tool_calls);
     my @results;
-    for my $tc_idx (0 .. $#$tool_calls) {
-      # Safe point: no further tool call once a cancel is requested.
-      return $self->_cancelled_result($state) if $self->cancel_requested;
-      my $tc = $tool_calls->[$tc_idx];
-      my ( $name, $input ) = $self->_tool_call_name_input($engine, $tc);
-
-      # A call whose arguments the model did not send as valid JSON must not run
-      # the tool on {} -- answer it with an error result the model can retry, as
-      # core does (karr k345). Truncated calls were dropped upstream already.
-      if ( my $bad = $self->_undecodable_tool_result($tc) ) {
-        push @results, { tool_call => $tc, result => $bad };
-        $$raid_tool_calls++;
-        next;
-      }
-
-      # Plugin hook: inspect/transform before tool execution
-      my @plugin_tc = await $self->plugin_pipeline_tool_call_f($name, $input);
-      unless (@plugin_tc) {
-        # Plugin returned empty list — skip this tool call
-        my $skip_result = {
-          content => [{ type => 'text', text => "Tool call '$name' was skipped by plugin." }],
-        };
-        push @results, { tool_call => $tc, result => $skip_result };
-        $$raid_tool_calls++;
-        next;
-      }
-      ( $name, $input ) = @plugin_tc;
-
-      my $tool_t0 = $langfuse ? $engine->langfuse_timestamp : undef;
-
-      # Virtual self-tools. A raider_-prefixed name routes here only when no tool
-      # source announced it: an MCP source may offer a raider_-prefixed name and
-      # win the first-wins dedup (karr k90), in which case it sits in
-      # tool_server_map and was sent to the model as that MCP tool. Dispatch has
-      # to follow the actual registration, not the prefix, or such a call dies as
-      # "Unknown self-tool" instead of reaching its MCP source (karr k93).
-      if ($name =~ /^raider_/ && $self->has_raider_mcp && !$tool_server_map->{$name}) {
-        my $self_result = await $self->_execute_self_tool_f($name, $input);
-
-        # Handle interactive self-tool results
-        if ($self_result->{type} eq 'question' || $self_result->{type} eq 'pause') {
-          # Save continuation state for respond_f
-          $self->_continuation({
-            state          => $state,
-            iteration      => $iteration,
-            data           => $echo_data,
-            pending_tc     => $tc,
-            # Only the calls AFTER this pausing self-tool are still pending.
-            # The ones before it already ran and sit in results_so_far; carrying
-            # them here (as a plain "everything but $tc" filter did) re-runs their
-            # side effects and emits a second tool_result for the same tool_use id
-            # on resume — a 400 on strict providers like Anthropic.
-            remaining_tcs  => [ @$tool_calls[$tc_idx+1 .. $#$tool_calls] ],
-            results_so_far => \@results,
-            iter_span_id   => $iter_span_id,
-          });
-
-          if ($self_result->{type} eq 'question') {
-            return Langertha::Raider::Result->new(
-              type    => 'question',
-              content => $self_result->{question},
-              $self_result->{options} ? (options => $self_result->{options}) : (),
-            );
-          } else {
-            return Langertha::Raider::Result->new(
-              type    => 'pause',
-              content => $self_result->{reason},
-            );
-          }
-        }
-
-        if ($self_result->{type} eq 'abort') {
-          # Finalize metrics before aborting
-          my $elapsed = tv_interval($t0) * 1000;
-          my $m = $self->metrics;
-          $m->{iterations}  += $$raid_iterations;
-          $m->{tool_calls}  += $$raid_tool_calls;
-          $m->{time_ms}     += $elapsed;
-
-          return Langertha::Raider::Result->new(
-            type    => 'abort',
-            content => $self_result->{reason},
-          );
-        }
-
-        if ($self_result->{type} eq 'wait') {
-          my $loop = $engine->async_loop // IO::Async::Loop->new;
-          await $self->_until_cancelled($loop->delay_future(after => $self_result->{seconds}));
-          return $self->_cancelled_result($state) if $self->cancel_requested;
-          my $result = {
-            content => [{ type => 'text', text => "Waited $self_result->{seconds} seconds." }],
-          };
-
-          if ($langfuse) {
-            $engine->langfuse_span(
-              trace_id              => $trace_id,
-              parent_observation_id => $iter_span_id,
-              name                  => "tool: $name",
-              input                 => $input,
-              output                => "Waited $self_result->{seconds} seconds.",
-              start_time            => $tool_t0,
-              end_time              => $engine->langfuse_timestamp,
-            );
-          }
-
-          push @results, { tool_call => $tc, result => $result };
-          $$raid_tool_calls++;
-          next;
-        }
-
-        # type eq 'result' — normal self-tool result
-        my $result = $self_result;
-
-        # Plugin hook: transform tool result
-        for my $plugin (@{$self->plugin_instances}) {
-          $result = await $plugin->plugin_after_tool_call($name, $input, $result);
-        }
-
-        if ($langfuse) {
-          my $tool_output = join('', map { $_->{text} // '' } @{$result->{content} // []});
-          $engine->langfuse_span(
-            trace_id              => $trace_id,
-            parent_observation_id => $iter_span_id,
-            name                  => "tool: $name",
-            input                 => $input,
-            output                => $tool_output,
-            start_time            => $tool_t0,
-            end_time              => $engine->langfuse_timestamp,
-          );
-        }
-
-        push @results, { tool_call => $tc, result => $result };
-        $$raid_tool_calls++;
-        next;
-      }
-
-      # Normal MCP tool call. A name no server offers is answered with an error
-      # result so the batch runs to the end and the model can correct itself,
-      # instead of dying and losing the whole raid (core k332).
-      my $mcp = $tool_server_map->{$name};
-      unless ($mcp) {
-        push @results, { tool_call => $tc, result => {
-          content => [{ type => 'text', text => "unknown tool ".($name // '') }],
-          isError => JSON->true,
-        } };
-        $$raid_tool_calls++;
-        next;
-      }
-
-      my $call_f = $mcp->call_tool($name, $input)->else(sub {
-        my ( $error ) = @_;
-        Future->done({
-          content => [{ type => 'text', text => "Error calling tool '$name': $error" }],
-          isError => JSON->true,
-        });
-      });
-      my $result = await $self->_until_cancelled($call_f);
-      $result = $self->_cancelled_tool_result($name) if $self->_cut_off($call_f, $result);
-
-      # Plugin hook: transform tool result
-      for my $plugin (@{$self->plugin_instances}) {
-        $result = await $plugin->plugin_after_tool_call($name, $input, $result);
-      }
-
-      # Langfuse: span for each tool call, nested under iteration span
-      if ($langfuse) {
-        my $tool_output = join('', map { $_->{text} // '' } @{$result->{content} // []});
-        $engine->langfuse_span(
-          trace_id              => $trace_id,
-          parent_observation_id => $iter_span_id,
-          name                  => "tool: $name",
-          input                 => $input,
-          output                => $tool_output,
-          start_time            => $tool_t0,
-          end_time              => $engine->langfuse_timestamp,
-          $result->{isError} ? ( level => 'ERROR' ) : (),
-        );
-      }
-
-      push @results, { tool_call => $tc, result => $result };
-      $$raid_tool_calls++;
-    }
-
-    # Langfuse: close iteration span after tools complete
-    if ($langfuse) {
-      $engine->langfuse_update_span(
-        id       => $iter_span_id,
-        end_time => $engine->langfuse_timestamp,
-        metadata => {
-          tool_calls => scalar @$tool_calls,
-          tools_used => [map {
-            ($self->_tool_call_name_input($engine, $_->{tool_call}))[0]
-          } @results],
-        },
-      );
-    }
-
-    # Append assistant + tool results to conversation and session_history.
-    # $echo_data is the wire body without any tool call whose arguments were
-    # truncated, so the next turn never carries a call without a result.
-    my @tool_msgs = $engine->format_tool_results($echo_data, \@results);
-    push @$conversation, @tool_msgs;
-    push @{$state->{tool_segments}}, [ @tool_msgs ];   # track for in-loop compaction (k89)
-    $self->_push_session_history(@tool_msgs);
+    my $stop = await $self->_execute_tool_calls_f($state, $iter, $tool_calls, $echo_data, \@results);
+    return $stop if defined $stop;
+    $self->_close_iteration_trace($state, $iter, $tool_calls, \@results);
+    $self->_append_tool_turn($state, $echo_data, \@results);
   }
 
   die "Raider tool loop exceeded ".$self->max_iterations." iterations";
+}
+
+# Brings the conversation up to date before an iteration's request: in-loop
+# compaction, the tool set rebuilt if it changed, injections (from the second
+# iteration of the raid on), then the plugin_before_llm_call hook.
+async sub _prepare_iteration_f {
+  my ( $self, $state, $iteration, $start_iteration ) = @_;
+
+  # Keep one long raid inside the context window: before building the next
+  # request, drop the oldest tool exchanges if the last prompt crossed the
+  # threshold (karr k89). Runs before injections and the plugin hook so both
+  # see the compacted conversation.
+  $self->_compact_conversation($state);
+
+  await $self->_refresh_tools_f($state);
+
+  # Drain injections for iterations 2+
+  $self->_drain_injections($state, $iteration)
+    if $iteration > $start_iteration || $start_iteration > 1;
+
+  # Plugin hook: transform conversation before each LLM call
+  my $conversation = $state->{conversation};
+  for my $plugin (@{$self->plugin_instances}) {
+    $conversation = await $plugin->plugin_before_llm_call($conversation, $iteration);
+  }
+  # A plugin may return a fresh arrayref. Keep the continuation state pointing
+  # at whatever the loop now works with, because respond_f resumes from
+  # $state->{conversation}: without this write-back a paused raid reverts to
+  # the pre-plugin array and drops every message accumulated after divergence.
+  $state->{conversation} = $conversation;
+  return;
+}
+
+# Re-gathers the tool set for the active engine when the catalog or the engine
+# changed (_tools_dirty).
+async sub _refresh_tools_f {
+  my ( $self, $state ) = @_;
+  return unless $self->_tools_dirty;
+  my $engine = $self->active_engine;
+  $state->{engine} = $engine;
+  my ( $all_tools, $new_map ) = await $self->_gather_tools_f;
+  $state->{formatted_tools} = $engine->format_tools($all_tools);
+  $state->{tool_server_map} = $new_map;
+  $state->{model_params} = $self->_langfuse_model_parameters($engine)
+    if $state->{langfuse};
+  $self->_tools_dirty(0);
+  return;
+}
+
+# Moves the queued inject() messages and those the on_iteration callback
+# returns into the conversation, the raid's injected history and
+# session_history.
+sub _drain_injections {
+  my ( $self, $state, $iteration ) = @_;
+  my @injected;
+  if (@{$self->_injections}) {
+    push @injected, splice @{$self->_injections};
+  }
+  if ($self->has_on_iteration) {
+    my $cb_msgs = $self->on_iteration->($self, $iteration);
+    push @injected, @$cb_msgs if $cb_msgs && @$cb_msgs;
+  }
+  return unless @injected;
+  my @msgs = map {
+    ref $_ ? $_ : { role => 'user', content => $_ }
+  } @injected;
+  push @{$state->{conversation}}, @msgs;
+  push @{$state->{injected_history}}, @msgs;
+  $self->_push_session_history(@msgs);
+  return;
+}
+
+# Opens the iteration's Langfuse span. Returns the iteration's bookkeeping:
+# its number, and with Langfuse its start time and span id.
+sub _start_iteration_trace {
+  my ( $self, $state, $iteration ) = @_;
+  my $iter = { iteration => $iteration };
+  return $iter unless $state->{langfuse};
+  my $engine = $state->{engine};
+  $iter->{t0} = $engine->langfuse_timestamp;
+  $iter->{span_id} = $engine->langfuse_span(
+    trace_id   => $state->{trace_id},
+    name       => "iteration-$iteration",
+    start_time => $iter->{t0},
+  );
+  return $iter;
+}
+
+# Sends the iteration's request. The future gives the HTTP response, or
+# nothing once a cancel abandons the request.
+sub _send_turn_f {
+  my ( $self, $state ) = @_;
+  my $engine = $state->{engine};
+  my $request = $engine->build_tool_chat_request($state->{conversation}, $state->{formatted_tools});
+  return $self->_until_cancelled($engine->async_request_f($request));
+}
+
+# Parses the reply to the iteration's request (dying on a failed request),
+# runs the plugin_after_llm_response hook and records the prompt tokens for
+# auto-compression and, with Langfuse, the usage on $iter. Returns the body.
+async sub _read_turn_f {
+  my ( $self, $state, $iter, $response ) = @_;
+  my $engine = $state->{engine};
+
+  unless ($response->is_success) {
+    die "".(ref $engine)." raid request failed: ".$response->status_line."\n".$response->content;
+  }
+
+  my $data = $engine->parse_response($response);
+
+  # Plugin hook: inspect/transform LLM response
+  for my $plugin (@{$self->plugin_instances}) {
+    $data = await $plugin->plugin_after_llm_response($data, $iter->{iteration});
+  }
+
+  # Track prompt tokens for auto-compression. from_raw is undef when the
+  # body reports no usage, but a Usage without a prompt count still has
+  # input_tokens 0: treat 0 as not reported, so it never resets the count.
+  my $usage = Langertha::Usage->from_raw($data);
+  $self->_last_prompt_tokens($usage->input_tokens)
+    if $usage && $usage->input_tokens > 0;
+
+  # Extract usage for Langfuse
+  $iter->{usage} = $state->{langfuse} && $usage ? {
+    input  => $usage->input_tokens,
+    output => $usage->output_tokens,
+    total  => $usage->total_tokens,
+  } : undef;
+
+  return $data;
+}
+
+# The Langfuse generation for the iteration's model call, nested under the
+# iteration span.
+sub _trace_llm_call {
+  my ( $self, $state, $iter, $output, $end_time ) = @_;
+  my $engine       = $state->{engine};
+  my $model_params = $state->{model_params};
+  $engine->langfuse_generation(
+    trace_id              => $state->{trace_id},
+    parent_observation_id => $iter->{span_id},
+    name                  => 'llm-call',
+    model                 => $engine->chat_model,
+    input                 => $state->{conversation},
+    output                => $output,
+    start_time            => $iter->{t0},
+    end_time              => $end_time,
+    $iter->{usage} ? ( usage            => $iter->{usage} ) : (),
+    $model_params  ? ( model_parameters => $model_params )  : (),
+  );
+  return;
+}
+
+# Ends the raid on a reply without tool calls: closes the Langfuse span and
+# trace, persists the user messages, injections and answer in history,
+# updates the metrics and returns the final Result through the
+# plugin_after_raid hook.
+async sub _finish_raid_f {
+  my ( $self, $state, $iter, $text ) = @_;
+
+  if ($state->{langfuse}) {
+    my $engine  = $state->{engine};
+    my $iter_t1 = $engine->langfuse_timestamp;
+
+    # Langfuse: generation nested under iteration span
+    $self->_trace_llm_call($state, $iter, $text, $iter_t1);
+
+    # Close iteration span
+    $engine->langfuse_update_span(
+      id       => $iter->{span_id},
+      end_time => $iter_t1,
+      output   => $text,
+    );
+
+    # Update trace with final output
+    $engine->langfuse_update_trace(
+      id     => $state->{trace_id},
+      output => $text,
+    );
+  }
+
+  # Persist user messages, injections, and final assistant response in history
+  my $injected_history = $state->{injected_history};
+  push @{$self->history}, @{$state->{user_msgs}};
+  push @{$self->history}, @$injected_history if @$injected_history;
+  push @{$self->history}, { role => 'assistant', content => $text };
+
+  # Push final assistant response to session_history
+  $self->_push_session_history({ role => 'assistant', content => $text });
+
+  $self->metrics->{raids}++;
+  $self->_record_raid_metrics($state);
+
+  my $result = Langertha::Raider::Result->new(type => 'final', text => $text);
+
+  # Plugin hook: transform final result before return
+  for my $plugin (@{$self->plugin_instances}) {
+    $result = await $plugin->plugin_after_raid($result);
+  }
+
+  return $result;
+}
+
+# Adds the raid's iterations, tool calls and elapsed time to the metrics.
+sub _record_raid_metrics {
+  my ( $self, $state ) = @_;
+  my $elapsed = tv_interval($state->{t0}) * 1000;
+  my $m = $self->metrics;
+  $m->{iterations}  += ${$state->{raid_iterations}};
+  $m->{tool_calls}  += ${$state->{raid_tool_calls}};
+  $m->{time_ms}     += $elapsed;
+  return;
+}
+
+# Langfuse: generation for the model call that produced tool calls, its
+# output the called tool names.
+sub _trace_tool_turn {
+  my ( $self, $state, $iter, $tool_calls ) = @_;
+  return unless $state->{langfuse};
+  my $engine     = $state->{engine};
+  my $post_llm_t = $engine->langfuse_timestamp;
+  $self->_trace_llm_call($state, $iter, $engine->json->encode([map {
+    ($self->_tool_call_name_input($engine, $_))[0]
+  } @$tool_calls]), $post_llm_t);
+  return;
+}
+
+# Runs the iteration's tool calls in order and pushes one
+# { tool_call => ..., result => ... } per call onto $results. Returns the
+# Result that ends the raid when a cancel, an interactive self-tool or an
+# abort stops the batch; nothing when the whole batch ran.
+async sub _execute_tool_calls_f {
+  my ( $self, $state, $iter, $tool_calls, $echo_data, $results ) = @_;
+  my $engine = $state->{engine};
+
+  for my $tc_idx (0 .. $#$tool_calls) {
+    # Safe point: no further tool call once a cancel is requested.
+    return $self->_cancelled_result($state) if $self->cancel_requested;
+    my $tc = $tool_calls->[$tc_idx];
+    my ( $name, $input ) = $self->_tool_call_name_input($engine, $tc);
+
+    # A call whose arguments the model did not send as valid JSON must not run
+    # the tool on {} -- answer it with an error result the model can retry, as
+    # core does (karr k345). Truncated calls were dropped upstream already.
+    if ( my $bad = $self->_undecodable_tool_result($tc) ) {
+      push @$results, { tool_call => $tc, result => $bad };
+      ${$state->{raid_tool_calls}}++;
+      next;
+    }
+
+    # Plugin hook: inspect/transform before tool execution
+    my @plugin_tc = await $self->plugin_pipeline_tool_call_f($name, $input);
+    unless (@plugin_tc) {
+      # Plugin returned empty list — skip this tool call
+      my $skip_result = {
+        content => [{ type => 'text', text => "Tool call '$name' was skipped by plugin." }],
+      };
+      push @$results, { tool_call => $tc, result => $skip_result };
+      ${$state->{raid_tool_calls}}++;
+      next;
+    }
+    ( $name, $input ) = @plugin_tc;
+
+    my $tool_t0 = $state->{langfuse} ? $engine->langfuse_timestamp : undef;
+    my $result;
+
+    # Virtual self-tools. A raider_-prefixed name routes here only when no tool
+    # source announced it: an MCP source may offer a raider_-prefixed name and
+    # win the first-wins dedup (karr k90), in which case it sits in
+    # tool_server_map and was sent to the model as that MCP tool. Dispatch has
+    # to follow the actual registration, not the prefix, or such a call dies as
+    # "Unknown self-tool" instead of reaching its MCP source (karr k93).
+    if ($name =~ /^raider_/ && $self->has_raider_mcp && !$state->{tool_server_map}{$name}) {
+      my $self_result = await $self->_execute_self_tool_f($name, $input);
+
+      # Handle interactive self-tool results
+      if ($self_result->{type} eq 'question' || $self_result->{type} eq 'pause') {
+        # Only the calls AFTER this pausing self-tool are still pending.
+        # The ones before it already ran and sit in $results; carrying them
+        # too (as a plain "everything but $tc" filter did) re-runs their side
+        # effects and emits a second tool_result for the same tool_use id on
+        # resume — a 400 on strict providers like Anthropic.
+        return $self->_pause_raid($state, $iter, $echo_data, $tc,
+          [ @$tool_calls[$tc_idx+1 .. $#$tool_calls] ], $results, $self_result);
+      }
+
+      return $self->_abort_raid($state, $self_result)
+        if $self_result->{type} eq 'abort';
+
+      if ($self_result->{type} eq 'wait') {
+        $result = await $self->_wait_self_tool_f(
+          $state, $iter, $name, $input, $tool_t0, $self_result->{seconds});
+        return $self->_cancelled_result($state) unless $result;
+      }
+      else {
+        # type eq 'result' — normal self-tool result
+        $result = await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0, $self_result);
+      }
+    }
+    else {
+      $result = await $self->_call_mcp_tool_f($state, $iter, $name, $input, $tool_t0);
+    }
+
+    push @$results, { tool_call => $tc, result => $result };
+    ${$state->{raid_tool_calls}}++;
+  }
+
+  return;
+}
+
+# Saves the continuation respond_f resumes from when an interactive self-tool
+# stops the batch, and returns its question or pause Result. $remaining_tcs
+# are the calls of the batch after $tc, $results those that already ran.
+sub _pause_raid {
+  my ( $self, $state, $iter, $echo_data, $tc, $remaining_tcs, $results, $self_result ) = @_;
+  $self->_continuation({
+    state          => $state,
+    iteration      => $iter->{iteration},
+    data           => $echo_data,
+    pending_tc     => $tc,
+    remaining_tcs  => $remaining_tcs,
+    results_so_far => $results,
+    iter_span_id   => $iter->{span_id},
+  });
+
+  if ($self_result->{type} eq 'question') {
+    return Langertha::Raider::Result->new(
+      type    => 'question',
+      content => $self_result->{question},
+      $self_result->{options} ? (options => $self_result->{options}) : (),
+    );
+  }
+  return Langertha::Raider::Result->new(
+    type    => 'pause',
+    content => $self_result->{reason},
+  );
+}
+
+# Ends the raid on raider_abort, metrics finalized first.
+sub _abort_raid {
+  my ( $self, $state, $self_result ) = @_;
+  $self->_record_raid_metrics($state);
+  return Langertha::Raider::Result->new(
+    type    => 'abort',
+    content => $self_result->{reason},
+  );
+}
+
+# Runs raider_wait: waits $seconds on the raid's loop unless a cancel cuts
+# the wait short. Returns the tool result, or nothing after a cancel.
+async sub _wait_self_tool_f {
+  my ( $self, $state, $iter, $name, $input, $tool_t0, $seconds ) = @_;
+  my $engine = $state->{engine};
+  my $loop = $engine->async_loop // IO::Async::Loop->new;
+  await $self->_until_cancelled($loop->delay_future(after => $seconds));
+  return if $self->cancel_requested;
+  my $text = "Waited $seconds seconds.";
+  $self->_trace_tool_call($state, $iter, $name, $input, $tool_t0, $text)
+    if $state->{langfuse};
+  return { content => [{ type => 'text', text => $text }] };
+}
+
+# Calls the tool $name on the MCP source that registered it. A name no server
+# offers is answered with an error result so the batch runs to the end and the
+# model can correct itself, instead of dying and losing the whole raid (core
+# k332). A failed call, or one a cancel cut off, is an error result too.
+async sub _call_mcp_tool_f {
+  my ( $self, $state, $iter, $name, $input, $tool_t0 ) = @_;
+  my $mcp = $state->{tool_server_map}{$name};
+  unless ($mcp) {
+    return {
+      content => [{ type => 'text', text => "unknown tool ".($name // '') }],
+      isError => JSON->true,
+    };
+  }
+
+  my $call_f = $mcp->call_tool($name, $input)->else(sub {
+    my ( $error ) = @_;
+    Future->done({
+      content => [{ type => 'text', text => "Error calling tool '$name': $error" }],
+      isError => JSON->true,
+    });
+  });
+  my $result = await $self->_until_cancelled($call_f);
+  $result = $self->_cancelled_tool_result($name) if $self->_cut_off($call_f, $result);
+
+  return await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0, $result, 1);
+}
+
+# Runs the plugin_after_tool_call hook on a tool's result and traces the call
+# as a Langfuse span under the iteration span. With $flag_errors an error
+# result gets level ERROR (MCP calls; self-tool results carry no level).
+async sub _after_tool_call_f {
+  my ( $self, $state, $iter, $name, $input, $tool_t0, $result, $flag_errors ) = @_;
+
+  # Plugin hook: transform tool result
+  for my $plugin (@{$self->plugin_instances}) {
+    $result = await $plugin->plugin_after_tool_call($name, $input, $result);
+  }
+
+  if ($state->{langfuse}) {
+    my $tool_output = join('', map { $_->{text} // '' } @{$result->{content} // []});
+    $self->_trace_tool_call($state, $iter, $name, $input, $tool_t0, $tool_output,
+      $flag_errors && $result->{isError} ? ( level => 'ERROR' ) : ());
+  }
+
+  return $result;
+}
+
+# Langfuse: span for one tool call, nested under the iteration span.
+sub _trace_tool_call {
+  my ( $self, $state, $iter, $name, $input, $tool_t0, $output, @extra ) = @_;
+  my $engine = $state->{engine};
+  $engine->langfuse_span(
+    trace_id              => $state->{trace_id},
+    parent_observation_id => $iter->{span_id},
+    name                  => "tool: $name",
+    input                 => $input,
+    output                => $output,
+    start_time            => $tool_t0,
+    end_time              => $engine->langfuse_timestamp,
+    @extra,
+  );
+  return;
+}
+
+# Langfuse: closes the iteration span once the batch of tool calls ran.
+sub _close_iteration_trace {
+  my ( $self, $state, $iter, $tool_calls, $results ) = @_;
+  return unless $state->{langfuse};
+  my $engine = $state->{engine};
+  $engine->langfuse_update_span(
+    id       => $iter->{span_id},
+    end_time => $engine->langfuse_timestamp,
+    metadata => {
+      tool_calls => scalar @$tool_calls,
+      tools_used => [map {
+        ($self->_tool_call_name_input($engine, $_->{tool_call}))[0]
+      } @$results],
+    },
+  );
+  return;
+}
+
+# Appends the assistant echo and the tool results to the conversation and
+# session_history, and tracks them as one exchange for in-loop compaction
+# (k89). $echo_data is the wire body without any tool call whose arguments
+# were truncated, so the next turn never carries a call without a result.
+sub _append_tool_turn {
+  my ( $self, $state, $echo_data, $results ) = @_;
+  my @tool_msgs = $state->{engine}->format_tool_results($echo_data, $results);
+  push @{$state->{conversation}}, @tool_msgs;
+  push @{$state->{tool_segments}}, [ @tool_msgs ];
+  $self->_push_session_history(@tool_msgs);
+  return;
 }
 
 sub respond_f {
