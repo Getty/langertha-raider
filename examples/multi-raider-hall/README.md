@@ -26,8 +26,11 @@ examples/multi-raider-hall/
 └── .raider.md                 # shared persona note (optional)
 ```
 
-Nothing else: the hall owns `.raider-hall/` at runtime (logs, state,
-per-raider libs). It's safe to `rm -rf .raider-hall/` between runs.
+Nothing else: at runtime the hall owns `.raider-hall/` (logs, state and,
+with this config, the lib target its raiders install into) and keeps the
+session journals in `.raider/sessions/`. Removing `.raider-hall/` between
+runs drops the logs, the waiting queues, the session bindings and the
+installed modules; the journals stay.
 
 ## Quick start
 
@@ -77,8 +80,9 @@ acp> /cancel                  # sends session/cancel
 acp> /quit
 ```
 
-From an ACP-capable editor (Zed etc.) point the agent configuration at
-`tcp://127.0.0.1:38421` — same protocol, client does the rest.
+Any client that speaks ACP over TCP can use the port the same way. An
+editor that starts its agent as a local command over stdio (Zed does)
+needs the stdio ACP server, which is not there yet (ADR 0010).
 
 ## Adding a raider
 
@@ -87,9 +91,10 @@ raider hall add-raider ivar --engine openai --persona teacher \
     --pack testing-fu --model gpt-4o-mini
 ```
 
-This appends an entry to `.raider-hall.yml`. No daemon restart needed
-for the next spawn — `raider hall spawn ivar "…"` picks up the new
-config on the fly.
+This appends an entry to `.raider-hall.yml`. A running hall reads the
+file once at start, so restart it (`raider hall stop`, then
+`raider hall start`) before `raider hall spawn ivar "…"` uses the new
+entry.
 
 ## Turning on Telegram
 

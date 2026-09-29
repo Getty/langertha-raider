@@ -7,8 +7,8 @@ the `raider` command-line agent built on it (`Langertha::Raider::CLI`).
 `raider` is an autonomous command-line agent in Perl. It wraps `Langertha::Raider`
 with a practical toolbox — filesystem, bash, web search, web fetch, optional
 Perl-native tools — and drops you into a REPL (or a one-shot run) where a viking
-shield-maiden named **Langertha** does the work, against any of the 15+ LLM
-providers Langertha speaks.
+shield-maiden named **Langertha** does the work, against any of the ten LLM
+providers `-e` knows (from Perl, `Langertha::Raider` takes any Langertha engine).
 
 ```
              __     __
@@ -122,13 +122,16 @@ Options:
                            minimax, cerebras, openrouter, ollama (default: auto)
   -m, --model NAME         Model identifier (engine-specific cheap default)
   -k, --api-key KEY        API key (overrides *_API_KEY env var)
-  -o, --option KEY=VALUE   Engine attribute (repeatable), e.g. -o temperature=0.2
+  -o, --option KEY=VALUE   Engine attribute (repeatable), e.g. -o temperature=0.2;
+                           raider's own .raider.yml keys (perl, packs=a,b, ...)
+                           configure raider instead
   -r, --root DIR           Working directory (default: cwd). File tools are
                            confined to this directory.
   -M, --mission TEXT       Replace the persona / .raider.md instructions
                            (skills, packs and the tool descriptions still apply)
-      --bare               Isolated context: no .raider.md, skills or detection
-                           (--pack NAME and /pack still work)
+      --bare               Isolated context: no .raider.md, skills, packs:,
+                           default packs or detection (--pack NAME and /pack
+                           NAME still work)
   -i, --interactive        REPL mode (default on a TTY with no prompt / pipe)
       --json[=N]           Print one JSON document for the run and exit
       --msgpack[=N]        The same document as MessagePack
@@ -141,11 +144,13 @@ Options:
       --continue           The same, with the newest session of the project
       --max-iterations N   Hard safety cap on tool rounds per raid (default 10000)
       --no-color           Disable ANSI colors
-      --no-trace           Hide live tool-call progress output
+      --no-trace           Hide live tool-call progress output (--trace shows
+                           it, also with a machine flag, on stderr)
       --perl               Enable perl_eval / perl_check / perl_cpanm tools
       --pack NAME          Enable a bundled pack (repeatable)
       --no-pack NAME       Switch a pack off (also a detected/default one)
       --no-detect          Do not activate packs by workspace detection
+                           (--detect forces it on over detect: false)
       --claude             Load CLAUDE.md + .claude/skills/*/SKILL.md
       --openai / --codex   Load AGENTS.md
       --skills DIR         Load *.md from DIR as skills (repeatable)
@@ -174,8 +179,12 @@ REPL slash commands:
 | `/pack on/off NAME`    | Enable or disable a pack (`/pack NAME` toggles)     |
 | `/quit` `/exit` `:q`   | Leave                                               |
 
-Full detail — including the machine-output document schema and every exit status —
-is in `perldoc raider`.
+`/pack` and `/reload` rebuild the mission, and mount or unmount the Perl tools when
+a pack that requests them (the `perl` pack) comes or goes — the tools the model is
+told about are always the tools it gets.
+
+Full detail — every option, the environment variables, the machine-output document
+schema and every exit status — is in `perldoc raider`.
 
 ## Configuration — `.raider.yml`
 
@@ -214,8 +223,9 @@ Two kinds of keys live in the file:
   engine. `skills` is merged across layers instead of replaced.
 
 A file that does not parse, whose top level is not a mapping, or that puts a mapping
-under one of raider's own keys is a hard error naming the offending key — raider
-stops instead of loading half of it.
+under one of raider's own keys (other than `skills` and `detect`, whose `detect:`
+map holds per-pack detection rules) is a hard error naming the offending key —
+raider stops instead of loading half of it.
 
 `.raider.md` in the working root is the **persona / mission** file: drop one in to
 rename Langertha, reshape her, or replace her entirely; `/prompt` builds one
@@ -264,43 +274,57 @@ and reports what the crash rules found: damaged lines, runs that never ended
 
 ## Tools
 
-Every run assembles one toolbox. The built-ins:
+Every run assembles one toolbox, and the tool list in the model's prompt is
+generated from exactly the tools the engine is offered — a tool that is not mounted
+is not described. The built-ins:
 
-| Tool                                            | Notes                                       |
-|-------------------------------------------------|---------------------------------------------|
-| `list_files(path)`                              | Directory listing, dirs suffixed with `/`   |
-| `read_file(path)`                               | Full text file                              |
-| `write_file(path, content)`                     | Creates parents, overwrites                 |
-| `edit_file(path, old_string, new_string)`       | Exact unique-match substitution             |
-| `bash(command, [working_directory], [timeout])` | Real shell; captures stdout/stderr/exit     |
-| `web_search(query, [limit])`                    | Multi-provider, rank-fused                  |
-| `web_fetch(url, [as_html])`                     | HTML flattened to text by default           |
+| Tool                                                        | Notes                                     |
+|-------------------------------------------------------------|-------------------------------------------|
+| `list_files(path)`                                          | Directory listing, dirs suffixed with `/` |
+| `read_file(path)`                                           | Full text file                            |
+| `write_file(path, content)`                                 | Creates parents, overwrites               |
+| `edit_file(path, old_string, new_string)`                   | Exact unique-match substitution           |
+| `bash(command, [compress], [timeout], [working_directory])` | Real shell; stdout/stderr/exit code       |
+| `web_search(query, [limit])`                                | Multi-provider, rank-fused                |
+| `web_fetch(url, [as_html])`                                 | HTML flattened to text by default         |
 
-Filesystem tools are confined to the `-r`/`--root` directory; `bash` inherits it as
-its working directory. `web_search` always has DuckDuckGo (keyless); Brave, Serper
-and Google are added automatically when `BRAVE_API_KEY`, `SERPER_API_KEY`, or both
-`GOOGLE_API_KEY` + `GOOGLE_CSE_ID` are set.
+Filesystem tools are confined to the `-r`/`--root` directory. `bash` starts there
+(120 s per command unless the call sets `timeout`; `compress` shortens the output
+for the model) but is a full shell, not confined to it. `web_search` always has
+DuckDuckGo (keyless); Brave, Serper and Google are added automatically when
+`BRAVE_API_KEY`, `SERPER_API_KEY`, or both `GOOGLE_API_KEY` + `GOOGLE_CSE_ID` are
+set.
 
-You can add MCP tools from Perl (see [Using the engine from Perl](#using-the-engine-from-perl)).
-A fine-grained permission/policy layer over these tools is on the
-[roadmap](#roadmap--planned); today the confinement above is the boundary.
+A raider started by the [Hall](#raider-hall) also gets `telegram_reply(bot, chat_id,
+text, [message_thread_id])` (bound to the chat of a Telegram mission, where only
+`text` is needed), `hall_status()` and `hall_spawn(name, mission)`.
+
+`raider config explain` says whether the Perl tools are mounted and why;
+`--export-skill` writes the current tool list as a table. You can add MCP tools
+from Perl (see [Using the engine from Perl](#using-the-engine-from-perl)). A
+fine-grained permission/policy layer over these tools is on the
+[roadmap](#roadmap--planned); today the file-tool confinement above is the only
+boundary.
 
 ### Perl-native tools
 
-`--perl` (or `perl: true` in `.raider.yml`) adds three tools:
+Three more tools come with `--perl`, with `perl: true` in `.raider.yml`, or — when
+neither says otherwise — with an active pack that requests them: the bundled `perl`
+pack, detected in a Perl workspace. `perl: false` keeps them off.
 
-| Tool                            | Notes                                              |
-|---------------------------------|----------------------------------------------------|
-| `perl_eval(code, [stdin])`      | Ephemeral interpreter; captures stdout/stderr/exit |
-| `perl_check(code)`              | `perl -c` — syntax check without executing         |
-| `perl_cpanm(module, [options])` | Install into the raider's private `local::lib`     |
+| Tool                                  | Notes                                          |
+|---------------------------------------|------------------------------------------------|
+| `perl_eval(code, [stdin], [timeout])` | Fresh interpreter per call; stdout/stderr/exit |
+| `perl_check(code)`                    | `perl -c` — syntax check                       |
+| `perl_cpanm(module, [options])`       | Install into the raider's private `local::lib` |
 
-Installs land in a `local::lib` the raider owns — `.raider/lib/` next to the working
-directory by default — which the process imports at startup, so freshly-installed
-modules are visible to later `perl_eval` calls without a restart. `perl_eval` also
-auto-recovers from `Can't locate X/Y.pm in @INC`: it installs the missing module
-once, retries the eval, and reports what it installed. It never loops. (Note that
-`perl -c` runs `BEGIN`/`use`, so `perl_check` is code execution too.)
+Installs land in a `local::lib` the raider owns — `.raider/lib/` in the working
+directory by default (`preferred_lib_target` in `.raider.yml` moves it) — which is on
+`PERL5LIB` of every `perl_eval` and `perl_check`, so freshly-installed modules are
+visible to the next call without a restart. `perl_eval` also auto-recovers from
+`Can't locate X/Y.pm in @INC`: it installs the missing module once, retries the
+eval, and reports what it installed. It never loops. (Note that `perl -c` runs
+`BEGIN`/`use`, so `perl_check` is code execution too.)
 
 ## Personas, packs and skills
 
@@ -310,8 +334,10 @@ once, retries the eval, and reports what it installed. It never loops. (Note tha
   stacked on top of the mission. Bundled packs: **caveman**, **polite**, **teacher**
   (persona group, one active at a time) and **git-guru**, **testing-fu**,
   **perl-hacker**, **perl** (power group, stackable). Enable with `--pack NAME`,
-  toggle in the REPL with `/pack`, persist under `packs:` in `.raider.yml`, or drop
-  your own under `share/packs/<name>/`.
+  toggle in the REPL with `/pack`, persist under `packs:` in `.raider.yml`. Your
+  own packs go into `.raider/packs/<name>/` of the project, `~/.raider/packs/<name>/`
+  or a directory listed in `RAIDER_PACK_DIRS`; a `pack.yml` may set
+  `exclusive_group`, `enabled_by_default`, `tools: [perl]` and a `detect:` rule.
 - A **skill** is know-how — instructions and maybe resources — loaded into the
   mission. `--claude` loads `CLAUDE.md` and `.claude/skills/*/SKILL.md`,
   `--openai`/`--codex` loads `AGENTS.md`, and `--skills DIR` loads plain markdown
@@ -365,7 +391,7 @@ or Docker). Run `raider hall <subcommand> --help` for per-command options.
 A hall is configured by a `.raider-hall.yml` in its directory:
 
 ```yaml
-longhouse: false                 # true: share one local::lib across raiders
+longhouse: false                 # true: longhouse/lib of the hall on every raider's PERL5LIB
 raiders:
   bjorn:    { engine: anthropic, persona: caveman, packs: [git-guru] }
   lagertha: { engine: openai, model: gpt-4o-mini, persona: polite, packs: [testing-fu] }
@@ -374,15 +400,20 @@ cron:
 telegram:
   bots:
     ops: { token: '123456:ABC...', allowlist: [42, 99], routing: { 42: bjorn, '*': lagertha } }
+    # allowed_chats: [-1001234567890]   # group chats to answer in
 acp:
   port: 38421
 ```
 
 Named raiders spawn as child processes; a `1name` prefix (e.g. `spawn 1bjorn`)
 forces at most one instance, queuing overlapping missions FIFO. Cron entries fire
-non-blocking; Telegram bots long-poll with a per-bot allowlist and routing map, and
-answer through the hall. There is a fuller walkthrough under
-[`examples/multi-raider-hall/`](examples/multi-raider-hall/).
+non-blocking; Telegram bots long-poll with a per-bot allowlist (Telegram user ids;
+empty lets nobody in, group chats must also be in `allowed_chats`) and routing map,
+and answer through the hall. The hall reads `.raider-hall.yml` once at start, and
+starts its raiders with the `raider` next to it or on `PATH`
+(`RAIDER_HALL_RAIDER_BIN` overrides that); `perldoc raider-hall` and
+`perldoc Langertha::Raider::Hall` have the details. There is a fuller walkthrough
+under [`examples/multi-raider-hall/`](examples/multi-raider-hall/).
 
 ## ACP (editors)
 
@@ -406,9 +437,10 @@ raider acp prompt 127.0.0.1:38421 --raider bjorn "..."  # one-shot
 raider acp connect 127.0.0.1:38421 --raider lagertha    # interactive REPL
 ```
 
-`--json` streams the raw JSON-RPC frames to stderr for debugging. Under the hood
-this is `Langertha::Raider::ACP::Client`, a small blocking JSON-RPC 2.0 client you
-can embed in your own Perl.
+The endpoint is `HOST:PORT`, or just `PORT` for `127.0.0.1`. `--json` also prints
+every `session/update` notification as raw JSON on stderr for debugging. Under the
+hood this is `Langertha::Raider::ACP::Client`, a small blocking JSON-RPC 2.0 client
+you can embed in your own Perl.
 
 > The stdio ACP server an editor starts directly (`raider acp` as the agent
 > command), and driving remote raiders as `raider NAME@HOST`, are on the
@@ -434,7 +466,8 @@ say $result;
 ```
 
 `raid_f` runs one turn's worth of the agent loop and returns a
-`Langertha::Raider::Result` (`is_final`, `is_question`, `is_pause`, `is_abort`);
+`Langertha::Raider::Result` (`is_final`, `is_question`, `is_pause`, `is_abort`,
+`is_cancelled`);
 `respond_f` answers back into the same conversation. `Langertha::Raid` orchestrates
 several runnables (`Raid::Sequential`, `Raid::Parallel`, `Raid::Loop`). Attaching
 MCP tools is covered in the [Langertha](https://metacpan.org/dist/Langertha) docs.
@@ -508,7 +541,8 @@ vocabulary live in [`CONTEXT.md`](CONTEXT.md); it lands in small vertical slices
 - **Permissions & policy** (ADR 0005) — one active tool set with real capability
   grants, `raider policy check` / `raider tools explain`, approvals tied to the
   exact call, a "headless never allows all" rule, and a home-service `project_tools`
-  mapping. *Today: filesystem tools confined to `--root`, `bash` unrestricted within it.*
+  mapping. *Today: filesystem tools confined to `--root`; `bash` starts there but is
+  unrestricted.*
 - **Provider discovery** (ADR 0007) — `raider --provider host.tld`,
   `raider provider add/inspect`, and a declarative `.well-known/langertha.json`
   manifest. *Today: any Langertha provider via API key and `-e`.*
