@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-29T18:25:41Z
+claimed_by: worker-bin-b
+class: standard
+completed: 2026-09-29T18:25:41Z
+created: 2026-09-29T18:04:40Z
+id: 107
+priority: medium
+started: 2026-09-29T18:06:47Z
+status: done
+tags:
+- binary
+- http
+- defect
+title: 'Fehlendes libssl: https-Aufrufe haengen statt zu scheitern'
+updated: 2026-09-29T18:25:41Z
+---
+
+Aus #97. Auf einem Ziel ohne libssl3 (bzw. wenn ein dynamisch geladenes Modul fehlt, vgl. IO::Async::Internals::Connector) haengt der erste HTTP-Request fuer immer statt mit Fehler abzubrechen. Ursache in der async Fehlerbehandlung (verlorenes Future/die im Callback). Reproduzieren (z.B. Connector-Load per Test scheitern lassen), Fehler muss als Tool-/Engine-Fehler hochkommen.
+
+2026-09-29 18:16 Root cause (reproduced without the binary, @INC hook blocking IO/Async/Internals/Connector.pm or IO/Async/SSL.pm; raider CLI hung, plain Net::Async::HTTP did not): Net::Async::HTTP 0.50 get_connection pushes the new conn onto the host's connection list, then connect_connection dies synchronously (require IO::Async::SSL, or $loop->connect -> require IO::Async::Internals::Connector). The die becomes a failed future (repeat catches it), but on_error never runs, so the conn stays in the list: with max_connections_per_host=1 every later request to that host waits forever for a slot. In raider the first request is the background session-history embedding (error swallowed), so the chat request is the one that hangs. Same for web_fetch/web_search: first call errors, second call to the same host hangs. libssl missing = IO::Socket::SSL fails at startup inside Mojo::IOLoop::TLS's eval, then IO::Async::SSL dies with it at connect time -> same path.
+
+2026-09-29 18:16 Also found / to file: (1) upstream Net::Async::HTTP (PEVANS, CPAN RT, not a karr board): connect_connection dying synchronously leaks the host's connection slot; fix = catch it and route through on_error. (2) langertha core board: Role::AsyncHTTP could run the same connect-module check before a Net::Async::HTTP request (covers every core user); raider's check could then go. (3) Hall::Telegram has its own Net::Async::HTTP to https api.telegram.org, not guarded (Hall lane of the other worker). (4) Edge not covered: web_fetch of an http URL that redirects to https without IO::Async::SSL still poisons the https host. (5) IO::Async::SSL is not in cpanfile (only build-binary.sh adds it) although every cloud engine is https; requires/recommends is a maintainer call.
+
+2026-09-29 18:16 Done: new internal Langertha::Raider::ConnectCheck (connect_error($url): loads IO::Async::Internals::Connector, and IO::Async::SSL for https, via use_module; returns a one-line error naming target scheme://host:port, module and load error). Raider: _raid_engines extracted from _check_engine_loops; new _check_engine_connect runs after it in raid_f/respond_f for every raid engine with async_loop + url and croaks 'Raider <engine>: Cannot connect to ...' -> the raid fails at once, CLI prints error, exit 1. WebTools: web_fetch checks its URL, web_search checks https:, both return a tool error and send nothing. POD in raid_f and WebTools. Verified: t/16_http_connect_failure.t (red before: raid hung 10s x2, second web_fetch hung; green after), prove t/00 t/15 t/16 t/8* t/9* green; bin/raider with blocked Connector / IO::Async::SSL / IO::Socket::SSL now exits 1 with the message instead of hanging.
+
+Committed eed0361
