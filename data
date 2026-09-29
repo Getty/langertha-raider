@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-29T02:47:16Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-29T02:47:16Z
+created: 2026-09-29T01:15:22Z
+id: 92
+priority: medium
+started: 2026-09-29T02:39:27Z
+status: done
+tags:
+- bug
+- context
+- core-sync
+title: 'Raider compress_history_f: 200-Error-Body ergibt still leere Zusammenfassung'
+updated: 2026-09-29T02:47:16Z
+---
+
+Aus k85-Analyse (out of tool-loop scope): compress_history_f (lib/Langertha/Raider.pm ~1058-1059) liest die Zusammenfassung via response_text_content, also ergibt ein 200-Error-Body dort still eine leere Zusammenfassung. Es ist ein reiner Nicht-Tool-Chat, der Fix wuerde ueber den public chat_response der Engine gehen (nicht tool_loop_response). Angrenzend an k89 (Kompression), aber eigene Ursache (Lesen der Reply, nicht Trigger). Fertig wenn: ein Error-Body bei der Verdichtung wird laut statt still leer, Test mit Fake-Engine.
+
+Committed 14ce3f7
