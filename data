@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-29T18:05:50Z
+claimed_by: worker-hall
+class: standard
+completed: 2026-09-29T18:05:50Z
+created: 2026-09-29T17:48:38Z
+id: 102
+priority: low
+started: 2026-09-29T17:49:49Z
+status: done
+tags:
+- hall
+- cli
+- defect
+title: 'raider hall spawn --attach / attach: Event-Stream fehlt'
+updated: 2026-09-29T18:05:56Z
+---
+
+Aus #98. --attach wird an _spawn_raider durchgereicht, aber nie benutzt. Die attach-Hilfe verspricht einen Event-Stream, der Befehl gibt nur Slot, PID und Log-Pfad aus. Entweder implementieren oder Hilfe/Option ehrlich machen.
+
+2026-09-29 17:53 Decision: implement. Existing machinery fits: every hall run writes its --stream-json events to .raider-hall/logs/ID.events.jsonl, hall attach already returns events_path, and logs --follow has the poll-until-reaped loop. attach ID follows the events file (JSONL on stdout) until the raider is reaped; spawn --attach spawns, then follows (spawn reply gains events_path so a run that ends before the first poll is still printed). The hall-side attach arg is dead (attach is client-side) and is removed from spawn/_spawn/_spawn_raider/queue entries/Protocol.
+
+2026-09-29 18:04 Done, implemented (not just honest help): attach ID now follows the run's --stream-json events file (.raider-hall/logs/ID.events.jsonl, JSONL on stdout) until the hall has reaped the raider, reusing the logs --follow loop (factored into _follow_file). spawn --attach spawns, prints the run-ID line on stderr, then follows; the spawn reply gains events_path so a run that ends before the first poll is still printed whole; a queued mission is not attached (says so on stderr). The dead hall-side attach arg is removed (Protocol, spawn/_spawn/_spawn_next_in_queue/_spawn_raider, queue entries); the old attach info view (slot/PID/log path) is gone. Files: lib/Langertha/Raider/Hall/CLI.pm, Hall.pm (+POD), Hall/Protocol.pm, bin/raider-hall POD; tests t/32 (5 new subtests, payload asserts), t/57 (spawn reply events_path), t/30/t/33/t/27 (arg list). Verified: targeted hall tests, end-to-end hall daemon + spawn --attach smoke, full prove -r t: 82 files/733 tests PASS.
+
+Commit 176b171
