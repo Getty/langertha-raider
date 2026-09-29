@@ -48,10 +48,18 @@ expect() {
 }
 
 # --- 1. startup ----------------------------------------------------------------
-# raider has no --version; the version is checked against the packed sources
-# in step 3.
+# --version names the Langertha::Raider the binary runs, which has to be the
+# checkout's; step 3 holds its Langertha against the one in the archive.
+want_raider=$(sed -n "s/^our \$VERSION = '\(.*\)';/\1/p" "$root/lib/Langertha/Raider.pm")
+[ -n "$want_raider" ] || fail "no \$VERSION in $root/lib/Langertha/Raider.pm"
+version=$(run --version 2>&1) || fail "--version (exit $?): $version"
+[[ $version =~ ^raider\ ([^ ]+)\ \(Langertha\ ([^ ]+)\)$ ]] \
+  || fail "--version: not 'raider VERSION (Langertha VERSION)': $version"
+[ "${BASH_REMATCH[1]}" = "$want_raider" ] \
+  || fail "--version: raider ${BASH_REMATCH[1]}, the checkout is $want_raider"
+bin_langertha=${BASH_REMATCH[2]}
 expect "--help" '^Usage: raider' "$BIN" --help
-echo "startup (--help, fresh cache): OK"
+echo "startup (--version: $version, fresh cache; --help): OK"
 
 # --- 2. every subcommand's help -------------------------------------------------
 # The subcommands dispatch before option parsing (Langertha::Raider::CLI::Main
@@ -86,12 +94,7 @@ plib="$work/archive/lib"
 missing=$(cd "$root/lib" && find Langertha -name '*.pm' | sort | while IFS= read -r f; do
   [ -f "$plib/$f" ] || echo "$f"; done)
 [ -z "$missing" ] || fail "not packed: $missing"
-want_raider=$(sed -n "s/^our \$VERSION = '\(.*\)';/\1/p" "$root/lib/Langertha/Raider.pm")
-want_bin=$(sed -n "s/^our \$VERSION = '\(.*\)';/\1/p" "$root/bin/raider")
-got_bin=$(sed -n "s/^our \$VERSION = '\(.*\)';/\1/p" "$work/archive/script/raider")
-[ -n "$want_bin" ] && [ "$got_bin" = "$want_bin" ] \
-  || fail "packed bin/raider is version '$got_bin', the checkout's is '$want_bin'"
-PLIB="$plib" WANT="$want_raider" RAIDER_SHARE="$root/share" perl -e '
+PLIB="$plib" BIN_LANGERTHA="$bin_langertha" RAIDER_SHARE="$root/share" perl -e '
   BEGIN { @INC = ( $ENV{PLIB} ) }
   use strict;
   use warnings;
@@ -116,12 +119,14 @@ PLIB="$plib" WANT="$want_raider" RAIDER_SHARE="$root/share" perl -e '
     IO::Async::Loop IO::Async::SSL IO::Socket::SSL Net::SSLeay Mozilla::CA
     Net::Async::HTTP LWP::UserAgent LWP::Protocol::https
     Net::Async::MCP MCP::Server MCP::Run::Bash
-    JSON::MaybeXS YAML::PP YAML::XS Data::MessagePack
+    Langertha JSON::MaybeXS YAML::PP YAML::XS Data::MessagePack
     File::ShareDir File::ShareDir::ProjectDistDir
   );
   die join( "\n", "modules that do not load from the archive:", @fail )."\n" if @fail;
   my $v = Langertha::Raider->VERSION;
-  die "packed Langertha::Raider is $v, the checkout is $ENV{WANT}\n" unless $v eq $ENV{WANT};
+  my $core = Langertha->VERSION;
+  die "--version reports Langertha $ENV{BIN_LANGERTHA}, the archive packs $core\n"
+    unless $core eq $ENV{BIN_LANGERTHA};
   my $loop = ref IO::Async::Loop->new;
   my $json = JSON::MaybeXS::JSON();
   my $ca   = Mozilla::CA::SSL_ca_file();
@@ -134,8 +139,8 @@ PLIB="$plib" WANT="$want_raider" RAIDER_SHARE="$root/share" perl -e '
   my ( undef, $spec ) = Langertha::Engine::OpenAI->openapi_file;
   die "Langertha::Engine::OpenAI spec is $spec, not inside the archive\n"
     unless -s $spec && index($spec, $ENV{PLIB}) == 0;
-  printf "modules (%d Langertha::*, Langertha::Raider %s, loop %s, JSON %s): OK\n",
-    scalar @mods, $v, $loop, $json;
+  printf "modules (%d Langertha::*, Langertha::Raider %s, Langertha %s, loop %s, JSON %s): OK\n",
+    scalar @mods, $v, $core, $loop, $json;
   print "share (Langertha-Raider = checkout share/, Langertha openai.yaml via the engine, Mozilla::CA): OK\n";
 ' || fail "packed module set"
 

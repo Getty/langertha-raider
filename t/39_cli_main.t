@@ -203,6 +203,17 @@ subtest 'success exits 0, a failed run 1' => sub {
   is($exit, 0, 'config explain');
 };
 
+subtest '--version: raider and Langertha, exit 0 (k108)' => sub {
+  my ( $exit, $out, $err ) = main_run('', '--version');
+  is($exit, 0, 'exits 0');
+  is($out, 'raider '.$Langertha::Raider::VERSION.' (Langertha '.$Langertha::VERSION.")\n",
+    'one line: raider, then Langertha core');
+  is($err, '', 'nothing on stderr');
+  ( $exit, $out ) = main_run('', @base, '--version', 'hello');
+  is($exit, 0, 'with options and a prompt');
+  like($out, qr/\Araider \S+ \(Langertha \S+\)\n\z/, 'only the version, no run');
+};
+
 subtest 'config explain after the options' => sub {
   my ( $exit, $out, $err ) = main_run('', @base, 'config', 'explain');
   is($exit, 0, 'exits 0');

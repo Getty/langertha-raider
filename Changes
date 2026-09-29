@@ -295,6 +295,7 @@ Revision history for Langertha-Raider
       runs the binary directly instead of perl <binary>, which died with
       "Unrecognized character \x7F"; RAIDER_HALL_RAIDER_BIN still overrides
       it.
+    - New raider --version: prints raider's and Langertha's version and exits 0.
 
     - Slice 1 — Perl-native tools: --perl unlocks perl_eval /
       perl_check / perl_cpanm, a private local::lib per raider, and

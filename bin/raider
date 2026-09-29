@@ -232,6 +232,11 @@ configuration (default F<RAIDER-SKILL.md> in C<-r>) and exit.
 Write the same as a Claude Code F<SKILL.md> with frontmatter (default
 F<.claude/skills/raider/SKILL.md> in C<-r>) and exit.
 
+=opt --version
+
+Print the version of raider (L<Langertha::Raider>) and of L<Langertha>
+core on one line, C<raider VERSION (Langertha VERSION)>, and exit.
+
 =opt -h, --help
 
 Print the option summary and exit.
@@ -470,7 +475,7 @@ with exit status C<4>.
 
 =over
 
-=item C<0> -- success, including C<--help>, the exports, C<config explain>,
+=item C<0> -- success, including C<--help>, C<--version>, the exports, C<config explain>,
 C<session list>, C<session show>, C<session fork>, C<session rm> and
 leaving the REPL.
 

@@ -8,6 +8,8 @@ use Getopt::Long ();
 use IO::Prompt::Tiny qw( prompt );
 use Path::Tiny;
 use Time::HiRes ();
+use Langertha;
+use Langertha::Raider;
 use Langertha::Raider::ACP::CLI;
 use Langertha::Raider::CLI;
 use Langertha::Raider::CLI::Machine;
@@ -38,7 +40,7 @@ then either the REPL (L<Langertha::Raider::CLI::REPL>) or one prompt
 
 =over
 
-=item C<0> -- success, including C<--help>, the exports, C<config explain>,
+=item C<0> -- success, including C<--help>, C<--version>, the exports, C<config explain>,
 C<session list>, C<session show>, C<session fork>, C<session rm> and
 leaving the REPL.
 
@@ -215,6 +217,7 @@ Options:
                            Write a Claude Code SKILL.md with frontmatter
                            (default: .claude/skills/raider/SKILL.md)
                            and exit.
+      --version            Show the versions of raider and Langertha
   -h, --help               Show this help
 
 If no prompt is given and not interactive, reads the prompt from STDIN.
@@ -224,6 +227,20 @@ hex digits (3f2a).
 Exit status: 0 success, 1 the run failed, 2 usage error,
 3 configuration error, 4 the session is in use.
 USAGE
+
+=method version_line
+
+The C<--version> line: F<raider>'s version (that of L<Langertha::Raider>),
+then that of L<Langertha> core.
+
+    raider 0.503 (Langertha 0.503)   # for example
+
+=cut
+
+sub version_line {
+  my ( $self ) = @_;
+  return 'raider '.Langertha::Raider->VERSION.' (Langertha '.Langertha->VERSION.")\n";
+}
 
 =method parse_options
 
@@ -278,6 +295,7 @@ sub parse_options {
       'no-session'            => \$opt{no_session},
       'session=s'             => \$opt{session},
       'continue'              => \$opt{continue},
+      'version'               => \$opt{version},
       'h|help'                => \$opt{help},
     );
   };
@@ -430,6 +448,10 @@ sub run {
 
   if ($opt->{help}) {
     $self->output->emit($self->usage);
+    return EXIT_OK;
+  }
+  if ($opt->{version}) {
+    $self->output->emit($self->version_line);
     return EXIT_OK;
   }
 
