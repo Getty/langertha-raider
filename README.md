@@ -55,6 +55,8 @@ cpanm --installdeps .
 perl -Ilib bin/raider
 ```
 
+Or as a single-file Linux binary — no Perl needed (see [Binary](#binary-no-perl-needed)).
+
 Or via Docker — no Perl toolchain required (see [Docker](#docker)):
 
 ```bash
@@ -157,6 +159,7 @@ Options:
       --customize-prompt   Launch the prompt-builder at startup
       --export-skill [PATH]        Write a "how to use raider" markdown doc, exit
       --export-claude-skill [PATH] Write a Claude Code SKILL.md, exit
+      --version            Print raider's and Langertha's version, exit
   -h, --help               Show help
 ```
 
@@ -522,6 +525,39 @@ docker build \
 Use `--target runtime-root` for a root image. On release, `dist.ini`'s
 `run_after_release` hook publishes the GitHub release and pushes the Docker Hub
 image; that is the maintainer's step (`dzil release`).
+
+## Binary (no Perl needed)
+
+Prebuilt Linux binaries are attached to each
+[GitHub release](https://github.com/Getty/langertha-raider/releases):
+`raider-<version>-linux-x86_64` and `raider-<version>-linux-aarch64`, each as a raw
+executable and a `.tar.gz` (binary, `LICENSE`, `README`); a single
+`raider-<version>-checksums.txt` covers them all.
+
+```bash
+v=0.xxx   # the release you want
+curl -fLO https://github.com/Getty/langertha-raider/releases/download/$v/raider-$v-linux-x86_64
+curl -fLO https://github.com/Getty/langertha-raider/releases/download/$v/raider-$v-checksums.txt
+sha256sum -c --ignore-missing raider-$v-checksums.txt
+install -m 755 raider-$v-linux-x86_64 ~/.local/bin/raider
+```
+
+The binary is a [PAR::Packer](https://metacpan.org/dist/PAR-Packer) build (~15 MB)
+that carries its own Perl, every module and the shipped packs. Besides glibc 2.36 or
+newer, the target needs only OpenSSL 3 — `libssl` and `libcrypto` (Debian/Ubuntu:
+`libssl3`), present on any normal Linux. The first start unpacks into
+`/tmp/par-<user>/` and takes a few seconds; after that it starts about as fast as the
+CPAN install. It is for distribution convenience, not speed. `raider --version`
+shows which raider and Langertha it carries. Only `raider` ships as a binary — use
+`raider hall …` where you would run `raider-hall`; a hall started from the binary
+spawns its raiders with the binary itself (`RAIDER_HALL_RAIDER_BIN` still overrides
+that).
+
+To build one yourself from a checkout (needs `PAR::Packer` and the dependencies
+installed): `scripts/build-binary.sh`, then `scripts/verify-binary.sh ./raider` and
+`scripts/check-binary-libs.sh ./raider`. Release builds run in the
+`release-binaries` GitHub workflow on `perl:5.40-bookworm`, so they run on older
+distributions too.
 
 ## Roadmap / Planned
 
