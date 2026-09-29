@@ -2306,8 +2306,13 @@ async sub _run_raid_loop {
 
       my $tool_t0 = $langfuse ? $engine->langfuse_timestamp : undef;
 
-      # Check for virtual self-tools
-      if ($name =~ /^raider_/ && $self->has_raider_mcp) {
+      # Virtual self-tools. A raider_-prefixed name routes here only when no tool
+      # source announced it: an MCP source may offer a raider_-prefixed name and
+      # win the first-wins dedup (karr k90), in which case it sits in
+      # tool_server_map and was sent to the model as that MCP tool. Dispatch has
+      # to follow the actual registration, not the prefix, or such a call dies as
+      # "Unknown self-tool" instead of reaching its MCP source (karr k93).
+      if ($name =~ /^raider_/ && $self->has_raider_mcp && !$tool_server_map->{$name}) {
         my $self_result = await $self->_execute_self_tool_f($name, $input);
 
         # Handle interactive self-tool results
@@ -2524,7 +2529,9 @@ async sub _respond_f {
       next;
     }
 
-    if ($name =~ /^raider_/ && $self->has_raider_mcp) {
+    # Same rule as the main loop: a raider_-prefixed name reaches the self-tool
+    # executor only when no MCP source registered it (karr k90/k93).
+    if ($name =~ /^raider_/ && $self->has_raider_mcp && !$state->{tool_server_map}{$name}) {
       my $self_result = await $self->_execute_self_tool_f($name, $input);
 
       # Another interactive self-tool in the batch: pause the raid again, saving

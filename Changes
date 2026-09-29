@@ -358,6 +358,11 @@ Revision history for Langertha-Raider
       instead of silently producing an empty summary (Gemini thoughts
       filtered as in core); engines without the hook fall back to
       response_text_content.
+    - Raider now dispatches a raider_-prefixed tool name by its actual
+      source: a name an MCP source registered (winning the first-wins dedup)
+      is called on that source instead of being sent to the self-tool
+      executor as "Unknown self-tool"; genuine self-tools are unaffected;
+      fixed in both the main raid loop and respond_f.
 
 0.003    2026-04-21 01:46:09Z
 
