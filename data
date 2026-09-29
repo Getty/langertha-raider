@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-29T17:26:45Z
+claimed_by: worker-followup
+class: standard
+completed: 2026-09-29T17:26:45Z
+created: 2026-09-29T17:05:14Z
+id: 99
+priority: low
+started: 2026-09-29T17:07:10Z
+status: done
+tags:
+- adr-0005
+- tools
+title: 'Skill.pm: eigene feste Tool-Tabelle durch das gemountete Tool-Set ersetzen'
+updated: 2026-09-29T17:26:50Z
+---
+
+Aus #94. Langertha::Raider::Skill hat noch eine eigene feste 7-Tool-Tabelle; ADR 0005 verlangt eine einzige Quelle (Application::_tool_servers).
+
+Aus #94 zusaetzlich: sobald Remote-/extra_mcp-Quellen existieren, muss die Prompt-Toolliste aus dem async list_tools der Clients kommen statt direkt aus den In-Process-Servern.
+
+2026-09-29 17:24 Done. Skill is not a static bundled doc: it is built from a live Langertha::Raider::CLI (app is required) and already reads engine, model, persona and web providers from it. So the table now comes from the runtime set itself, not from a second list generated from the builders. Skill::_tools_table renders app->_mounted_tools (new private Application helper = map ->tools over _tool_servers, also used by _tools_text now) with app->_tool_signature, plus the first sentence of each tool's description as Purpose (pipes escaped). The hand-maintained 7-row table is gone. It already had drifted: bash was documented as bash(command, [working_directory], [timeout]), which missed [compress]. Perl tools show only when granted and Hall tools only under a Hall. POD DESCRIPTION updated. Test t/66_skill_tool_table.t: rows == the prompt's tool lines (same signatures, same order), bash row, perl_* only with perl => 1, an extra mounted probe tool appears (first sentence, pipe escaped). Full suite 81 files / 720 tests PASS. Not done, from the card body: the async list_tools derivation for remote/extra_mcp sources. None are mounted today, so that is for the slice that adds them. Also: Skill (public) now calls two private Application methods (_mounted_tools, _tool_signature), in the same pattern as CLI::Commands -> _engine (ADR 0017 consequence 4).
+
+Commit 0bb1443
