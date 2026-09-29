@@ -101,12 +101,15 @@ B<Key features:>
 
 =item * Mid-raid context injection via C<inject()> and C<on_iteration>
 
+=item * Automatic context management — between-raid LLM history summary plus in-raid mechanical compaction, mission and skills preserved
+
 =back
 
 B<History management:> Only user messages and final assistant text
 responses are persisted in history. Intermediate tool-call messages
 (assistant tool requests and tool results) are NOT persisted, preventing
-token bloat across long conversations.
+token bloat across long conversations. The full turn-by-turn record, tool
+calls and results included, is kept separately in L</session_history>.
 
 =cut
 

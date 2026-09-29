@@ -71,7 +71,7 @@ L</token_stats>. The CLI front-end is L<raider>.
 
 =cut
 
-=attr default_model_for_engine
+=method default_model_for_engine
 
 Per-engine default model when L<Langertha::Raider::Application/model> is not explicitly set.
 

@@ -95,12 +95,15 @@ sub emit {
 
 =method say_agent
 
+One line of agent output, inline C<`code`> highlighted.
+
 =method say_meta
+
+One line of meta information.
 
 =method say_error
 
-One line of agent output (inline C<`code`> highlighted), of meta
-information, or an C<error:> line.
+An C<error:> line.
 
 =cut
 

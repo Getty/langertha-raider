@@ -2,6 +2,16 @@ package Langertha::Raider::Hall::CLI;
 our $VERSION = '0.503';
 # ABSTRACT: raider hall subcommand dispatcher
 
+=head1 DESCRIPTION
+
+Dispatches the C<raider hall> subcommands: it reads the subcommand and its
+options and runs the matching handler -- C<init> and C<add-raider> to set up
+a L<Langertha::Raider::Hall>, C<start> and C<stop> for its daemon, and
+C<status>, C<ps>, C<spawn>, C<attach>, C<logs>, C<kill>, C<session> and
+C<install> to drive a running hall over its control socket.
+
+=cut
+
 use strict;
 use warnings;
 use Path::Tiny;

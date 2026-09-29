@@ -60,7 +60,7 @@ L<Langertha::Response/"Boolean context — a Response is always true">.
 
 Type is still asked with the predicates (L</is_final>, L</is_question>,
 L</is_pause>, L</is_abort>), and emptiness of the text with C<length "$r">
-or L</has_text>. The C<""> overload is unchanged: C<"$r"> is still L</text>
+or C<has_text>. The C<""> overload is unchanged: C<"$r"> is still L</text>
 (or the empty string), and C<eq> / C<ne> / concatenation keep routing
 through it.
 

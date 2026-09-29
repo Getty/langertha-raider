@@ -363,6 +363,14 @@ Revision history for Langertha-Raider
       is called on that source instead of being sent to the self-tool
       executor as "Unknown self-tool"; genuine self-tools are unaffected;
       fixed in both the main raid loop and respond_f.
+    - POD cleanup so the built dist has correct woven docs: resolved broken
+      internal links (Result.pm has_text, CLI::Runner terminate_grace, now
+      plain C<> code spans) and empty =head2 sections (CLI::Output
+      say_agent/say_meta each get a description); dropped four private
+      _-helper =method blocks from the public Raid.pm; corrected CLI.pm's
+      default_model_for_engine from =attr to =method; gave Hall::CLI a
+      DESCRIPTION like every other hall module; and noted automatic context
+      management and the session_history archive in Langertha::Raider.
 
 0.003    2026-04-21 01:46:09Z
 

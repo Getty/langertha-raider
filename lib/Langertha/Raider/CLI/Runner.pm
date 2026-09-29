@@ -326,7 +326,7 @@ command (L<MCP::Run::Bash> puts it into a process group of its own, so a
 signal aimed at raider alone never reaches it), a C<perl_eval> or
 C<perl_cpanm> child: C<SIGTERM> to each child's process group, or to the
 child when it leads none, and C<SIGKILL> to what is left after
-L</terminate_grace> seconds.
+C<terminate_grace> seconds.
 
 =cut
 

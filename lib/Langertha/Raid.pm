@@ -67,23 +67,11 @@ sub _validate_steps {
   return;
 }
 
-=method _validate_steps
-
-Internal step validation used at construction.
-
-=cut
-
 sub _coerce_context {
   my ( $self, $ctx ) = @_;
   return $ctx if blessed($ctx) && $ctx->isa('Langertha::RunContext');
   return Langertha::RunContext->new(input => $ctx);
 }
-
-=method _coerce_context
-
-Internal helper that normalizes scalar/array input into L<Langertha::RunContext>.
-
-=cut
 
 sub _step_label {
   my ( $self, $step, $idx ) = @_;
@@ -115,12 +103,6 @@ sub _normalize_result {
 
   croak "Unsupported step result type from ".(blessed($raw) || ref($raw) || 'scalar');
 }
-
-=method _normalize_result
-
-Internal helper to normalize scalar/hash/object returns into L<Langertha::Raider::Result>.
-
-=cut
 
 sub _with_context_result {
   my ( $self, $result, $ctx ) = @_;
@@ -201,13 +183,6 @@ async sub _run_steps_sequentially_f {
 
   return $self->_with_context_result($last_result, $ctx);
 }
-
-=method _run_steps_sequentially_f
-
-Internal sequential executor used by sequential/loop orchestrators.
-Stops early and propagates C<question>, C<pause>, and C<abort>.
-
-=cut
 
 async sub run_f {
   croak ref($_[0])." is abstract; use a Raid subclass";
