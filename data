@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-29T18:24:05Z
+claimed_by: worker-bin-a
+class: standard
+completed: 2026-09-29T18:23:59Z
+created: 2026-09-29T18:04:45Z
+id: 108
+priority: low
+started: 2026-09-29T18:06:36Z
+status: done
+tags:
+- cli
+- binary
+title: raider --version
+updated: 2026-09-29T18:24:05Z
+---
+
+Aus #97. raider hat kein --version. Fuer das Binary (und generell) --version einfuehren: gibt Langertha::Raider-Version (und Langertha-Version) aus, Exit 0; in --help und bin/raider POD (=opt); verify-binary.sh dann darauf umstellen.
+
+2026-09-29 18:22 Done: raider --version prints 'raider <Langertha::Raider version> (Langertha <core version>)', exit 0 (CLI::Main: 'version' Getopt option, version_line method, use Langertha + Langertha::Raider at top); listed in --help, bin/raider =opt --version, exit-status POD in bin/raider and CLI::Main. Test: t/39_cli_main.t subtest (line + exit 0 + no stderr; with options and a prompt no run happens); the k104 --help-lists-every-option test covers it too. scripts/verify-binary.sh: step 1 checks --version's raider version against lib/Langertha/Raider.pm's $VERSION, step 3 checks its Langertha version against Langertha->VERSION loaded from the archive; the old packed-bin/raider-$VERSION sed check and the in-archive Langertha::Raider WANT check are replaced. Verified: binary prints 'raider 0.503 (Langertha 0.503)', verify: OK. Possible follow-up (not done): the release workflow could compare --version to the tag.
+
+Committed d3303ab
