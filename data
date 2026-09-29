@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-29T03:00:39Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-29T03:00:39Z
+created: 2026-09-29T02:29:09Z
+id: 93
+priority: low
+started: 2026-09-29T02:51:30Z
+status: done
+tags:
+- bug
+- tools
+title: 'Raider: raider_-praefixierter MCP-Tool-Name wird trotz Dedup an Self-Tool-Executor
+  geroutet'
+updated: 2026-09-29T03:00:39Z
+---
+
+Aus k90-Analyse: Beim Dispatch wird ein Call, dessen Name auf /^raider_/ matcht, an _execute_self_tool_f geroutet BEVOR %tool_server_map konsultiert wird (Raider.pm ~2242/2452). Bietet eine MCP-Quelle einen raider_*-praefixierten Namen an und gewinnt den first-wins-Dedup (k90), wird das Tool einmal annonciert, aber weiterhin an den Self-Tool-Executor dispatcht (und scheitert als "Unknown self-tool", ausser es ist zufaellig ein echtes Self-Tool). Mismatch besteht seit vor k90. Fertig wenn: Dispatch respektiert die Tool-Quelle (nicht nur das Namenspraefix) bzw. ein raider_*-Name aus MCP wird korrekt an die MCP-Quelle geroutet; Test.
+
+Committed fb84a5c
