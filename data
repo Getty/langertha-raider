@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-29T18:38:01Z
+claimed_by: worker-rest
+class: standard
+completed: 2026-09-29T18:38:01Z
+created: 2026-09-29T18:23:34Z
+id: 109
+priority: low
+started: 2026-09-29T18:26:22Z
+status: done
+tags:
+- binary
+- cleanup
+title: 'Binary-Reste: packed-Erkennung vereinheitlichen, Telegram-Guard, perl_cpanm,
+  perl-version-Marker'
+updated: 2026-09-29T18:38:07Z
+---
+
+Aus #106/#107. (1) Hall::_packed_binary und PerlTools::_tool_perl-Erkennung ($INC{PAR.pm} && $ENV{PAR_PROGNAME}) doppelt -> ein gemeinsamer interner Helper. (2) Hall::Telegram hat einen eigenen Net::Async::HTTP-Client zu https api.telegram.org ohne ConnectCheck-Guard. (3) perl_cpanm startet cpanm aus PATH, im Binary ohne perl -> Startfehler statt klarer Meldung wie perl_eval. (4) perl-version-Marker der Lib schreibt $] des laufenden (im Binary: gepackten) Perl, nicht des System-Perl, das die Lib nutzt. (5) web_fetch http->https-Redirect kann den https-Host noch blockieren.
+
+Zusatz: t/39_cli_main.t Subtest 'every option in --help' (k104) erkennt 'M|mission=s' nicht (Regex nur [a-z|-]) -> 'Use of uninitialized value $names in split' und --mission wird nie geprueft. Regex auf [A-Za-z|-] erweitern, Warnung weg, und dafuer sorgen, dass ein unparsebarer Spec-Eintrag den Test failt statt still uebersprungen zu werden.
+
+2026-09-29 18:30 Items 1,3,4 done: new internal Langertha::Raider::Binary (packed_binary: abs exe path or undef, PAR.pm + PAR_PROGNAME); Hall::_packed_binary removed, Hall + PerlTools::_tool_perl use it. perl_cpanm guards on _tool_perl like perl_eval/check (tool error, cpanm not run, no lib created). perl-version marker: $] unpacked (unchanged), packed: asks the tool perl (perl -e 'print $]'), no marker if it does not answer. t/20 new/extended subtests red before, green after; t/59_hall_packed_binary green.
+
+2026-09-29 18:36 Done, uncommitted. (1) new internal Langertha::Raider::Binary::packed_binary (PAR.pm + PAR_PROGNAME -> abs exe path); Hall::_packed_binary removed, Hall::_raider_command/_raider_bin and PerlTools::_tool_perl use it. (2) Hall::Telegram::_connect_error = connect_error('https://api.telegram.org'): _poll stops the bot (active=0), warns and emits telegram.poll_error naming the module, sends nothing; send_message returns {error} without a request. POD in DESCRIPTION. (3) perl_cpanm resolves _tool_perl first: packed without perl on PATH -> same tool error as perl_eval ('no perl to run cpanm'), cpanm not run, no lib created. (4) perl-version marker: unpacked $] (unchanged, now asserted), packed: '$perl -e print $]' of the tool perl; no marker when it does not answer. (5) web_fetch passes on_redirect to do_request, which runs connect_error on every Location and dies before NaHTTP connects (repeat turns the die into a failed future); http->https redirect is the tool error, round 2 no longer hangs. (6) t/39 k104 subtest: per-entry regex [A-Za-z|-] anchored, each entry is an ok() so an unparseable one fails; --mission now checked, warning gone. Tests: t/59_hall_telegram_connect.t (new), t/16 redirect subtest, t/20 cpanm/marker subtests -- each red against HEAD code, green now; full prove -r t green (85 files, 747 tests, only live skips). Binary rebuilt from the tree (dev langertha) and scripts/verify-binary.sh: OK. Not done: driving perl_cpanm inside the real binary via a fake endpoint (covered by the simulated packed state in t/20).
+
+Committed: 413b9b9 (Binary/PerlTools), bcf2955 (Telegram/WebTools), 43cddb5 (t/39)
