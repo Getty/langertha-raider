@@ -5,7 +5,7 @@ use Moose;
 use Future;
 use Future::AsyncAwait;
 use Time::HiRes qw( gettimeofday tv_interval );
-use Carp qw( croak );
+use Carp qw( croak carp );
 use Module::Runtime qw( use_module );
 use Scalar::Util qw( blessed refaddr weaken );
 use JSON::MaybeXS qw( JSON );
@@ -1712,15 +1712,35 @@ loop, and returns the final text response. Updates history and metrics.
 async sub _gather_tools_f {
   my ( $self ) = @_;
   my $engine = $self->active_engine;
-  my ( @all_tools, %tool_server_map );
+  my ( @all_tools, %tool_server_map, %seen );
+
+  # A name offered by more than one source is sent to the provider once --
+  # providers reject a request that declares one function twice -- and the
+  # first source (in gather order) wins, as core's
+  # Langertha::Role::Tools->_tool_loop_tools does across mcp_servers (karr k332).
+  # Raider assembles its own tool set from four kinds of source, so it needs its
+  # own dedup. Returns true when the tool was accepted, false when it was a
+  # duplicate of an earlier source and dropped with a carp.
+  my $accept = sub {
+    my ( $tool, $label ) = @_;
+    my $name = $tool->{name};
+    if ( my $first = $seen{$name} ) {
+      carp "" . ( ref $self ) . ": tool '$name' is offered by $first and $label; using the first";
+      return 0;
+    }
+    $seen{$name} = $label;
+    push @all_tools, $tool;
+    return 1;
+  };
 
   # Engine MCP servers
   if ($engine->can('mcp_servers')) {
+    my $no = 0;
     for my $mcp (@{$engine->mcp_servers}) {
+      my $label = 'engine MCP server ' . ( ++$no ) . ' (' . ref($mcp) . ')';
       my $tools = await $mcp->list_tools;
       for my $tool (@$tools) {
-        $tool_server_map{$tool->{name}} = $mcp;
-        push @all_tools, $tool;
+        $tool_server_map{$tool->{name}} = $mcp if $accept->($tool, $label);
       }
     }
   }
@@ -1729,8 +1749,8 @@ async sub _gather_tools_f {
   if ($self->has_inline_mcp) {
     my $tools = await $self->_inline_mcp->list_tools;
     for my $tool (@$tools) {
-      $tool_server_map{$tool->{name}} = $self->_inline_mcp;
-      push @all_tools, $tool;
+      $tool_server_map{$tool->{name}} = $self->_inline_mcp
+        if $accept->($tool, 'inline MCP');
     }
   }
 
@@ -1739,14 +1759,14 @@ async sub _gather_tools_f {
     my $mcp = $self->_active_catalog_mcps->{$name};
     my $tools = await $mcp->list_tools;
     for my $tool (@$tools) {
-      $tool_server_map{$tool->{name}} = $mcp;
-      push @all_tools, $tool;
+      $tool_server_map{$tool->{name}} = $mcp
+        if $accept->($tool, "catalog MCP '$name'");
     }
   }
 
   # Self-tools (virtual — no MCP server mapping needed)
   if ($self->has_raider_mcp) {
-    push @all_tools, @{$self->_self_tool_definitions};
+    $accept->($_, 'raider self-tools') for @{$self->_self_tool_definitions};
   }
 
   return ( \@all_tools, \%tool_server_map );

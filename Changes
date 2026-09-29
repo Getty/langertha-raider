@@ -345,6 +345,10 @@ Revision history for Langertha-Raider
       drives bin/raider as a user against a fresh workspace and isolated
       home, then checks the result and session journal; a provider error
       fails the run instead of being skipped.
+    - Raider no longer sends a tool name twice to the provider when two tool
+      sources (engine mcp_servers, inline MCP, catalog MCPs, self-tools)
+      offer it; the first source wins and a warning names both, matching
+      core's tool-loop dedup.
 
 0.003    2026-04-21 01:46:09Z
 
