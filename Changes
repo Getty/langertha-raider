@@ -28,6 +28,11 @@ Revision history for Langertha-Raider
     - A raider whose engines (engine, compression_engine, engine_catalog)
       sit on different event loops fails at the start of raid_f and
       respond_f, naming the engine, instead of hanging.
+    - A raid, and the web_fetch / web_search tools, fail at once with the
+      module's name when IO::Async::Internals::Connector, or for https
+      IO::Async::SSL (IO::Socket::SSL, Net::SSLeay, libssl), does not load.
+      Before, the first request failed and every later one to that host
+      hung (a Net::Async::HTTP 0.50 connection-slot leak).
     - Raider fixes that landed in Langertha core before the extraction and
       reach CPAN with this release:
       - A raid paused by an interactive self-tool (raider_ask_user etc.)

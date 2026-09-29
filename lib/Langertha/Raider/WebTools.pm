@@ -14,6 +14,7 @@ use Net::Async::WebSearch::Provider::Brave;
 use Net::Async::WebSearch::Provider::Serper;
 use Net::Async::WebSearch::Provider::Google;
 use HTML::TreeBuilder;
+use Langertha::Raider::ConnectCheck qw( connect_error );
 
 use Exporter 'import';
 our @EXPORT_OK = qw( build_web_tools_server );
@@ -47,6 +48,12 @@ unless C<as_html> is true.
 C<limit> of C<web_search> defaults to 8.
 
 =back
+
+Both tools return a tool error, and send nothing, when a module
+L<Net::Async::HTTP> needs to connect does not load
+(L<IO::Async::Internals::Connector>; for https L<IO::Async::SSL>, which
+needs L<IO::Socket::SSL>, L<Net::SSLeay> and the system libssl). The error
+names the module.
 
 =cut
 
@@ -112,6 +119,11 @@ sub build_web_tools_server {
       my ($tool, $in) = @_;
       my $query = $in->{query};
       my $limit = $in->{limit} // 8;
+      # Every search provider is https (see connect_error for why a failed
+      # load must not reach Net::Async::HTTP).
+      if (my $error = connect_error('https:')) {
+        return $tool->text_result("Error: $error", 1);
+      }
       my $f = $ws->search(query => $query, limit => $limit);
       my $out = eval {
         $loop->await($f);
@@ -153,6 +165,12 @@ sub build_web_tools_server {
     code => sub {
       my ($tool, $in) = @_;
       my $url = $in->{url};
+      # A module Net::Async::HTTP fails to load while connecting leaves the
+      # host's connection slot taken: every later fetch from it would hang
+      # (karr k107).
+      if (my $error = connect_error($url)) {
+        return $tool->text_result("Error: $error", 1);
+      }
       my $req = GET($url);
       $req->header('User-Agent' => 'raider/0.001');
       my $f = $http->do_request(request => $req);

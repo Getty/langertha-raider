@@ -16,6 +16,7 @@ use IO::Async::Handle;
 use IO::Async::Loop;
 use IO::Async::OS;
 use Langertha::Usage;
+use Langertha::Raider::ConnectCheck qw( connect_error );
 use Langertha::Raider::Result;
 use Langertha::RunContext;
 
@@ -1847,16 +1848,7 @@ async sub _initialize_inline_mcp_f {
 # Tradeoff: async_loop builds each engine's HTTP client now, so a sync-fallback warning may show at raid start.
 sub _check_engine_loops {
   my ( $self ) = @_;
-  my @engines = ( [ engine => $self->engine ] );
-  push @engines, [ compression_engine => $self->compression_engine ]
-    if $self->has_compression_engine;
-  # Its futures complete only while the raid's loop runs.
-  push @engines, [ embedding_engine => $self->embedding_engine ]
-    if $self->has_embedding_engine && !$self->no_session_embeddings;
-  for my $name (sort keys %{$self->engine_catalog}) {
-    my $engine = $self->engine_catalog->{$name}{engine} // next;
-    push @engines, [ "engine_catalog '$name'" => $engine ];
-  }
+  my @engines = $self->_raid_engines;
   my $loop_of = sub {
     my ( $engine ) = @_;
     return ( $engine->can('async_loop') && $engine->async_loop ) || IO::Async::Loop->new;
@@ -1871,6 +1863,40 @@ sub _check_engine_loops {
   return $loop;
 }
 
+# Every engine a raid may use, as [ name => engine ] pairs, engine first.
+sub _raid_engines {
+  my ( $self ) = @_;
+  my @engines = ( [ engine => $self->engine ] );
+  push @engines, [ compression_engine => $self->compression_engine ]
+    if $self->has_compression_engine;
+  # Its futures complete only while the raid's loop runs.
+  push @engines, [ embedding_engine => $self->embedding_engine ]
+    if $self->has_embedding_engine && !$self->no_session_embeddings;
+  for my $name (sort keys %{$self->engine_catalog}) {
+    my $engine = $self->engine_catalog->{$name}{engine} // next;
+    push @engines, [ "engine_catalog '$name'" => $engine ];
+  }
+  return @engines;
+}
+
+# Net::Async::HTTP loads what a connection needs only when it opens one, and
+# a load that dies there keeps the host's connection slot taken: every later
+# request to the host -- the chat request after the session-history
+# embedding -- waits forever (karr k107). Checked before the raid sends, a
+# missing module is an error that names it. Only engines with an event loop
+# and a url: the synchronous fallback connects through LWP.
+sub _check_engine_connect {
+  my ( $self ) = @_;
+  for my $entry ($self->_raid_engines) {
+    my ( $name, $engine ) = @$entry;
+    next unless $engine->can('async_loop') && $engine->async_loop
+      && $engine->can('url') && defined $engine->url;
+    my $error = connect_error($engine->url) // next;
+    croak "Raider $name: $error";
+  }
+  return;
+}
+
 sub raid_f {
   my ( $self, @messages ) = @_;
   return $self->_end_raid($self->_raid_f(@messages));
@@ -1879,6 +1905,7 @@ sub raid_f {
 async sub _raid_f {
   my ( $self, @messages ) = @_;
   $self->_check_engine_loops;
+  $self->_check_engine_connect;
   my $engine = $self->active_engine;
   my $t0 = [gettimeofday];
   my $langfuse = $engine->can('langfuse_enabled') && $engine->langfuse_enabled;
@@ -2600,6 +2627,7 @@ async sub _respond_f {
   croak "No pending interaction — call raid_f first"
     unless $self->has_continuation;
   $self->_check_engine_loops;
+  $self->_check_engine_connect;
 
   my $cont = $self->_continuation;
   $self->clear_continuation;
@@ -2767,6 +2795,13 @@ C<no_session_embeddings> is set) must run on the same event loop, since one raid
 is driven by one loop. An engine without a loop (the synchronous fallback)
 counts as the process-wide C<< IO::Async::Loop->new >>. C<raid_f> and
 C<respond_f> fail right away, naming the engine, when one runs on another loop.
+
+They also fail right away, naming the engine and the module, when a module
+L<Net::Async::HTTP> needs to connect to an engine's C<url> does not load:
+L<IO::Async::Internals::Connector>, and for https L<IO::Async::SSL> (which
+needs L<IO::Socket::SSL>, L<Net::SSLeay> and the system libssl). Sent
+anyway, the first request would fail and every later one to that host would
+wait forever.
 
 =method respond_f
 
