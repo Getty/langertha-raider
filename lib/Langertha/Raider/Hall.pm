@@ -180,6 +180,7 @@ use IO::Async::Timer::Countdown;
 use IO::Socket::UNIX;
 use File::Which ();
 use Net::Async::HTTP;
+use Langertha::Raider::Binary qw( packed_binary );
 use Langertha::Raider::Hall::ACP;
 use Langertha::Raider::Hall::Cron;
 use Langertha::Raider::Hall::MCP;
@@ -1260,16 +1261,7 @@ sub _session_fields {
 sub _raider_command {
   my ($self) = @_;
   my $raider_bin = $self->_raider_bin;
-  return $self->_packed_binary ? ($raider_bin) : ($^X, $raider_bin);
-}
-
-# The executable this process runs from when it is a PAR::Packer binary.
-# PAR.pm loaded in-process is the signal; PAR_PROGNAME alone is not, a
-# plain perl started from the binary inherits it.
-sub _packed_binary {
-  my ($self) = @_;
-  return unless $INC{'PAR.pm'} && $ENV{PAR_PROGNAME};
-  return path($ENV{PAR_PROGNAME})->absolute->stringify;
+  return packed_binary() ? ($raider_bin) : ($^X, $raider_bin);
 }
 
 sub _raider_bin {
@@ -1280,7 +1272,7 @@ sub _raider_bin {
 
   # The standalone binary starts its raiders with itself, whatever it is
   # called and whatever raider is on PATH.
-  my $packed = $self->_packed_binary;
+  my $packed = packed_binary();
   return $packed if defined $packed;
 
   # Otherwise: next to the currently-running script (raider-hall lives

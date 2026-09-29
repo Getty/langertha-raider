@@ -143,9 +143,14 @@ subtest packed_binary_without_perl_fails_loud => sub {
   local $ENV{PAR_PROGNAME} = path($dir)->child('raider')->stringify;
   local $ENV{PATH} = $empty->stringify;
 
+  # cpanm is found (the fake one), but it is a perl script (k109).
+  local $ENV{PATH} = $empty.':'.$fakebin;
+  my $target = path($dir)->child('.raider', 'no-perl-lib');
+
   for my $case (
     [ perl_eval  => { code => 'print 1' } ],
     [ perl_check => { code => 'print 1' } ],
+    [ perl_cpanm => { module => 'Acme::No::Perl', options => { target => "$target" } } ],
   ) {
     my ( $name, $args ) = @$case;
     my $res = eval { call_tool($name, $args) };
@@ -154,6 +159,29 @@ subtest packed_binary_without_perl_fails_loud => sub {
     like($res->{content}[0]{text}, qr/no perl/i, $name.' says there is no perl');
     like($res->{content}[0]{text}, qr/PATH/, $name.' says where it looked');
   }
+  ok(!-e $target, 'perl_cpanm created no lib');
+};
+
+# The perl-version marker is for the perl that uses the lib; in the binary
+# that is the perl on PATH, not the packed one running this code (k109).
+subtest packed_binary_marker_is_the_path_perls_version => sub {
+  my $bin = path($dir)->child('marker-bin');
+  $bin->mkpath;
+  my $path_perl = $bin->child('perl');
+  $path_perl->spew_utf8(<<'SH');
+#!/bin/sh
+[ "$1" = "-e" ] && [ "$2" = 'print $]' ] && { printf '5.030003'; exit 0; }
+exit 1
+SH
+  chmod 0755, $path_perl;
+  local $INC{'PAR.pm'} = __FILE__;
+  local $ENV{PAR_PROGNAME} = path($dir)->child('raider')->stringify;
+  local $ENV{PATH} = $bin.':'.$fakebin;
+  my $target = path($dir)->child('.raider', 'marker-lib');
+
+  my $d = decoded(call_tool('perl_cpanm', { module => 'Acme::Marker', options => { target => "$target" } }));
+  is($d->{installed}, JSON::MaybeXS::true, 'cpanm ran') or diag $d->{stderr};
+  is($target->child('perl-version')->slurp_utf8, "5.030003\n", 'marker is the PATH perl\'s $]');
 };
 
 subtest perl_eval_timeout_reported => sub {
@@ -301,6 +329,7 @@ subtest perl_cpanm_init_lib => sub {
   ok(-d $target, 'lib directory created');
   ok(-f path($target, 'cpanfile'), 'cpanfile created');
   ok(-f path($target, 'perl-version'), 'perl-version created');
+  is(path($target, 'perl-version')->slurp_utf8, "$]\n", 'marker is the version of the perl that runs raider');
 };
 
 subtest perl_cpanm_idempotent => sub {

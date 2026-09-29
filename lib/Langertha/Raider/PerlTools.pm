@@ -7,8 +7,9 @@ use warnings;
 use Path::Tiny;
 use File::Which ();
 use MCP::Server;
-use IPC::Run qw( start timeout );
+use IPC::Run qw( run start timeout );
 use JSON::MaybeXS ();
+use Langertha::Raider::Binary qw( packed_binary );
 use Langertha::Raider::SessionStore;
 
 use Exporter 'import';
@@ -21,8 +22,8 @@ C<perl_eval(code, [stdin], [timeout])>, C<perl_check(code)> and
 C<perl_cpanm(module, [options])>, all run as subprocesses in the working
 root, with a private local::lib on C<PERL5LIB>. C<perl_eval> and
 C<perl_check> run the perl that runs raider; the standalone binary has no
-usable perl of its own, so there they run the C<perl> on C<PATH>, and are
-a tool error when there is none.
+usable perl of its own, so there they run the C<perl> on C<PATH>. Without
+one all three tools are a tool error there, and nothing runs.
 
 =func build_perl_tools_server
 
@@ -40,19 +41,29 @@ F<.raider/.gitignore> when there is none.
 
 =cut
 
-# The perl that perl_eval and perl_check run, or undef when there is none.
-# A raider script runs them with its own perl. The standalone binary
-# (PAR::Packer) has none: $^X is not a usable interpreter there, so it
-# takes the perl on PATH. PAR.pm loaded in-process is the signal; a plain
-# perl started from the binary inherits PAR_PROGNAME, but not PAR.pm.
+# The perl the tools run, or undef when there is none. A raider script
+# runs them with its own perl. The standalone binary (PAR::Packer) has
+# none: $^X is not a usable interpreter there, so it takes the perl on PATH.
 sub _tool_perl {
-  return $^X unless $INC{'PAR.pm'} && $ENV{PAR_PROGNAME};
+  return $^X unless packed_binary();
   return scalar File::Which::which('perl');
 }
 
+# The $] of $perl, for the lib's perl-version marker: the perl that uses
+# the lib, which in the standalone binary is not the one running this
+# code. undef when that perl does not answer.
+sub _tool_perl_version {
+  my ( $perl ) = @_;
+  return $] unless packed_binary();
+  my ( $out, $err ) = ( '', '' );
+  return unless eval { run([ $perl, '-e', 'print $]' ], \'', \$out, \$err, timeout(30)) };
+  return $1 if $out =~ /\A(\d+\.\d+)\z/;
+  return;
+}
+
 sub _no_perl_message {
-  my ( $tool_name ) = @_;
-  return $tool_name.': no perl to run the code: this raider is the standalone '
+  my ( $tool_name, $what ) = @_;
+  return $tool_name.': no perl to run '.( $what // 'the code' ).': this raider is the standalone '
        . 'binary, which has no perl interpreter of its own, and there is no perl '
        . 'on PATH. Install perl or put it on PATH.';
 }
@@ -110,8 +121,9 @@ sub build_perl_tools_server {
     return (-1, $failure);
   };
 
+  # $perl is the perl that will use the lib; the marker records its version.
   my $ensure_lib_init = sub {
-    my ($target) = @_;
+    my ($target, $perl) = @_;
     my $dir = path($target);
     return if -d $dir && -f $dir->child('cpanfile');
 
@@ -119,7 +131,8 @@ sub build_perl_tools_server {
     my $store = Langertha::Raider::SessionStore->new(root => $root->stringify);
     $store->prepare_base if $store->base->subsumes($dir->absolute($root));
     $dir->mkpath;
-    $dir->child('perl-version')->spew_utf8("$]\n");
+    my $perl_version = _tool_perl_version($perl);
+    $dir->child('perl-version')->spew_utf8($perl_version."\n") if defined $perl_version;
     $dir->child('cpanfile')->spew_utf8(";\n");
     return;
   };
@@ -194,7 +207,7 @@ sub build_perl_tools_server {
       if (@missing && !$auto_installed && !$failure) {
         my ($i_out, $i_err);
         my $target = $resolve_lib_target->();
-        $ensure_lib_init->($target);
+        $ensure_lib_init->($target, $perl);
         my ($i_rc, $i_failure) = $run_cpanm->(['cpanm', '--local-lib', $target, @missing], \$i_out, \$i_err);
 
         if ($i_rc == 0) {
@@ -297,11 +310,15 @@ sub build_perl_tools_server {
           unless $in_root->($explicit_target);
       }
 
+      # cpanm is a perl script, and the modules are for the tool perl.
+      my $perl = _tool_perl();
+      return $tool->text_result(_no_perl_message('perl_cpanm', 'cpanm'), 1) unless defined $perl;
+
       my $target_dir = defined $explicit_target
         ? path($explicit_target)->absolute($root)->stringify
         : $resolve_lib_target->();
 
-      $ensure_lib_init->($target_dir);
+      $ensure_lib_init->($target_dir, $perl);
 
       my @cmd = ('cpanm', '--local-lib', $target_dir);
       push @cmd, '--test'    if $opts->{test};
@@ -365,7 +382,11 @@ Install a CPAN module into a private local::lib. An explicit
 C<options.target> must lie inside the working root (relative paths resolve
 against it); anything else is rejected. Creates the target
 directory (with cpanfile + perl-version marker) on first install. The
+marker holds C<$]> of the perl the lib is for, the one L</perl_eval> uses;
+in the standalone binary that perl is asked for it. The
 cpanfile is updated idempotently (no duplicate entries).
+In the standalone binary without a C<perl> on C<PATH> the call is a tool
+error, as for L</perl_eval>, and cpanm does not run.
 C<error> is C<timeout> when cpanm hit the C<install_timeout> limit,
 otherwise the message of whatever else kept it from running.
 
