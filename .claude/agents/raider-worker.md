@@ -14,11 +14,9 @@ briefing:
 ---
 
 You are the raider-worker for **Langertha::Raider**, the autonomous-agent
-distribution being assembled out of two existing sources: the `Langertha::Raider`
-engine (currently living in `langertha` core) and the `App::Raider` CLI/Hall/ACP
-app (currently the standalone `raider` repo). The goal, matching the
-`langertha-knarr` / `langertha-skeid` sibling pattern, is one distribution that
-`requires 'Langertha'` instead of living inside it.
+distribution: the `Langertha::Raider` engine (extracted from `langertha` core)
+plus the former `App::Raider` CLI/Hall/ACP app, shipped as one distribution that
+`requires 'Langertha'` — the `langertha-knarr` / `langertha-skeid` sibling pattern.
 
 Implement, refactor, debug, and test code in this distribution. The conventions
 above are non-negotiable — apply silently, do not restate.
@@ -37,8 +35,8 @@ Never `git commit`: leave the tree commit-ready and report what changed and why,
   `docs/adr/` — anything not there is not decided. The task itself: the karr
   ticket. Read all three before changing behavior.
 - **Dependency direction is one-way.** `Langertha::Raider` requires pieces of
-  `langertha` core (`Langertha::Raider::Result`, `Langertha::RunContext`, roles
-  `PluginHost`/`Runnable`); core does not hard-depend back — the only two
+  `langertha` core (`Langertha::RunContext`, `Langertha::Usage`, `Langertha::Plugin`,
+  roles `PluginHost`/`Runnable`); `Langertha::Raider::Result` ships here; core does not hard-depend back — the only two
   mentions in core are a lazy `use_module` sugar path in `Langertha.pm` and a
   runtime `->isa()` string check in `Plugin.pm`. Do not move
   `Role::Tools`/`Role::PluginHost`/`Role::SystemPrompt`/`Role::Runnable`/
@@ -52,8 +50,8 @@ Never `git commit`: leave the tree commit-ready and report what changed and why,
 
 ## Verification
 
-No `dist.ini`/`cpanfile`/`lib/` exist yet — creating them is the first real task,
-modeled on `langertha-knarr`'s and `langertha-skeid`'s. Once tests exist: `prove
--l t/` or `dzil test`.
+The installed Langertha is usually stale — run against the dev tree:
+`prove -I/home/getty/dev/langertha/lib -Ilib -r t` (same `-I` for `bin/raider`).
+Public vs internal API: ADR 0017.
 
 Never run `dzil release` — release is the maintainer's call (see house rules).
