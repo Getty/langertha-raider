@@ -5,6 +5,7 @@ our $VERSION = '0.503';
 use strict;
 use warnings;
 use Path::Tiny;
+use File::Which ();
 use MCP::Server;
 use IPC::Run qw( start timeout );
 use JSON::MaybeXS ();
@@ -17,8 +18,11 @@ our @EXPORT_OK = qw( build_perl_tools_server );
 
 The Perl-native tools of L<raider>: an L<MCP::Server> with
 C<perl_eval(code, [stdin], [timeout])>, C<perl_check(code)> and
-C<perl_cpanm(module, [options])>, all run as subprocesses of the running
-perl in the working root, with a private local::lib on C<PERL5LIB>.
+C<perl_cpanm(module, [options])>, all run as subprocesses in the working
+root, with a private local::lib on C<PERL5LIB>. C<perl_eval> and
+C<perl_check> run the perl that runs raider; the standalone binary has no
+usable perl of its own, so there they run the C<perl> on C<PATH>, and are
+a tool error when there is none.
 
 =func build_perl_tools_server
 
@@ -35,6 +39,23 @@ L<Langertha::Raider::SessionStore/prepare_base>, which writes
 F<.raider/.gitignore> when there is none.
 
 =cut
+
+# The perl that perl_eval and perl_check run, or undef when there is none.
+# A raider script runs them with its own perl. The standalone binary
+# (PAR::Packer) has none: $^X is not a usable interpreter there, so it
+# takes the perl on PATH. PAR.pm loaded in-process is the signal; a plain
+# perl started from the binary inherits PAR_PROGNAME, but not PAR.pm.
+sub _tool_perl {
+  return $^X unless $INC{'PAR.pm'} && $ENV{PAR_PROGNAME};
+  return scalar File::Which::which('perl');
+}
+
+sub _no_perl_message {
+  my ( $tool_name ) = @_;
+  return $tool_name.': no perl to run the code: this raider is the standalone '
+       . 'binary, which has no perl interpreter of its own, and there is no perl '
+       . 'on PATH. Install perl or put it on PATH.';
+}
 
 sub build_perl_tools_server {
   my %args = @_;
@@ -134,10 +155,13 @@ sub build_perl_tools_server {
       my $stdin  = $in->{stdin}  // '';
       my $to_sec = $in->{timeout} // 60;
 
+      my $perl = _tool_perl();
+      return $tool->text_result(_no_perl_message('perl_eval'), 1) unless defined $perl;
+
       my ($out, $err, $auto_installed, $failure);
 
       my $do_run = sub {
-        my @cmd = ($^X, '-e', $code);
+        my @cmd = ($perl, '-e', $code);
         my $target = $resolve_lib_target->();
         local $ENV{PERL5LIB} = $perl5lib_for->($target);
         my $h = start \@cmd, \$stdin, \$out, \$err, init => $chdir_root, timeout($to_sec);
@@ -218,9 +242,12 @@ sub build_perl_tools_server {
       my ($tool, $in) = @_;
       my $code = $in->{code} // '';
 
+      my $perl = _tool_perl();
+      return $tool->text_result(_no_perl_message('perl_check'), 1) unless defined $perl;
+
       my ($out, $err);
       local $ENV{PERL5LIB} = $perl5lib_for->($resolve_lib_target->());
-      my $h = start [$^X, '-c', '-'], \$code, \$out, \$err, init => $chdir_root, timeout(30);
+      my $h = start [$perl, '-c', '-'], \$code, \$out, \$err, init => $chdir_root, timeout(30);
       my $rc = $finish->($h);
 
       my $valid = ($rc == 0) ? JSON::MaybeXS::true() : JSON::MaybeXS::false();
@@ -319,11 +346,16 @@ On "Can't locate X/Y.pm" in stderr, auto-installs the module once then
 retries the eval. If retry still fails, returns the error. A failed or
 timed-out install is noted in C<stderr>.
 
+In the standalone binary, which has no usable perl of its own, the code
+runs with the C<perl> on C<PATH>. Without one the call is a tool error
+that says so, and nothing runs.
+
 =head2 perl_check
 
 Compile-check Perl code via C<perl -c> in the working root, with the
 private lib on C<PERL5LIB>. This is not a sandbox: C<BEGIN> blocks and
-C<use> statements run during compilation, for at most 30 seconds.
+C<use> statements run during compilation, for at most 30 seconds. The perl
+is the one L</perl_eval> uses.
 Returns C<valid> (bool) and
 C<syntax_error> (string or null).
 

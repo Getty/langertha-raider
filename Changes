@@ -28,6 +28,9 @@ Revision history for Langertha-Raider
     - A raider whose engines (engine, compression_engine, engine_catalog)
       sit on different event loops fails at the start of raid_f and
       respond_f, naming the engine, instead of hanging.
+    - perl_eval and perl_check run the perl on PATH inside the standalone
+      binary, whose $^X is no usable interpreter, and return a tool error
+      saying so when there is none.
     - A raid, and the web_fetch / web_search tools, fail at once with the
       module's name when IO::Async::Internals::Connector, or for https
       IO::Async::SSL (IO::Socket::SSL, Net::SSLeay, libssl), does not load.

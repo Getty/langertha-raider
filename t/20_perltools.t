@@ -117,6 +117,45 @@ subtest perl_eval_runs_in_root_with_current_perl => sub {
   $fake_perl->remove;
 };
 
+# Inside the standalone binary (PAR::Packer: PAR.pm loaded, PAR_PROGNAME
+# set) $^X is no usable perl: the tools take the perl on PATH (k106).
+subtest packed_binary_runs_perl_from_path => sub {
+  my $bin = path($dir)->child('packed-bin');
+  $bin->mkpath;
+  my $path_perl = $bin->child('perl');
+  $path_perl->spew_utf8("#!/bin/sh\nRAIDER_TEST_PATH_PERL=1 exec '$^X' \"\$@\"\n");
+  chmod 0755, $path_perl;
+  local $INC{'PAR.pm'} = __FILE__;
+  local $ENV{PAR_PROGNAME} = path($dir)->child('raider')->stringify;
+  local $ENV{PATH} = $bin.':'.$fakebin;
+
+  my $d = decoded(call_tool('perl_eval', { code => 'print $ENV{RAIDER_TEST_PATH_PERL} // "no"' }));
+  is($d->{stdout}, '1', 'perl_eval runs the perl on PATH') or diag $d->{stderr};
+
+  $d = decoded(call_tool('perl_check', { code => 'BEGIN { $ENV{RAIDER_TEST_PATH_PERL} or die "not the PATH perl" }' }));
+  is($d->{valid}, JSON::MaybeXS::true, 'perl_check runs the perl on PATH') or diag $d->{syntax_error};
+};
+
+subtest packed_binary_without_perl_fails_loud => sub {
+  my $empty = path($dir)->child('empty-bin');
+  $empty->mkpath;
+  local $INC{'PAR.pm'} = __FILE__;
+  local $ENV{PAR_PROGNAME} = path($dir)->child('raider')->stringify;
+  local $ENV{PATH} = $empty->stringify;
+
+  for my $case (
+    [ perl_eval  => { code => 'print 1' } ],
+    [ perl_check => { code => 'print 1' } ],
+  ) {
+    my ( $name, $args ) = @$case;
+    my $res = eval { call_tool($name, $args) };
+    ok($res, $name.' does not throw') or diag $@;
+    ok($res->{isError}, $name.' is a tool error');
+    like($res->{content}[0]{text}, qr/no perl/i, $name.' says there is no perl');
+    like($res->{content}[0]{text}, qr/PATH/, $name.' says where it looked');
+  }
+};
+
 subtest perl_eval_timeout_reported => sub {
   my $res = call_tool('perl_eval', { code => 'sleep 10', timeout => 1 });
   my $d = decoded($res);
