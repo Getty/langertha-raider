@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-29T01:13:52Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-29T01:13:52Z
+created: 2026-09-27T05:10:24Z
+id: 86
+priority: high
+started: 2026-09-29T00:51:19Z
+status: done
+tags:
+- bug
+- cli
+- engines
+title: 'EngineResolver: ohne -m geht model '''' an Engines ohne Tabelleneintrag (minimax,
+  openrouter, ollama)'
+updated: 2026-09-29T01:13:57Z
+---
+
+Live gefunden 2026-09-27: 'raider -e minimax' ohne -m -> 400 'invalid params, unknown model \'\' (2013)'. Die Hilfe verspricht einen engine-spezifischen Default.
+Ursache: EngineResolver.pm %DEFAULT_MODEL (Zeile ~92) kennt minimax, openrouter, ollama nicht; _build_model (~205) fällt auf '' zurück, und model => '' überschreibt den Engine-eigenen default_model (MiniMax: 'MiniMax-M3').
+Fertig wenn: ohne Modell wird kein model an die Engine übergeben (Engine-Default greift), has_model/explain zeigen den Engine-Default; Test für jede Engine in engine_names ohne Tabelleneintrag. Prüfen, ob die eigene Tabelle neben core default_model überhaupt nötig ist.
+t/82 hat das nicht gefunden, weil es Engines direkt baut (siehe Live-Aufgaben-Karte).
+
+Committed 467927b
