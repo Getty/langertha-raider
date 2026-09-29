@@ -8,7 +8,7 @@ use Future::AsyncAwait;
 use Net::Async::MCP;
 use MCP::Run::Bash;
 use Path::Tiny;
-use Scalar::Util qw( blessed weaken );
+use Scalar::Util qw( blessed refaddr weaken );
 use Time::HiRes ();
 use Langertha::Raider::HallTools qw( build_hall_tools_server );
 
@@ -400,7 +400,8 @@ else it is on when an active pack requests the C<perl> tools (the bundled
 C<perl> pack, detected by F<cpanfile>, F<dist.ini>, F<Makefile.PL> or
 F<lib/**/*.pm>). Granting a pack's request here stands in for the local
 tool policy of ADR 0005, which does not exist yet; C<perl: false> is the
-local denial.
+local denial. A pack switched on or off later is followed by
+L</reload_mission>, which remounts the server to match.
 
 =cut
 
@@ -873,12 +874,19 @@ has loop => (
 
 has _engine => (is => 'ro', lazy => 1, builder => '_build_engine');
 has _raider => (is => 'ro', lazy => 1, builder => '_build_raider', predicate => '_has_raider');
-has _mcps   => (is => 'ro', lazy => 1, builder => '_build_mcps');
+has _mcps   => (is => 'ro', lazy => 1, builder => '_build_mcps', predicate => '_has_mcps');
 
 # The active tool set (ADR 0005): the MCP servers mounted for this raider.
 # The engine's clients (_mcps) and the prompt's tool description
-# (_tools_text) both come from it.
-has _tool_servers => (is => 'ro', lazy => 1, builder => '_build_tool_servers');
+# (_tools_text) both come from it. _remount_tool_servers brings it in line
+# again when the Perl tools grant changes.
+has _tool_servers => (is => 'ro', lazy => 1, builder => '_build_tool_servers', predicate => '_has_tool_servers');
+
+# The servers the set is assembled from, each built once, so a remount
+# keeps the servers (and their clients) that stay mounted.
+has _stock_tool_servers => (is => 'ro', lazy => 1, builder => '_build_stock_tool_servers');
+has _perl_tool_server   => (is => 'ro', lazy => 1, builder => '_build_perl_tool_server');
+has _hall_tool_server   => (is => 'ro', lazy => 1, builder => '_build_hall_tool_server');
 
 sub _build_api_key { $_[0]->engine_resolver->api_key }
 
@@ -886,19 +894,27 @@ sub _engine_class { $_[0]->engine_resolver->engine_class }
 
 sub _build_mcps {
   my ($self) = @_;
-  my @clients;
-  for my $server (@{ $self->_tool_servers }) {
-    my $client = Net::Async::MCP->new(server => $server);
-    $self->loop->add($client);
-    push @clients, $client;
-  }
-  return \@clients;
+  return [ map { $self->_mcp_client($_) } @{ $self->_tool_servers } ];
+}
+
+sub _mcp_client {
+  my ($self, $server) = @_;
+  my $client = Net::Async::MCP->new(server => $server);
+  $self->loop->add($client);
+  return $client;
 }
 
 sub _build_tool_servers {
   my ($self) = @_;
+  return [
+    @{ $self->_stock_tool_servers },
+    ( $self->perl_tools_enabled ? $self->_perl_tool_server : () ),
+    ( $self->_hall_tool_server // () ),
+  ];
+}
 
-  my $yml = $self->_load_yml_options;
+sub _build_stock_tool_servers {
+  my ($self) = @_;
 
   my $files = build_file_tools_server(root => $self->root);
 
@@ -912,28 +928,51 @@ sub _build_tool_servers {
 
   my $web = build_web_tools_server(loop => $self->loop);
 
-  my @servers = ($files, $bash, $web);
+  return [ $files, $bash, $web ];
+}
 
-  if ($self->perl_tools_enabled) {
-    my $lib_target = $self->has_preferred_lib_target
-      ? $self->preferred_lib_target
-      : ($yml->{preferred_lib_target} // undef);
-    push @servers, build_perl_tools_server(
-      root       => $self->root,
-      loop       => $self->loop,
-      lib_target => $lib_target,
-    );
+sub _build_perl_tool_server {
+  my ($self) = @_;
+  my $lib_target = $self->has_preferred_lib_target
+    ? $self->preferred_lib_target
+    : ($self->_load_yml_options->{preferred_lib_target} // undef);
+  return build_perl_tools_server(
+    root       => $self->root,
+    loop       => $self->loop,
+    lib_target => $lib_target,
+  );
+}
+
+# Hall-side tools: when we were spawned by raider-hall, expose
+# telegram_reply / hall_status / hall_spawn so the agent can talk back.
+sub _build_hall_tool_server {
+  my ($self) = @_;
+  return unless $ENV{RAIDER_HALL_SOCKET} && -S $ENV{RAIDER_HALL_SOCKET};
+  return build_hall_tools_server(socket => $ENV{RAIDER_HALL_SOCKET});
+}
+
+# Remounts the tool set after the Perl tools grant changed (/pack,
+# /reload): assembles it again, keeps the servers and clients that stay,
+# adds clients for new servers and drops the clients of unmounted ones.
+# Both arrays change in place -- the engine holds this very _mcps array as
+# its mcp_servers, so the raider's next tool gather sees the new set.
+# Returns true when the set changed. Before the set is built there is
+# nothing to remount; the lazy build reads the current grant.
+sub _remount_tool_servers {
+  my ($self) = @_;
+  return 0 unless $self->_has_tool_servers;
+  my $servers = $self->_tool_servers;
+  my $want    = $self->_build_tool_servers;
+  return 0 if join(',', map { refaddr $_ } @$servers) eq join(',', map { refaddr $_ } @$want);
+  if ($self->_has_mcps) {
+    my $mcps = $self->_mcps;
+    my %client = map { refaddr($servers->[$_]) => $mcps->[$_] } 0..$#$servers;
+    my @clients = map { delete $client{refaddr $_} // $self->_mcp_client($_) } @$want;
+    $self->loop->remove($_) for values %client;
+    @$mcps = @clients;
   }
-
-  # Hall-side tools: when we were spawned by raider-hall, expose
-  # telegram_reply / hall_status / hall_spawn so the agent can talk back.
-  if ($ENV{RAIDER_HALL_SOCKET} && -S $ENV{RAIDER_HALL_SOCKET}) {
-    push @servers, build_hall_tools_server(
-      socket => $ENV{RAIDER_HALL_SOCKET},
-    );
-  }
-
-  return \@servers;
+  @$servers = @$want;
+  return 1;
 }
 
 sub _build_engine {
@@ -1361,14 +1400,22 @@ sub remove_session {
 
 Rebuilds the mission (e.g. after C<.raider.md> has been edited) and swaps it
 into the underlying L<Langertha::Raider>. An explicit L</mission> is kept.
+When L</perl_tools_grant> changed since the tool servers were mounted
+(C</pack>, C</reload>), the PerlTools server is mounted or unmounted first,
+so the engine offers the same tools the new mission describes from the
+next raid on; a raid resumed from a pending question re-gathers them too.
 
 =cut
 
 sub reload_mission {
   my ($self) = @_;
+  my $remounted = $self->_remount_tool_servers;
   my $new = $self->_build_mission;
   # Hot-swap on the running raider, history and metrics stay.
-  $self->_raider->_set_mission($new);
+  my $raider = $self->_raider;
+  $raider->_set_mission($new);
+  # A raid resumed from a continuation re-gathers its tools too.
+  $raider->_tools_dirty(1) if $remounted;
   return $new;
 }
 

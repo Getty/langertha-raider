@@ -378,6 +378,9 @@ Revision history for Langertha-Raider
       management and the session_history archive in Langertha::Raider.
     - README rewritten to describe the current CLI, config and Hall/ACP
       behavior, with a Roadmap section for the planned (ADR-backed) features.
+    - Switching the perl pack on or off with /pack (or /reload) now mounts or
+      unmounts the perl_* tools, so what raider reports as granted is what
+      the model can call.
 
 0.003    2026-04-21 01:46:09Z
 
