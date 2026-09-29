@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-29T17:49:22Z
+claimed_by: worker-docs
+class: standard
+completed: 2026-09-29T17:49:22Z
+created: 2026-09-29T16:42:53Z
+id: 98
+priority: medium
+started: 2026-09-29T17:27:31Z
+status: done
+tags:
+- docs
+- readme
+title: Dokumentation komplett durchgehen + README aktualisieren
+updated: 2026-09-29T17:49:27Z
+---
+
+Nach Tool-Liste/Binary: alle POD-Dokumentation gegen den Code pruefen (veraltete Optionen, falsche Links, fehlende Module), README.md auf den aktuellen Stand inkl. Binary-Installation bringen. Changes-Eintrag.
+
+2026-09-29 17:28 worker-docs started: auditing POD in lib/ + bin/ against code, README drift, ADR 0017 doc gaps (=env, =opt, raider-hall POD, internal markers). Binary install section left to the binary worker.
+
+2026-09-29 17:47 Done (docs only, no behavior change; verified non-POD diff = blank lines/__END__/ABSTRACT comments). POD: bin/raider gets TOOLS, OPTIONS (=opt for every flag incl. --trace/--detect), ENVIRONMENT (=env for all API keys, web keys, RAIDER_PACK_DIRS, HOME, ANSI_COLORS_DISABLED, RAIDER_HALL_SOCKET), DESCRIPTION now names CLI::Main, exit 3 incl. invalid detect rule; bin/raider-hall gets full POD (commands, env); Hall.pm ENVIRONMENT (RAIDER_HALL_RAIDER_BIN/ACP_PORT/ACP_HOST + child env), longhouse, 'Slice 4/5' dropped; internal marker on the 9 ADR-0017 packages; Raider.pm run_f + raid return + plugin hooks + remove_engine croak; CLI.pm default_model_for_engine as =func, ABSTRACT under package; tool modules get DESCRIPTION + =env, corrected signatures (web_fetch as_html, perl_eval timeout, PerlTools root not required); Packs documents pack.yml keys; Collection/Raid/ACP::Client/Output/Skill/Trace/Situation fixes; stub metacpan links -> Langertha-Raider. README + examples/multi-raider-hall/README.md corrected (generated tool list incl. bash compress, perl_eval timeout, hall tools; Perl tools grant incl. perl pack + /pack remount; own packs location; bash not confined; hall reads config once; ACP --json; allowed_chats; 'ten providers'). Binary install section left out as instructed. Changes entry added. Verified: translated podchecker clean on all lib/bin, link check clean, perl -c OK, prove -r t: 81 files/720 tests PASS (3 live tests skipped by design). Code bugs found (not fixed): Hall::Cron coalesce never drops (running reset right after spawn); hall spawn --attach unused and 'attach' help says event stream but prints slot/PID/log; Raid::Parallel ignores a cancelled branch; Skill markdown output contains POD L<...>; git-guru pack.yml 'type: power' ignored key; CLI::Main --help omits --trace.
+
+Commits e828a61, 0edde99
