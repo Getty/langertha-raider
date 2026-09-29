@@ -81,6 +81,11 @@ Revision history for Langertha-Raider
     - Explicit -m and -k beat model:/api_key: from .raider.yml, and the
       banner shows the model the engine is actually built with.
     - /reload and /pack keep a mission given with -M.
+    - The tool description in the system prompt is generated from the tool
+      servers mounted for the run (name and parameters from each tool's
+      input schema, optional parameters in brackets), so the Perl and
+      Hall tools are described when mounted and only then. -M and --bare
+      keep it.
     - New raider config explain [options] (the options may also come
       first) and REPL /config: every effective setting with its source
       (flag, .raider.yml layer, environment, default).

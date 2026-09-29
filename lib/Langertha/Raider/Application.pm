@@ -160,7 +160,10 @@ has api_key => (
 System prompt of the Raider, compiled from separate items (ADR 0004,
 ADR 0014): the instructions (a generic assistant persona plus
 F<.raider.md>), the tool description, the loaded skills and the active
-packs. A C<mission> passed to the constructor (C<-M>) replaces the
+packs. The tool description lists the tools of the mounted tool servers
+-- the same servers the engine gets -- each as C<name(required, [optional])>
+from its input schema (ADR 0005); a tool that is not mounted is not
+described. A C<mission> passed to the constructor (C<-M>) replaces the
 instructions item only, also across L</reload_mission>; the other items
 still apply. With L</bare> the skills, F<.raider.md> and all packs not
 switched on by C<--pack> or C</pack> are left out.
@@ -229,20 +232,26 @@ sub _instructions_text {
   return $base;
 }
 
-# The tool description item. Hand-written until ADR 0005 derives it from
-# the active tool set; -M never replaces it.
+# The tool description item, derived from the tool servers mounted for
+# this raider (ADR 0005) -- the same servers the catalogue comes from; -M
+# never replaces it (ADR 0014).
 sub _tools_text {
   my ($self) = @_;
-  return 'Working directory: '.$self->root."\n\n".<<'EOM';
-Tools (MCP):
-  - list_files(path)
-  - read_file(path)
-  - write_file(path, content)
-  - edit_file(path, old_string, new_string)
-  - bash(command, [working_directory], [timeout])
-  - web_search(query, [limit])
-  - web_fetch(url, [as_html])
-EOM
+  my @tools = map { @{ $_->tools } } @{ $self->_tool_servers };
+  return 'Working directory: '.$self->root."\n\n"
+    ."Tools (MCP):\n"
+    .join('', map { '  - '.$self->_tool_signature($_)."\n" } @tools);
+}
+
+# name(required, ..., [optional], ...) from the tool's input schema: the
+# required parameters in their schema order, then the optional ones sorted.
+sub _tool_signature {
+  my ($self, $tool) = @_;
+  my $schema   = $tool->input_schema // {};
+  my @required = @{ $schema->{required} // [] };
+  my %required = map { $_ => 1 } @required;
+  my @optional = sort grep { !$required{$_} } keys %{ $schema->{properties} // {} };
+  return $tool->name.'('.join(', ', @required, map { '['.$_.']' } @optional).')';
 }
 
 # The default persona: what the agent is (persona_intro), how it works,
@@ -866,11 +875,27 @@ has _engine => (is => 'ro', lazy => 1, builder => '_build_engine');
 has _raider => (is => 'ro', lazy => 1, builder => '_build_raider', predicate => '_has_raider');
 has _mcps   => (is => 'ro', lazy => 1, builder => '_build_mcps');
 
+# The active tool set (ADR 0005): the MCP servers mounted for this raider.
+# The engine's clients (_mcps) and the prompt's tool description
+# (_tools_text) both come from it.
+has _tool_servers => (is => 'ro', lazy => 1, builder => '_build_tool_servers');
+
 sub _build_api_key { $_[0]->engine_resolver->api_key }
 
 sub _engine_class { $_[0]->engine_resolver->engine_class }
 
 sub _build_mcps {
+  my ($self) = @_;
+  my @clients;
+  for my $server (@{ $self->_tool_servers }) {
+    my $client = Net::Async::MCP->new(server => $server);
+    $self->loop->add($client);
+    push @clients, $client;
+  }
+  return \@clients;
+}
+
+sub _build_tool_servers {
   my ($self) = @_;
 
   my $yml = $self->_load_yml_options;
@@ -887,39 +912,28 @@ sub _build_mcps {
 
   my $web = build_web_tools_server(loop => $self->loop);
 
-  my @clients;
-  for my $server ($files, $bash, $web) {
-    my $client = Net::Async::MCP->new(server => $server);
-    $self->loop->add($client);
-    push @clients, $client;
-  }
+  my @servers = ($files, $bash, $web);
 
   if ($self->perl_tools_enabled) {
     my $lib_target = $self->has_preferred_lib_target
       ? $self->preferred_lib_target
       : ($yml->{preferred_lib_target} // undef);
-    my $perl = build_perl_tools_server(
+    push @servers, build_perl_tools_server(
       root       => $self->root,
       loop       => $self->loop,
       lib_target => $lib_target,
     );
-    my $client = Net::Async::MCP->new(server => $perl);
-    $self->loop->add($client);
-    push @clients, $client;
   }
 
   # Hall-side tools: when we were spawned by raider-hall, expose
   # telegram_reply / hall_status / hall_spawn so the agent can talk back.
   if ($ENV{RAIDER_HALL_SOCKET} && -S $ENV{RAIDER_HALL_SOCKET}) {
-    my $hall_srv = build_hall_tools_server(
+    push @servers, build_hall_tools_server(
       socket => $ENV{RAIDER_HALL_SOCKET},
     );
-    my $client = Net::Async::MCP->new(server => $hall_srv);
-    $self->loop->add($client);
-    push @clients, $client;
   }
 
-  return \@clients;
+  return \@servers;
 }
 
 sub _build_engine {
