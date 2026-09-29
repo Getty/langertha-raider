@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-29T01:14:02Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-29T01:14:02Z
+created: 2026-09-27T05:10:28Z
+id: 87
+priority: medium
+started: 2026-09-29T00:51:29Z
+status: done
+tags:
+- bug
+- acp
+- hall
+title: 'Hall-ACP: fehlgeschlagener Lauf kommt als Antworttext mit stopReason end_turn,
+  raider.failed als refusal'
+updated: 2026-09-29T01:14:06Z
+---
+
+Live gefunden 2026-09-27 (t/42_acp_live.t mit OpenAI-Key ohne Credits): das 429 kam als agent_message_chunk, session/prompt endete mit stopReason end_turn, der Test war grün.
+Hall/ACP.pm ~328-356: raider.done nimmt response // error als Antworttext und antwortet end_turn; raider.failed antwortet refusal. refusal heißt in ACP 'Modell verweigert', nicht 'Lauf fehlgeschlagen'; ein Editor zeigt den Fehler als Antwort.
+Fertig wenn: ein Lauf-Fehler endet session/prompt als JSON-RPC-Fehler (oder dokumentiert anders unterscheidbar), der Fehlertext geht nicht als normale Antwort raus; POD Zeile ~41 angepasst; t/42 prüft zusätzlich, dass eine fehlgeschlagene Modellanfrage nicht als end_turn endet (Offline-Test mit Fake-Engine, nicht nur live).
+
+Committed 1fa1054
