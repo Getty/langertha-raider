@@ -371,6 +371,8 @@ Revision history for Langertha-Raider
       default_model_for_engine from =attr to =method; gave Hall::CLI a
       DESCRIPTION like every other hall module; and noted automatic context
       management and the session_history archive in Langertha::Raider.
+    - README rewritten to describe the current CLI, config and Hall/ACP
+      behavior, with a Roadmap section for the planned (ADR-backed) features.
 
 0.003    2026-04-21 01:46:09Z
 
