@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-29T01:14:11Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-29T01:14:11Z
+created: 2026-09-25T23:26:31Z
+id: 85
+priority: medium
+started: 2026-09-29T00:51:24Z
+status: done
+tags:
+- bug
+- core-sync
+title: 'Raider loop reads replies with response_tool_calls/response_text_content:
+  200 error bodies return '''' (core k321)'
+updated: 2026-09-29T01:14:15Z
+---
+
+Core k321 made the core tool loops read replies through chat_response (errors croak, Gemini thoughts filtered, chunk arrays to text) via Role::Tools::_tool_loop_response. Raider.pm (~2020-2024) still uses response_tool_calls + response_text_content, so a 200 error body ends the raid with "" and Gemini thought parts leak. Needs a public core hook (ADR 0028 style) for _tool_loop_response, then switch Raider. Blocked on a core release that exposes it.
+
+Also pick up core k323/k324/k332: arguments_undecodable on ToolCall (drop truncated calls + remove from echo), unknown-tool error result instead of abort, duplicate tool names across MCP servers sent once.
+
+2026-09-27 05:10 Nicht blockiert: langertha main hat inzwischen das öffentliche Langertha::Role::Tools->tool_loop_response (Role/Tools.pm:733), das _tool_loop_response ersetzt. Der Pin 'Langertha 0.503' deckt es ab; auf einen Release zu warten ist kein Block.
+
+Committed d19c116
