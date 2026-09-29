@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-29T01:40:38Z
+claimed_by: raider-test-writer
+class: standard
+completed: 2026-09-29T01:40:38Z
+created: 2026-09-27T05:10:33Z
+id: 88
+priority: medium
+started: 2026-09-29T01:35:52Z
+status: done
+tags:
+- tests
+- live
+title: 'Live-Aufgaben: opt-in agentische Aufgaben über bin/raider mit prüfbarem Ergebnis'
+updated: 2026-09-29T01:40:38Z
+---
+
+Heute testen nur t/42 und t/82 live, beide nur mit TEST_LIVE, und beide liefen in keinem normalen Lauf. t/82 baut Engines direkt (am EngineResolver vorbei, deshalb blieb der model-''-Bug unsichtbar) und toleriert Provider-Fehler (DeepSeek 402 / OpenAI 429 -> Test trotzdem grün).
+Probe 2026-09-27: bin/raider -e minimax -m MiniMax-M3 --perl in einem Wegwerf-Workspace, Aufgabe 'Perl-Mini-Distribution + Test + prove bis grün' -> 13 s, 5 Tool-Calls (bash, write_file), prove grün, Session-Journal sauber.
+Ziel: eine kleine Sammlung solcher Aufgaben (xt/ oder t/live/), jede mit frischem Workspace und isolate_home, Start über bin/raider wie ein Nutzer, Prüfung am Ergebnis (prove grün, Dateiinhalt, Journal-Events), Provider per ENV wählbar; ein Provider-Fehler ist ein Fehlschlag, kein Skip. Stand der Keys 2026-09-27: nur MiniMax hat Guthaben.
+
+Committed 76abf50
