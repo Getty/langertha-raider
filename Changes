@@ -327,6 +327,9 @@ Revision history for Langertha-Raider
       OpenAI API; gated on $OPENAI_API_KEY, 2–8s per run).
     - examples/multi-raider-hall/ walkthrough showing a minimal
       multi-raider village wired for cron + ACP.
+    - Fix engine built with an empty model when neither -m nor a table
+      default is set (e.g. -e minimax): the engine's own default_model now
+      applies, and config explain shows it.
 
 0.003     2026-04-21 01:46:09Z
 

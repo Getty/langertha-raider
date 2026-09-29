@@ -81,4 +81,46 @@ subtest 'engine arguments' => sub {
     'unknown engine');
 };
 
+# karr #86: without -m, an engine with no built-in table default must NOT be
+# built with model => '' -- that empty string overrides the engine's own
+# default_model (MiniMax-M3, llama3.3, ...) and the provider 400s. Reading
+# ->model first mirrors the real order (run.started / explain touch it), which
+# used to flip the lazy 'has_explicit_model' predicate and make engine_args
+# emit the empty model on the next call.
+subtest 'no engine emits an empty model without -m' => sub {
+  my $class = 'Langertha::Raider::EngineResolver';
+  for my $engine ($class->engine_names) {
+    my $r = resolver(undef, engine => $engine);
+    $r->model;   # build the lazy slot first, as the application does
+    my %args = $r->engine_args;
+    ok(!(exists $args{model} && !length $args{model}),
+      "$engine: engine_args never carries an empty model")
+      or diag "model => '".($args{model} // 'undef')."'";
+  }
+};
+
+subtest 'engines without a table default let the engine choose' => sub {
+  for my $engine (qw( minimax openrouter ollama )) {
+    my $r = resolver(undef, engine => $engine);
+    $r->model;   # flip attempt
+    ok(!$r->has_model, "$engine: has_model is false without -m");
+    my %args = $r->engine_args;
+    ok(!exists $args{model}, "$engine: engine_args omits model, engine default applies");
+  }
+};
+
+subtest 'default_model_for_engine shows the engine default the table lacks' => sub {
+  my $class = 'Langertha::Raider::EngineResolver';
+  require Langertha::Engine::MiniMax;
+  require Langertha::Engine::Ollama;
+  is($class->default_model_for_engine('minimax'), Langertha::Engine::MiniMax->default_model,
+    'minimax mirrors its engine default_model');
+  is($class->default_model_for_engine('ollama'), Langertha::Engine::Ollama->default_model,
+    'ollama mirrors its engine default_model');
+  is($class->default_model_for_engine('openrouter'), undef,
+    'openrouter has no default -- it requires an explicit model');
+  is($class->default_model_for_engine('anthropic'), 'claude-haiku-4-5',
+    "anthropic keeps raider's cheap table default, not core's flagship");
+};
+
 done_testing;

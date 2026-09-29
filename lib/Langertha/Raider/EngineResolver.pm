@@ -176,49 +176,61 @@ sub env_var_for_engine {
 
     my $model = $resolver->default_model_for_engine('openai');   # 'gpt-4o-mini'
 
-The cheap default model of an engine, C<undef> when it has none. Also
+The model an engine uses without an explicit C<-m>: raider's cheap
+default from the built-in table, or -- for an engine the table does not
+list -- the engine class's own C<default_model>. C<undef> for an engine
+that requires an explicit model (e.g. openrouter). For display only;
+L</model> imposes only the table default, never the engine's own. Also
 callable on the class.
 
 =cut
 
 sub default_model_for_engine {
   my ( $self, $engine ) = @_;
-  return $DEFAULT_MODEL{$engine};
+  return $DEFAULT_MODEL{$engine} if defined $DEFAULT_MODEL{$engine};
+  my $class = $ENGINE_CLASS{$engine} or return undef;
+  my $model = eval {
+    Module::Runtime::require_module($class);
+    $class->default_model;   # croaks on engines that demand an explicit model
+  };
+  return defined $model && length $model ? $model : undef;
 }
 
 =attr model
 
 Model identifier the engine is built with. Defaults to C<model> in
 L</engine_options>, then C<model:> in F<.raider.yml>, then the per-engine
-cheap default. An explicit C<model> always wins.
+cheap default from the built-in table. With no such default the value is
+empty and L</engine_args> passes no C<model>, so the engine's own
+C<default_model> applies. An explicit C<model> always wins.
 
 =cut
 
 has model => (
-  is        => 'ro',
-  isa       => 'Str',
-  lazy      => 1,
-  predicate => 'has_explicit_model',
-  builder   => '_build_model',
+  is      => 'ro',
+  isa     => 'Str',
+  lazy    => 1,
+  builder => '_build_model',
 );
 
 sub _build_model {
   my ($self) = @_;
   return $self->engine_options->{model}
     // $self->engine_yml_options->{model}
-    // $self->default_model_for_engine($self->engine_name)
+    // $DEFAULT_MODEL{$self->engine_name}
     // '';
 }
 
 =method has_model
 
-True when a model was given or one resolves to a non-empty name.
+True when a non-empty model resolves. False when no C<-m>, C<-o model=>,
+C<model:> or table default is set, so L</engine_args> leaves C<model> off
+and the engine falls back to its own C<default_model>.
 
 =cut
 
 sub has_model {
   my ($self) = @_;
-  return 1 if $self->has_explicit_model;
   return length($self->model) ? 1 : 0;
 }
 
