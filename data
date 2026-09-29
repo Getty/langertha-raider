@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-29T17:05:28Z
+claimed_by: worker-loop
+class: standard
+completed: 2026-09-29T17:05:28Z
+created: 2026-09-29T16:42:37Z
+id: 95
+priority: low
+started: 2026-09-29T16:46:13Z
+status: done
+tags:
+- refactor
+- raider-pm
+title: 'Raider.pm: _run_raid_loop in benannte Schritte zerlegen'
+updated: 2026-09-29T17:05:33Z
+---
+
+Aus #22. Raider.pm ~2700 Zeilen, _run_raid_loop monolithisch. Verhaltensneutraler Refactor in kleine private Methoden (Iteration vorbereiten, Engine-Call, Tool-Calls ausfuehren, Abbruch-/Budget-Pruefung, Ergebnis). Keine API-Aenderung, kein Verhalten aendern; volle Testsuite gruen vorher/nachher.
+
+2026-09-29 16:52 Characterization test t/81_raider_loop_steps.t added first (Langfuse observations, MCP ok/fail/unknown, plugin skip, self-tool result + wait, injections/on_iteration, abort metrics, request failure, max_iterations) - these branches had no offline coverage. Loop split into _prepare_iteration_f/_refresh_tools_f/_drain_injections/_start_iteration_trace/_send_turn_f/_read_turn_f/_finish_raid_f/_execute_tool_calls_f/_pause_raid/_abort_raid/_wait_self_tool_f/_call_mcp_tool_f/_after_tool_call_f + trace helpers; cancel safe points stay in the loop body and the batch. Waiting on a free test slot (loadguard) to verify.
+
+2026-09-29 17:00 Review of the split vs HEAD: no drift found (engine/conversation locals map 1:1 onto $state, cancel safe points, wait/cancel, abort metrics w/o raids++, unknown tool w/o hook/span, ERROR level only on MCP spans, pause continuation contents all identical). t/81 passes against HEAD's Raider.pm and the split one. Running full suite.
+
+2026-09-29 17:04 Done: _run_raid_loop (was 412 lines, now 35) split into 19 private steps: _prepare_iteration_f, _refresh_tools_f, _drain_injections, _start_iteration_trace, _send_turn_f, _read_turn_f, _trace_llm_call, _finish_raid_f, _record_raid_metrics, _trace_tool_turn, _execute_tool_calls_f, _pause_raid, _abort_raid, _wait_self_tool_f, _call_mcp_tool_f, _after_tool_call_f, _trace_tool_call, _close_iteration_trace, _append_tool_turn. Loop-local copies of engine/conversation/tools now read from $state (the only writers are the refresh step and the plugin write-back, as before); per-iteration bookkeeping in $iter. Cancel safe points stay in the loop and the batch. _respond_f untouched. Reviewed against HEAD: no drift found. Verified: t/81_raider_loop_steps.t (characterization) passes against HEAD's Raider.pm and the split one; full suite with dev Langertha 79 files / 713 tests PASS (702 baseline + t/81's 5 + the k94 test). Proposed subject: 'Raider: split _run_raid_loop into named steps (k95)'.
+
+Commit c8bb823
