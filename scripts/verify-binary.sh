@@ -245,7 +245,8 @@ echo "REPL (piped: /help, /packs, a raid, /quit): OK"
 
 # --- 6. hall and ACP ----------------------------------------------------------------
 # A daemon hall with its ACP port: the UNIX control socket (status, ps), the
-# ACP server and client (acp ping), the systemd unit. No raider is spawned.
+# ACP server and client (acp ping), the systemd unit, and one raider it
+# spawns.
 mkdir "$work/hall"
 (
   cd "$work/hall"
@@ -263,10 +264,23 @@ mkdir "$work/hall"
   expect "hall status" '"running"' "$BIN" hall status
   expect "hall ps" 'No running raiders' "$BIN" hall ps
   expect "acp ping" '"protocolVersion"' "$BIN" acp ping "127.0.0.1:$acp_port"
+  # The hall starts its raider with the binary itself, never as
+  # "perl <binary>" (k105); the raider finds the fake endpoint of step 5 in
+  # the hall root's .raider.yml and runs its three tools there.
+  echo "raider-hall-marker-$$" > smoke.txt
+  printf 'engine: openai\nopenai:\n  url: http://127.0.0.1:%s/v1\n  api_key: fake\n  model: fake\n' \
+    "$port" > .raider.yml
+  # On failure the raider's own stderr, the slot log, says why.
+  spawned=$(run hall spawn --attach astrid "read smoke.txt, run the bash check, fetch the page" 2>&1) \
+    || fail "hall spawn --attach (exit $?): $spawned"
+  grep -qE "SMOKE-DONE raider-hall-marker-$$.*raider-bash-42.*raider-web-ok.*\"status\":\"completed\".*\"type\":\"run.finished\"" \
+    <<< "$spawned" \
+    || fail "hall spawn --attach: no completed run in: $spawned
+slot log: $(tail -n 20 .raider-hall/logs/astrid.log 2>&1)"
   run hall stop >/dev/null
   for _ in $(seq 100); do kill -0 "$hall_pid" 2>/dev/null || break; sleep 0.1; done
   if kill -0 "$hall_pid" 2>/dev/null; then fail "hall stop: PID $hall_pid still running"; fi
 ) || exit 1
-echo "hall + acp (init, add-raider, install, start --daemon, status, ps, acp ping, stop): OK"
+echo "hall + acp (init, add-raider, install, start --daemon, status, ps, acp ping, spawn --attach, stop): OK"
 
 echo "verify: OK"

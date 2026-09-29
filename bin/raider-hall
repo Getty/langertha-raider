@@ -104,8 +104,10 @@ C<docker run>.
 =env RAIDER_HALL_RAIDER_BIN
 
 The F<raider> executable the hall starts its raiders with. Without it (or
-when it is not executable), the F<raider> next to the running script, then
-the one on C<PATH>.
+when it is not executable), the standalone binary the hall itself runs
+from, else the F<raider> next to the running script, then the one on
+C<PATH>. From a standalone binary the hall execs it directly; otherwise
+it runs it with the perl that runs the hall.
 
 =env RAIDER_HALL_ACP_PORT
 

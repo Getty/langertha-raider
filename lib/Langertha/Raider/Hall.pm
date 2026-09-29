@@ -121,8 +121,10 @@ environment.
 =env RAIDER_HALL_RAIDER_BIN
 
 The F<raider> executable the hall starts its raiders with. Without it, or
-when it is not executable, the F<raider> next to the running script, then
-the one on C<PATH>.
+when it is not executable, the standalone binary the hall itself runs
+from, else the F<raider> next to the running script, then the one on
+C<PATH>. From a standalone binary the hall execs it directly; otherwise
+it runs it with the perl that runs the hall.
 
 =env RAIDER_HALL_ACP_PORT
 
@@ -1137,8 +1139,7 @@ sub _spawn_raider {
     if defined $persona && length $persona && !grep { $_ eq $persona } @packs;
   my $lib_target = $self->lib_target;
 
-  my $raider_bin = $self->_raider_bin;
-  my @cmd = ($^X, $raider_bin, '--stream-json');
+  my @cmd = ($self->_raider_command, '--stream-json');
   push @cmd, '--engine', $engine if $engine;
   push @cmd, '--model', $model if $model;
   push @cmd, '--pack', $_ for @packs;
@@ -1252,11 +1253,35 @@ sub _session_fields {
   return ( session => $raider->session_id, binding => $raider->binding );
 }
 
+# The argv prefix that starts a raider. A Perl script runs with this perl;
+# inside the standalone binary there is no such perl ($^X is a bare
+# "perl" off PATH, and "perl <binary>" dies on the ELF), so whatever
+# _raider_bin names is exec'd directly.
+sub _raider_command {
+  my ($self) = @_;
+  my $raider_bin = $self->_raider_bin;
+  return $self->_packed_binary ? ($raider_bin) : ($^X, $raider_bin);
+}
+
+# The executable this process runs from when it is a PAR::Packer binary.
+# PAR.pm loaded in-process is the signal; PAR_PROGNAME alone is not, a
+# plain perl started from the binary inherits it.
+sub _packed_binary {
+  my ($self) = @_;
+  return unless $INC{'PAR.pm'} && $ENV{PAR_PROGNAME};
+  return path($ENV{PAR_PROGNAME})->absolute->stringify;
+}
+
 sub _raider_bin {
   my ($self) = @_;
   # Explicit override wins — useful in tests and non-standard installs.
   return $ENV{RAIDER_HALL_RAIDER_BIN}
     if $ENV{RAIDER_HALL_RAIDER_BIN} && -x $ENV{RAIDER_HALL_RAIDER_BIN};
+
+  # The standalone binary starts its raiders with itself, whatever it is
+  # called and whatever raider is on PATH.
+  my $packed = $self->_packed_binary;
+  return $packed if defined $packed;
 
   # Otherwise: next to the currently-running script (raider-hall lives
   # alongside raider in a normal install), then $PATH.

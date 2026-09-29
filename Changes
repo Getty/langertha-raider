@@ -291,6 +291,10 @@ Revision history for Langertha-Raider
       conditionals.
     - Update README and POD for pack, PerlTools, Docker dist-dir build,
       Hall/ACP subcommands, and API-key-only Anthropic authentication.
+    - The standalone raider binary can spawn raiders from its hall: the hall
+      runs the binary directly instead of perl <binary>, which died with
+      "Unrecognized character \x7F"; RAIDER_HALL_RAIDER_BIN still overrides
+      it.
 
     - Slice 1 — Perl-native tools: --perl unlocks perl_eval /
       perl_check / perl_cpanm, a private local::lib per raider, and
