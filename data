@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-29T18:23:54Z
+claimed_by: worker-bin-a
+class: standard
+completed: 2026-09-29T18:23:48Z
+created: 2026-09-29T18:04:29Z
+id: 105
+priority: high
+started: 2026-09-29T18:06:30Z
+status: done
+tags:
+- binary
+- hall
+- defect
+title: 'Hall spawn aus dem Binary: Kind wird als ''perl <binary>'' gestartet'
+updated: 2026-09-29T18:23:54Z
+---
+
+Aus #97. raider hall spawn im PAR-Binary startet den Raider als perl <binary> -> "Unrecognized character \x7F". Hall muss erkennen, dass es als Binary laeuft ($ENV{PAR_TEMP}/PAR-Kontext, $0 ist ein ELF), und dann das Binary direkt starten. RAIDER_HALL_RAIDER_BIN bleibt Override. Regressionstest ohne echtes Binary (Command-Aufbau pruefen).
+
+2026-09-29 18:16 Cause: Hall::_spawn_raider ran ($^X, $raider_bin). Inside a pp binary $^X is a bare 'perl' off PATH (probed with a tiny pp build: $^X='perl', $0 as invoked, PAR_PROGNAME=absolute exe path, $INC{'PAR.pm'} set). Signal chosen: $INC{'PAR.pm'} && $ENV{PAR_PROGNAME} -- env alone is not enough, a plain perl started from a packed parent inherits PAR_PROGNAME (probed). Fix: Hall::_raider_command (argv prefix: packed -> (bin), else ($^X, bin)) + _packed_binary; _raider_bin returns the packed binary after the RAIDER_HALL_RAIDER_BIN override. Only re-exec site of raider via $^X in lib/ (PerlTools $^X is #106's; Hall::CLI systemd unit uses path($0)->absolute which is already the binary). Test t/59_hall_packed_binary.t (simulates PAR state, $^X pointed at nothing for the spawn run; fails against the old ($^X, bin) spawn).
+
+2026-09-29 18:22 Done: Hall::_raider_command (packed -> exec the binary directly, else $^X + script) and _packed_binary ($INC{'PAR.pm'} && PAR_PROGNAME; env alone is not a signal); _raider_bin: RAIDER_HALL_RAIDER_BIN override, then the packed binary itself, then sibling, then PATH. POD =env RAIDER_HALL_RAIDER_BIN updated in Hall.pm and bin/raider-hall. Only raider re-exec site via $^X in lib/ (PerlTools = #106). Tests: t/59_hall_packed_binary.t (5 subtests, simulates packed state; spawn subtest fails against the old ($^X, bin) command). scripts/verify-binary.sh step 6 now spawns astrid in the binary's hall (hall spawn --attach against the step-5 fake endpoint via the hall root's .raider.yml), prints the slot log on failure. Verified: local build 20M, verify: OK; a build with the old spawn line fails exactly there with 'Unrecognized character \x7F'. check-binary-libs locally flags libbz2/libz/libzstd (Debian system perl, expected); clean-container build not redone (no new deps). Full prove -r t: all green except t/16_http_connect_failure.t (other worker's in-progress #107 file).
+
+Committed d1c8eb6
