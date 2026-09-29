@@ -11,6 +11,12 @@ use MCP::Server;
 use Exporter 'import';
 our @EXPORT_OK = qw( build_file_tools_server );
 
+=description
+
+The file tools of L<raider>: an L<MCP::Server> with C<list_files(path)>,
+C<read_file(path)>, C<write_file(path, content)> and
+C<edit_file(path, old_string, new_string)>, confined to one directory.
+
 =func build_file_tools_server
 
     my $server = Langertha::Raider::FileTools::build_file_tools_server(

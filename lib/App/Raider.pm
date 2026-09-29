@@ -14,7 +14,7 @@ __END__
 Reserved namespace placeholder. The CLI entry point that used to live here (the
 application class behind the C<raider> command) was renamed and now lives in
 L<Langertha::Raider::CLI> in the
-L<langertha-raider|https://metacpan.org/dist/langertha-raider> distribution, which
+L<Langertha-Raider|https://metacpan.org/dist/Langertha-Raider> distribution, which
 replaces the former App-Raider distribution. Nothing uses this package; it is
 retained only so the C<App::Raider> namespace stays indexed to a dead stub on CPAN.
 

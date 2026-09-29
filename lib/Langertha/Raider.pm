@@ -1043,7 +1043,8 @@ sub remove_engine {
     $raider->remove_engine('vision');
 
 Removes an engine from the catalog. If the removed engine is currently active,
-automatically resets to the default engine.
+automatically resets to the default engine. Croaks when the name is not in
+the catalog.
 
 =cut
 
@@ -1723,12 +1724,27 @@ async sub run_f {
   return $result->with_context($ctx);
 }
 
+=method run_f
+
+    my $result = await $raider->run_f($ctx);   # a Langertha::RunContext, or plain input
+
+The L<Langertha::Role::Runnable> entry point that lets a raider be a step
+of a L<Langertha::Raid>. Runs L</raid_f> on the context's C<input> (a
+string, or an ArrayRef of messages; plain input is wrapped in a new
+L<Langertha::RunContext>). A final answer becomes the context's C<input>
+and C<< state->{last_output} >> for the next step; C<last_result_type>,
+C<last_result> and C<history> are updated too. Returns the
+L<Langertha::Raider::Result> with the context attached.
+
+=cut
+
 =method raid
 
     my $response = $raider->raid(@messages);
 
 Synchronous wrapper around C<raid_f>. Sends messages, runs the tool
-loop, and returns the final text response. Updates history and metrics.
+loop, and returns the L<Langertha::Raider::Result>, which stringifies to
+the final text. Updates history and metrics.
 
 =cut
 
@@ -2778,8 +2794,17 @@ are resolved first to C<Langertha::Plugin::$name>, then to
 C<LangerthaX::Plugin::$name>. Fully qualified names (with C<::>) are
 used as-is.
 
+A leading C<+> (C<+My::Plugin>) loads the class as named, without the
+prefix search, and a name may be followed by a HashRef of constructor
+arguments for that plugin.
+
 Plugin instances are created automatically with C<< host => $self >>.
 Extra constructor arguments can be passed via C<plugin_args>.
+
+Besides the tool-calling hooks every L<Langertha::Plugin> has, a raider
+calls C<plugin_before_raid> (the raid's messages), C<plugin_build_conversation>
+(the conversation sent to the model) and C<plugin_after_raid> (the final
+L<Langertha::Raider::Result>); the contract is in L<Langertha::Plugin>.
 
 =cut
 

@@ -58,8 +58,9 @@ the surface, see L<Langertha::Raider::CLI>.
 
 Langertha engine class shortcut (e.g. C<'anthropic'>, C<'openai'>,
 C<'deepseek'>, C<'groq'>, C<'mistral'>, C<'gemini'>, C<'ollama'>), passed as
-C<engine>. Defaults to C<engine:> in F<.raider.yml>, then to the first
-C<*_API_KEY> environment variable found, then to C<'anthropic'>.
+C<engine>. Defaults to C<-o engine=>, then to C<engine:> in F<.raider.yml>,
+then to the first C<*_API_KEY> environment variable found, then to
+C<'anthropic'> (L<Langertha::Raider::EngineResolver/engine_name>).
 
 =cut
 
@@ -130,7 +131,7 @@ sub has_model {
   return length($self->model) ? 1 : 0;
 }
 
-=attr api_key_env
+=method api_key_env
 
 Name of the environment variable used for the current engine's API key
 (for display / debugging). Returns undef for engines that don't use an API

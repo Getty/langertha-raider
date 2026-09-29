@@ -31,27 +31,36 @@ piece is C<prompt_stream>, which multiplexes inbound C<session/update>
 notifications with the pending C<session/prompt> response on the same
 socket.
 
-=method new(host => STR, port => INT, [timeout => SECS])
+=method new
 
-Open a connection. Dies on failure.
+    my $c = Langertha::Raider::ACP::Client->new(host => '127.0.0.1', port => 38421, timeout => 10);
+
+Opens the connection; C<port> is required, C<host> defaults to
+C<127.0.0.1> and C<timeout> (seconds) to 10. Dies on failure.
 
 =method initialize
 
 Handshake. Returns the server's C<result> hash
 (C<protocolVersion>, C<agentCapabilities>).
 
-=method new_session(\%params)
+=method new_session
+
+    my $s = $c->new_session({ raiderName => 'bjorn' });
 
 Create a session. Adds the current C<cwd> automatically if the caller
 didn't set one. Returns the C<result> hash (C<sessionId>, ...).
 
-=method prompt_stream($session_id, $text, $on_update)
+=method prompt_stream
+
+    my $result = $c->prompt_stream($session_id, $text, $on_update);
 
 Send a prompt, invoke C<$on_update-E<gt>($params)> for each
 C<session/update> notification that arrives, and return the final
 result hash (typically C<{ stopReason =E<gt> ... }>).
 
-=method cancel($session_id)
+=method cancel
+
+    $c->cancel($session_id);
 
 Send C<session/cancel>. Returns the server's result.
 

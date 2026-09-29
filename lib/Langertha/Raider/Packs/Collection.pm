@@ -244,7 +244,10 @@ sub _is_enabled {
 
 =method skill_texts
 
-Returns the concatenated SKILL.md texts from all enabled packs.
+    my @texts = $collection->skill_texts;
+
+The F<SKILL.md> texts of the enabled packs, in the order they were enabled,
+each headed C<### Pack: NAME>; packs without one are left out.
 
 =cut
 
@@ -281,7 +284,8 @@ sub requested_tools {
 
 =method active_pack_names
 
-Returns pack names that are currently enabled.
+ArrayRef of the names of the packs currently enabled, in the order they
+were enabled.
 
 =cut
 

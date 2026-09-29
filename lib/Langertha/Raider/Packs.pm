@@ -16,6 +16,12 @@ use Langertha::Raider::Packs::Pack;
 use Exporter 'import';
 our @EXPORT_OK = qw( build_packs );
 
+=description
+
+Finds and loads the packs of a workspace (ADR 0012): named bundles of skill
+text, persona defaults and requested tools that L<raider> stacks onto the
+mission.
+
 =func build_packs
 
     my $packs = Langertha::Raider::Packs::build_packs(
@@ -26,7 +32,8 @@ our @EXPORT_OK = qw( build_packs );
 Returns a L<Langertha::Raider::Packs::Collection> of every pack found.
 A pack is a directory with an optional F<pack.yml> and an optional
 F<SKILL.md> (without one it contributes no skill text). They are searched in these places; a pack name found in an earlier place hides
-the same name in a later one:
+the same name in a later one, so a bundled pack can be replaced by a
+project or home pack of its name, not by one from C<$RAIDER_PACK_DIRS>:
 
 =over
 
@@ -54,6 +61,37 @@ stops the start.
 Project packs are loaded right away, like the C<detect:> rules of the
 project's own config: the workspace trust decision of ADR 0004, which is
 meant to gate both, does not exist yet.
+
+F<pack.yml> knows these keys; others are ignored:
+
+=over
+
+=item C<exclusive_group> -- the group the pack belongs to, default
+C<power>. Packs of C<power> stack; of any other group (the bundled personas
+use C<persona>) only one is active at a time.
+
+=item C<enabled_by_default> -- true: the pack is on unless something names
+the packs explicitly (the bundled C<caveman>).
+
+=item C<tools> -- built-in tool servers the pack requests, today only
+C<perl> (L<Langertha::Raider::Packs::Collection/requested_tools>). A request, not
+a grant.
+
+=item C<detect> -- the pack's default detection rule
+(L<Langertha::Raider::Detect>); C<detect:> in F<.raider.yml> replaces it
+per pack.
+
+=back
+
+=head1 ENVIRONMENT
+
+=env RAIDER_PACK_DIRS
+
+Colon-separated directories searched for packs after the bundled ones.
+
+=env HOME
+
+The home whose F<.raider/packs/> is searched, when no C<home> is passed.
 
 =cut
 

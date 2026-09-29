@@ -1,8 +1,10 @@
 package Langertha::Raider::Hall::Cron;
 our $VERSION = '0.503';
-# ABSTRACT: Non-blocking cron scheduler for the raider hall
+# ABSTRACT: Internal non-blocking cron scheduler for the raider hall
 
 =head1 DESCRIPTION
+
+B<Internal module.> Its interface may change without notice.
 
 Arms an L<IO::Async::Timer::Absolute> per configured cron entry of a
 L<Langertha::Raider::Hall> and spawns the named raider when it fires.

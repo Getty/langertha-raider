@@ -18,7 +18,7 @@ extends 'Langertha::Raid';
 
 Runs child steps in strict order and forwards one shared context through all
 steps. Final outputs update context input for downstream steps. Non-final
-results (question/pause/abort) are propagated immediately.
+results (question/pause/abort/cancelled) are propagated immediately.
 
 =cut
 

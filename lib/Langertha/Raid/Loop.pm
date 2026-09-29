@@ -27,7 +27,8 @@ tool loop). The loop stops when:
 
 =item * C<max_loops>/C<max_iterations> is reached
 
-=item * a step returns C<question>, C<pause>, or C<abort>
+=item * a step returns anything but a C<final> result (C<question>,
+C<pause>, C<abort>, C<cancelled>)
 
 =item * optional C<continue_while> callback returns false
 
@@ -43,7 +44,7 @@ has max_loops => (
 
 =attr max_loops
 
-Maximum number of loop iterations (default limit).
+Maximum number of loop iterations. Defaults to C<1>.
 
 =cut
 

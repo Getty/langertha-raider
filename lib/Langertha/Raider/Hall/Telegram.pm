@@ -1,8 +1,10 @@
 package Langertha::Raider::Hall::Telegram;
 our $VERSION = '0.503';
-# ABSTRACT: Multi-bot Telegram long-poll adapter for the raider hall
+# ABSTRACT: Internal multi-bot Telegram long-poll adapter for the raider hall
 
 =head1 DESCRIPTION
+
+B<Internal module.> Its interface may change without notice.
 
 Long-polls every Telegram bot configured for a L<Langertha::Raider::Hall>,
 routes incoming messages to raiders and sends replies.

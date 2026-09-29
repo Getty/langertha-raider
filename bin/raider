@@ -30,8 +30,10 @@ exit Langertha::Raider::CLI::Main->new->run(@ARGV);
 
 =head1 DESCRIPTION
 
-F<raider> is the CLI front-end for L<Langertha::Raider::CLI>. It wires an LLM engine
-(via L<Langertha>) to a filesystem tool server and L<MCP::Run::Bash>,
+F<raider> is the command line of L<Langertha::Raider::CLI>: it runs
+L<Langertha::Raider::CLI::Main>, which parses the options below and builds
+a L<Langertha::Raider::CLI> for the working directory. That wires an LLM engine
+(via L<Langertha>) to the file tools, C<bash> (L<MCP::Run::Bash>) and the web tools,
 then runs the L<Langertha::Raider> multi-turn agent loop on your prompt.
 Optional profile, pack, and Perl-native tool flags let the same CLI load
 project agent instructions, persona/power bundles, and C<perl_eval> /
@@ -63,6 +65,176 @@ follow the run as it happens. See L</MACHINE OUTPUT>.
 
 When standard input is not a terminal, the REPL (C<-i>) reads its lines
 from it and ends at its end.
+
+=head1 TOOLS
+
+The model gets one tool set per run, and the tool list in its prompt is
+generated from exactly the tools the engine is offered:
+
+=over
+
+=item * C<list_files>, C<read_file>, C<write_file>, C<edit_file>
+(L<Langertha::Raider::FileTools>), confined to C<-r>.
+
+=item * C<bash> (L<MCP::Run::Bash>), a real shell started in C<-r>,
+120 seconds per command by default. It is not confined to C<-r>.
+
+=item * C<web_search>, C<web_fetch> (L<Langertha::Raider::WebTools>).
+
+=item * C<perl_eval>, C<perl_check>, C<perl_cpanm>
+(L<Langertha::Raider::PerlTools>) when granted: by C<--perl>, by C<perl:>
+in F<.raider.yml> (C<perl: false> denies them), or else when an active pack
+requests them -- the bundled C<perl> pack, detected in a Perl workspace.
+Switching such a pack with C</pack> or re-detecting it with C</reload>
+mounts or unmounts them for the next raid.
+
+=item * C<telegram_reply>, C<hall_status>, C<hall_spawn>
+(L<Langertha::Raider::HallTools>) only for a raider a Hall started (see
+L</RAIDER_HALL_SOCKET>).
+
+=back
+
+C<raider config explain> shows whether the Perl tools are mounted and why;
+C<--export-skill> writes the same tool list as a table.
+
+=head1 OPTIONS
+
+=opt -e, --engine NAME
+
+The engine: C<anthropic>, C<openai>, C<deepseek>, C<groq>, C<mistral>,
+C<gemini>, C<minimax>, C<cerebras>, C<openrouter> or C<ollama>. Without
+it, C<-o engine=>, then C<engine:> in F<.raider.yml>, then the first API key
+set in the environment (C<anthropic>, C<openai>, C<deepseek>, C<groq>,
+C<mistral>, C<gemini>, in that order; see L</ENVIRONMENT>) decide, else
+C<anthropic>.
+
+=opt -m, --model NAME
+
+The model. Without it, C<-o model=>, then C<model:> in F<.raider.yml>, then
+a cheap per-engine default (C<claude-haiku-4-5>, C<gpt-4o-mini>, ...), else
+the engine's own default. C<openrouter> needs one.
+
+=opt -k, --api-key KEY
+
+The API key, over C<api_key:> in F<.raider.yml> and the engine's
+environment variable.
+
+=opt -o, --option KEY=VALUE
+
+An engine attribute (repeatable), e.g. C<-o temperature=0.2 -o
+response_size=4096>, merged over F<.raider.yml>; the command line wins.
+Integers, decimals and C<true> / C<false> become numbers. raider's own
+F<.raider.yml> keys (C<engine>, C<perl>, C<packs=a,b>, C<skills=a,b>,
+C<detect>, C<no_detect=a,b>, C<preferred_lib_target>) configure raider
+instead and never reach the engine.
+
+=opt -r, --root DIR
+
+The working directory, default the current one. The file tools are
+confined to it, C<bash> starts in it, and F<.raider.yml>, F<.raider.md>
+and F<.raider/> are read from it.
+
+=opt -M, --mission TEXT
+
+The instructions: replaces the default persona and F<.raider.md> for this
+run. Skills, packs and the tool list still apply.
+
+=opt --bare
+
+An isolated context: no F<.raider.md>, no skills, no C<packs:>, no default
+packs, no detection. C<--pack NAME> and C</pack NAME> still work.
+
+=opt -i, --interactive
+
+The REPL. It is the default when standard input is a terminal and no prompt
+is given; C<-i> also forces it otherwise.
+
+=opt --json[=N], --msgpack[=N], --yaml[=N]
+
+Print one document for the run, see L</MACHINE OUTPUT>.
+
+=opt --stream-json[=N], --stream-msgpack[=N], --stream-yaml[=N]
+
+Print the run as events while it happens, ending with the document; see
+L</Streams>.
+
+=opt --no-session
+
+Record nothing; see L</SESSIONS>.
+
+=opt --session ID
+
+Continue session C<ID>: its conversation is replayed and the run (or the
+REPL) is recorded in it.
+
+=opt --continue
+
+The same with the newest session of the project.
+
+=opt --max-iterations N
+
+Hard cap on tool rounds per raid. Default 10000, effectively unlimited.
+
+=opt --no-color
+
+No ANSI colors, as with C<ANSI_COLORS_DISABLED>.
+
+=opt --trace, --no-trace
+
+Show or hide the live progress of tool calls. On by default when standard
+output is a terminal; off with a machine output flag, where C<--trace>
+sends it to standard error.
+
+=opt --perl
+
+Mount the Perl tools (C<perl_eval>, C<perl_check>, C<perl_cpanm>), see
+L</TOOLS>.
+
+=opt --pack NAME
+
+Enable a pack (repeatable). Given at all, the listed packs replace
+C<packs:> of F<.raider.yml> and the default packs; detection still adds.
+
+=opt --no-pack NAME
+
+Switch a pack off (repeatable), also a default or detected one.
+
+=opt --no-detect, --detect
+
+Switch pack detection off, or on over C<detect: false> in F<.raider.yml>.
+
+=opt --claude
+
+Load F<CLAUDE.md> and F<.claude/skills/*/SKILL.md> as skills. Saved to
+C<skills:> in F<.raider.yml> on first use.
+
+=opt --openai, --codex
+
+Load F<AGENTS.md>. Saved like C<--claude>.
+
+=opt --skills DIR
+
+Load the F<*.md> files in C<DIR> as skills (repeatable). Saved like
+C<--claude>.
+
+=opt --customize-prompt
+
+Start the REPL with the prompt-builder, which writes F<.raider.md> with
+you (C</prompt> in the REPL).
+
+=opt --export-skill [PATH]
+
+Write a plain-markdown "how to use raider" document for the current
+configuration (default F<RAIDER-SKILL.md> in C<-r>) and exit.
+
+=opt --export-claude-skill [PATH]
+
+Write the same as a Claude Code F<SKILL.md> with frontmatter (default
+F<.claude/skills/raider/SKILL.md> in C<-r>) and exit.
+
+=opt -h, --help
+
+Print the option summary and exit.
 
 =head1 MACHINE OUTPUT
 
@@ -310,8 +482,8 @@ C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
 machine output flag, a machine output flag with C<-i>, or an unknown format
 version.
 
-=item C<3> -- configuration error: F<.raider.yml> cannot be read, or the
-engine is unknown.
+=item C<3> -- configuration error: F<.raider.yml> cannot be read, the
+engine is unknown, or a pack detection rule is invalid.
 
 =item C<4> -- the session to continue (C<--session>, C<--continue>,
 C<session resume>) or to remove (C<session rm>) is in use by another
@@ -337,10 +509,88 @@ wait.
 
 The C<hall> and C<acp> subcommands keep their own exit statuses.
 
-API keys come from standard environment variables
-(C<ANTHROPIC_API_KEY>, C<OPENAI_API_KEY>, etc.).
-Claude Code subscription/OAuth credentials are not consumed by this CLI;
-Anthropic usage goes through the API key path.
+=head1 ENVIRONMENT
+
+API keys come from the environment variables below only. Claude Code
+subscription/OAuth credentials are not consumed by this CLI; Anthropic
+usage goes through the API key path.
+
+=env ANTHROPIC_API_KEY
+
+The key of the C<anthropic> engine. Set, it also makes C<anthropic> the
+engine when nothing names one; so do the next five, in this order.
+
+=env OPENAI_API_KEY
+
+The key of C<openai>.
+
+=env DEEPSEEK_API_KEY
+
+The key of C<deepseek>.
+
+=env GROQ_API_KEY
+
+The key of C<groq>.
+
+=env MISTRAL_API_KEY
+
+The key of C<mistral>.
+
+=env GEMINI_API_KEY
+
+The key of C<gemini>.
+
+=env MINIMAX_API_KEY
+
+The key of C<minimax>. This one and the next two are only read for their
+engine; they never pick it.
+
+=env CEREBRAS_API_KEY
+
+The key of C<cerebras>.
+
+=env OPENROUTER_API_KEY
+
+The key of C<openrouter>.
+
+=env BRAVE_API_KEY
+
+Adds Brave to C<web_search>, next to the keyless DuckDuckGo.
+
+=env SERPER_API_KEY
+
+Adds Serper to C<web_search>.
+
+=env GOOGLE_API_KEY
+
+With L</GOOGLE_CSE_ID>, adds Google Custom Search to C<web_search>.
+
+=env GOOGLE_CSE_ID
+
+The Custom Search engine id for L</GOOGLE_API_KEY>.
+
+=env RAIDER_PACK_DIRS
+
+Colon-separated directories searched for packs after the project's
+F<.raider/packs/>, F<~/.raider/packs/> and the bundled ones; see
+L<Langertha::Raider::Packs/build_packs>.
+
+=env HOME
+
+Where F<~/.raider/packs/> and the REPL history F<~/.raider_history> are.
+
+=env ANSI_COLORS_DISABLED
+
+Set, the output and the trace have no colors (C<--no-color> and the
+machine output flags set it themselves).
+
+=env RAIDER_HALL_SOCKET
+
+The control socket of the Hall that started this raider. When it names a
+socket, the Hall tools C<telegram_reply>, C<hall_status> and C<hall_spawn>
+are mounted; the Hall sets it, together with C<RAIDER_HALL_TELEGRAM_BOT>,
+C<RAIDER_HALL_TELEGRAM_CHAT_ID> and C<RAIDER_HALL_TELEGRAM_THREAD_ID> for a
+Telegram mission (see L<Langertha::Raider::HallTools>).
 
 =seealso
 
@@ -349,6 +599,8 @@ Anthropic usage goes through the API key path.
 =item * L<Langertha::Raider::CLI>
 
 =item * L<Langertha::Raider>
+
+=item * L<raider-hall> -- the Hall daemon, also reachable as C<raider hall>
 
 =back
 

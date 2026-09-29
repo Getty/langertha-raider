@@ -1,8 +1,10 @@
 package Langertha::Raider::Hall::MCP;
 our $VERSION = '0.503';
-# ABSTRACT: MCP tool adapter exposing the raider hall
+# ABSTRACT: Internal MCP tool adapter exposing the raider hall
 
 =head1 DESCRIPTION
+
+B<Internal module.> Its interface may change without notice.
 
 Describes and dispatches the hall management tools (spawn, list, schedule,
 cancel, Telegram, status) of a L<Langertha::Raider::Hall>.

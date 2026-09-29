@@ -18,6 +18,11 @@ use HTML::TreeBuilder;
 use Exporter 'import';
 our @EXPORT_OK = qw( build_web_tools_server );
 
+=description
+
+The web tools of L<raider>: an L<MCP::Server> with C<web_search> and
+C<web_fetch>, run on the caller's L<IO::Async::Loop>.
+
 =func build_web_tools_server
 
     my $server = Langertha::Raider::WebTools::build_web_tools_server(
@@ -34,9 +39,12 @@ L<Net::Async::WebSearch>. DuckDuckGo is always enabled (keyless). Brave,
 Serper and Google are auto-added when C<BRAVE_API_KEY>, C<SERPER_API_KEY>,
 or both C<GOOGLE_API_KEY> + C<GOOGLE_CSE_ID> are set in the environment.
 
-=item * C<web_fetch(url)>  -- fetch a URL via L<Net::Async::HTTP>. Returns
-the response body (HTML is flattened to readable text, up to
-C<max_fetch_bytes>).
+=item * C<web_fetch(url, [as_html])>  -- fetch a URL via L<Net::Async::HTTP>.
+Returns the status, the content type and the body, cut at
+C<max_fetch_bytes> (default 2_000_000). HTML is flattened to readable text
+unless C<as_html> is true.
+
+C<limit> of C<web_search> defaults to 8.
 
 =back
 
@@ -175,6 +183,24 @@ sub build_web_tools_server {
 }
 
 1;
+
+=head1 ENVIRONMENT
+
+=env BRAVE_API_KEY
+
+Adds Brave to C<web_search>.
+
+=env SERPER_API_KEY
+
+Adds Serper to C<web_search>.
+
+=env GOOGLE_API_KEY
+
+With L</GOOGLE_CSE_ID>, adds Google Custom Search to C<web_search>.
+
+=env GOOGLE_CSE_ID
+
+The Custom Search engine id for L</GOOGLE_API_KEY>.
 
 =seealso
 

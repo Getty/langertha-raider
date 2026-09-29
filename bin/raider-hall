@@ -12,3 +12,121 @@ use Langertha::Raider::Hall::CLI;
 Langertha::Raider::Hall::CLI->main(@ARGV);
 
 1;
+
+__END__
+
+=head1 SYNOPSIS
+
+    raider-hall init --name bjorn
+    raider-hall start --daemon --acp-port 38421
+    raider-hall spawn bjorn "summarise yesterday's git log"
+    raider-hall ps
+    raider-hall logs bjorn-1790000000 --follow
+    raider-hall stop
+
+=head1 DESCRIPTION
+
+F<raider-hall> runs the subcommands of L<Langertha::Raider::Hall>, the
+optional daemon that runs raiders on demand, on cron, for Telegram messages
+and over ACP. It is the same as C<raider hall>: C<raider-hall start> and
+C<raider hall start> do the same thing.
+
+The hall is the directory holding F<.raider-hall.yml> (see
+L<Langertha::Raider::Hall/CONFIG FILE>); C<DIR> defaults to the current
+one. C<raider-hall SUBCOMMAND --help> prints the options of a subcommand.
+
+=head1 COMMANDS
+
+=opt init [--name NAME] [--engine ENGINE] [--persona PACK]
+
+Write a starter F<.raider-hall.yml> with one raider in the current
+directory; asks for the name without C<--name>. Never overwrites one.
+
+=opt add-raider NAME [--engine E] [--persona P] [--model M] [--pack X]...
+
+Add a raider entry to F<.raider-hall.yml>. A running hall reads the file
+once at start, so restart it to use the new entry.
+
+=opt start [DIR] [--daemon] [--acp-port N] [--acp-host H]
+
+Run the hall, in the foreground or with C<--daemon> in the background.
+C<--acp-port> opens the ACP adapter on TCP port C<N>, over C<acp:> of the
+config; C<--acp-host> binds it to C<H> (default C<127.0.0.1>), and only
+counts together with C<--acp-port>.
+
+=opt stop [DIR]
+
+Send C<SIGTERM> to the running hall.
+
+=opt status [DIR]
+
+The hall's status as JSON.
+
+=opt ps [DIR]
+
+The running raiders: slot, PID, name.
+
+=opt spawn [DIR] NAME MISSION [--attach]
+
+Start raider C<NAME> on C<MISSION> and print its run ID. A name with a
+leading number (C<1bjorn>) is a singleton slot: a mission for a busy one
+waits in its queue. C<--attach> is accepted but has no effect yet.
+
+=opt attach [DIR] ID
+
+Where the running raider C<ID> is: its slot, PID and slot log. For its
+output, see C<logs --follow>.
+
+=opt logs [DIR] ID [--follow]
+
+The run's part of its slot log; C<--follow> keeps reading while it runs.
+
+=opt kill [DIR] ID
+
+Stop the running raider C<ID> with C<SIGTERM>.
+
+=opt session reset [DIR] BINDING
+
+Start a new session for a binding (C<telegram:BOT:CHAT_ID>, C<cron:ID>,
+C<slot:1NAME>, ...); see L<Langertha::Raider::Hall/session_bindings>.
+
+=opt install [DIR] [--docker | --host] [--image IMG] [--name NAME] [--acp-port N] [--acp-host H] [--stdout]
+
+Write a systemd user unit that starts the hall, native or through
+C<docker run>.
+
+=head1 ENVIRONMENT
+
+=env RAIDER_HALL_RAIDER_BIN
+
+The F<raider> executable the hall starts its raiders with. Without it (or
+when it is not executable), the F<raider> next to the running script, then
+the one on C<PATH>.
+
+=env RAIDER_HALL_ACP_PORT
+
+Opens the ACP adapter on this TCP port, over C<acp: { port: ... }> of the
+config. C<start --acp-port> sets it.
+
+=env RAIDER_HALL_ACP_HOST
+
+The address the ACP adapter binds to, over C<acp: { host: ... }>; default
+C<127.0.0.1>. C<start --acp-host> sets it (together with C<--acp-port>).
+
+The hall sets C<RAIDER_HALL_SOCKET>, C<RAIDER_HALL_ROOT>,
+C<RAIDER_HALL_SLOT>, C<RAIDER_HALL_MODE> and, for a Telegram mission,
+C<RAIDER_HALL_TELEGRAM_BOT>, C<RAIDER_HALL_TELEGRAM_CHAT_ID> and
+C<RAIDER_HALL_TELEGRAM_THREAD_ID> for the raiders it starts; see
+L<Langertha::Raider::Hall/ENVIRONMENT>.
+
+=seealso
+
+=over
+
+=item * L<Langertha::Raider::Hall>
+
+=item * L<raider>
+
+=back
+
+=cut

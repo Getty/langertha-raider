@@ -1,8 +1,10 @@
 package Langertha::Raider::Hall::Protocol;
 our $VERSION = '0.503';
-# ABSTRACT: Control-socket command handlers for the raider hall
+# ABSTRACT: Internal control-socket command handlers for the raider hall
 
 =head1 DESCRIPTION
+
+B<Internal module.> Its interface may change without notice.
 
 Registers the JSON line commands (spawn, ps, attach, kill, logs, status,
 session_reset, telegram_reply) on a L<Langertha::Raider::Hall> control

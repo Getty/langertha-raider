@@ -304,7 +304,7 @@ sub write_markdown {
     $skill->write_claude_skill('path/to/SKILL.md');
 
 Writes the Claude SKILL.md (with frontmatter) to C<$path>. The default path
-is C<.claude/skills/<name>/SKILL.md> relative to the app's working root.
+is C<< .claude/skills/<name>/SKILL.md >> relative to the app's working root.
 
 =cut
 

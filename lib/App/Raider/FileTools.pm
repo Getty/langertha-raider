@@ -13,7 +13,7 @@ __END__
 
 Reserved namespace placeholder. The MCP::Server factory with local filesystem tools
 that used to live here was renamed and now lives in L<Langertha::Raider::FileTools>
-in the L<langertha-raider|https://metacpan.org/dist/langertha-raider> distribution,
+in the L<Langertha-Raider|https://metacpan.org/dist/Langertha-Raider> distribution,
 which replaces the former App-Raider distribution. Nothing uses this package; it is
 retained only so the C<App::Raider::FileTools> namespace stays indexed to a dead
 stub on CPAN.

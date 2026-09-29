@@ -1,8 +1,10 @@
 package Langertha::Raider::Hall::Raider;
 our $VERSION = '0.503';
-# ABSTRACT: Record of a raider process spawned by the hall
+# ABSTRACT: Internal record of a raider process spawned by the hall
 
 =head1 DESCRIPTION
+
+B<Internal module.> Its interface may change without notice.
 
 Data object the L<Langertha::Raider::Hall> keeps per running raider, keyed by run ID:
 id, pid, slot and base name, log path, events path, mission and, for a

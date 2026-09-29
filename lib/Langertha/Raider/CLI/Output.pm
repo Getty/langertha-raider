@@ -148,7 +148,7 @@ sub render_inline_code {
 
 =method config_report
 
-Prints a report of L<Langertha::Raider::CLI/explain_config>: one line per
+Prints a report of L<Langertha::Raider::Application/explain_config>: one line per
 setting with its value, source, what it overrides and whether it applies to
 the engine or to raider; the instructions source (C<-M>, C<.raider.md>,
 C<default>) with C<(bare)> under C<--bare>; each pack with its state, the

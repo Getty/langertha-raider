@@ -1,8 +1,10 @@
 package Langertha::Raider::Hall::CLI;
 our $VERSION = '0.503';
-# ABSTRACT: raider hall subcommand dispatcher
+# ABSTRACT: Internal dispatcher of the raider hall subcommands
 
 =head1 DESCRIPTION
+
+B<Internal module.> Its interface may change without notice.
 
 Dispatches the C<raider hall> subcommands: it reads the subcommand and its
 options and runs the matching handler -- C<init> and C<add-raider> to set up

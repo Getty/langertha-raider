@@ -13,10 +13,17 @@ use Langertha::Raider::SessionStore;
 use Exporter 'import';
 our @EXPORT_OK = qw( build_perl_tools_server );
 
+=description
+
+The Perl-native tools of L<raider>: an L<MCP::Server> with
+C<perl_eval(code, [stdin], [timeout])>, C<perl_check(code)> and
+C<perl_cpanm(module, [options])>, all run as subprocesses of the running
+perl in the working root, with a private local::lib on C<PERL5LIB>.
+
 =func build_perl_tools_server
 
     my $server = Langertha::Raider::PerlTools::build_perl_tools_server(
-        root       => '/some/dir',  # chroot root (required)
+        root       => '/some/dir',  # working root (default: the current directory)
         lib_target => '.raider/lib',  # optional override
         install_timeout => 300,       # seconds per cpanm run (default 300)
     );
@@ -303,7 +310,8 @@ sub build_perl_tools_server {
 =head2 perl_eval
 
 Evaluate Perl code with the running perl (C<$^X>) in the working root,
-with the private lib on C<PERL5LIB>. Returns stdout, stderr, exit_code,
+with the private lib on C<PERL5LIB>, killed after C<timeout> seconds
+(default 60). Returns stdout, stderr, exit_code,
 return_value, and (optionally) auto_installed. C<error> is C<timeout> when
 the time limit hit, otherwise the message of whatever else failed.
 
@@ -315,7 +323,8 @@ timed-out install is noted in C<stderr>.
 
 Compile-check Perl code via C<perl -c> in the working root, with the
 private lib on C<PERL5LIB>. This is not a sandbox: C<BEGIN> blocks and
-C<use> statements run during compilation. Returns C<valid> (bool) and
+C<use> statements run during compilation, for at most 30 seconds.
+Returns C<valid> (bool) and
 C<syntax_error> (string or null).
 
 =head2 perl_cpanm

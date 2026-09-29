@@ -1,8 +1,10 @@
 package Langertha::Raider::Hall::ACP::SubStream;
 our $VERSION = '0.503';
-# ABSTRACT: Stream shim feeding hall output into an ACP callback
+# ABSTRACT: Internal stream shim feeding hall output into an ACP callback
 
 =head1 DESCRIPTION
+
+B<Internal module.> Its interface may change without notice.
 
 Minimal stand-in for an L<IO::Async::Stream> used by
 L<Langertha::Raider::Hall::ACP>: each written JSON line is passed to a

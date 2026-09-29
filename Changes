@@ -384,6 +384,16 @@ Revision history for Langertha-Raider
     - The how-to-use-raider doc (/skill, /skill-claude) lists the tools raider
       actually has mounted, with their real parameters; the Perl and Hall
       tools are included when they are on.
+    - Documentation pass: perldoc raider documents every option, the
+      tool set and the environment variables raider reads (API keys,
+      web-search keys, RAIDER_PACK_DIRS, RAIDER_HALL_SOCKET, ...);
+      raider-hall has a manual page of its own; Langertha::Raider::Hall
+      documents RAIDER_HALL_RAIDER_BIN, RAIDER_HALL_ACP_PORT and
+      RAIDER_HALL_ACP_HOST and the environment it gives its raiders;
+      Langertha::Raider::Packs documents the pack.yml keys; Langertha::Raider
+      documents run_f and its raid plugin hooks. The Hall parts and the
+      raider acp dispatcher are marked internal (ADR 0017). README and the
+      multi-raider-hall example corrected against the current code.
 
 0.003    2026-04-21 01:46:09Z
 

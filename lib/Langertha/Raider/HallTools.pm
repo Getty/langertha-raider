@@ -1,6 +1,6 @@
 package Langertha::Raider::HallTools;
 our $VERSION = '0.503';
-# ABSTRACT: MCP::Server factory with hall-side tools (telegram_reply, hall_status)
+# ABSTRACT: MCP::Server factory with hall-side tools (telegram_reply, hall_status, hall_spawn)
 
 use strict;
 use warnings;
@@ -10,6 +10,12 @@ use JSON::MaybeXS ();
 
 use Exporter 'import';
 our @EXPORT_OK = qw( build_hall_tools_server );
+
+=description
+
+The Hall tools of L<raider>: F<raider> mounts them when a
+L<Langertha::Raider::Hall> started it (L</RAIDER_HALL_SOCKET> names a
+socket).
 
 =func build_hall_tools_server
 
@@ -158,7 +164,31 @@ sub build_hall_tools_server {
 
 __END__
 
-=head1 SEE ALSO
+=head1 ENVIRONMENT
+
+The Hall sets these for the raiders it starts; the Telegram ones only for
+a Telegram mission, and without a C<telegram> argument the function reads
+them.
+
+=env RAIDER_HALL_SOCKET
+
+The Hall's control socket. F<raider> mounts the tools when it names a
+socket and passes it as C<socket>; the function itself does not read it.
+
+=env RAIDER_HALL_TELEGRAM_BOT
+
+The bot of the Telegram message the raider was started for; with
+L</RAIDER_HALL_TELEGRAM_CHAT_ID> it binds C<telegram_reply> to that chat.
+
+=env RAIDER_HALL_TELEGRAM_CHAT_ID
+
+The chat of that message.
+
+=env RAIDER_HALL_TELEGRAM_THREAD_ID
+
+The forum topic of that message, when it came from one.
+
+=seealso
 
 =over
 

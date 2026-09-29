@@ -1,6 +1,6 @@
 package Langertha::Raider::Hall::ACP;
 our $VERSION = '0.503';
-# ABSTRACT: ACP (Agent Client Protocol) adapter — exposes the hall over TCP
+# ABSTRACT: Internal ACP (Agent Client Protocol) adapter that exposes the hall over TCP
 
 use strict;
 use warnings;
@@ -14,9 +14,13 @@ use Langertha::Raider::Hall::ACP::SubStream;
 
 =head1 DESCRIPTION
 
+B<Internal module.> Its interface may change without notice.
+
 Minimal ACP server. Speaks JSON-RPC 2.0 line-framed over TCP. Clients
-(Zed, future ACP-capable editors) connect to the configured port and
-drive raiders through the hall.
+that speak ACP over TCP (C<raider acp>, L<Langertha::Raider::ACP::Client>)
+connect to the configured port and drive raiders through the hall. An
+editor that starts its agent as a command over stdio needs the stdio
+server of ADR 0010, which does not exist yet.
 
 =head2 Supported methods
 

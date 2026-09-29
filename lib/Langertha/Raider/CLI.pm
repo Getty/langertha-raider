@@ -1,6 +1,5 @@
-# ABSTRACT: Autonomous CLI agent that can browse directories, edit files, and run bash commands
-
 package Langertha::Raider::CLI;
+# ABSTRACT: Autonomous CLI agent that can browse directories, edit files, and run bash commands
 our $VERSION = '0.503';
 use Moose;
 use namespace::autoclean;
@@ -36,12 +35,16 @@ working coding/system agent:
 =item * Local filesystem access, confined to L<Langertha::Raider::Application/root>
 (L<Langertha::Raider::FileTools>).
 
-=item * Full shell via L<MCP::Run::Bash> (the C<bash> tool).
+=item * Full shell via L<MCP::Run::Bash> (the C<bash> tool), started in
+the root but not confined to it.
 
 =item * Web search + fetch via L<Net::Async::WebSearch> and
 L<Net::Async::HTTP> (L<Langertha::Raider::WebTools>).
 
-=item * Optional Perl-native tools via L<Langertha::Raider::PerlTools>.
+=item * Optional Perl-native tools via L<Langertha::Raider::PerlTools>,
+and the Hall tools (L<Langertha::Raider::HallTools>) when a Hall started
+the raider. The tool list in the prompt is generated from the tools the
+engine is offered (L<Langertha::Raider::Application/mission>).
 
 =item * Persona and power packs via L<Langertha::Raider::Packs>.
 
@@ -67,13 +70,18 @@ attributes and methods documented there (C<root>, C<engine_name>,
 C<model>, C<mission>, C<packs>, C<raid_f>, C<run>, C<explain_config>, ...)
 apply here, and this class adds what belongs to the terminal -- the live
 L</trace>, the per-tool agent profiles of C<--claude> / C<--openai> and
-L</token_stats>. The CLI front-end is L<raider>.
+L</token_stats>. The command line itself is L<raider>.
 
 =cut
 
-=method default_model_for_engine
+=func default_model_for_engine
 
-Per-engine default model when L<Langertha::Raider::Application/model> is not explicitly set.
+    my $model = Langertha::Raider::CLI::default_model_for_engine('openai');   # 'gpt-4o-mini'
+
+A plain function, not a method: the model an engine uses when no model is
+set (L<Langertha::Raider::Application/model>) -- raider's cheap default
+for the engine, else the engine class's own default, C<undef> for an
+engine that needs an explicit model (C<openrouter>) or an unknown one.
 
 =cut
 
@@ -236,7 +244,8 @@ sub trace_plugin {
 =method token_stats
 
 Cumulative token counts for this session (hashref with C<prompt>,
-C<completion>, C<total>, C<calls>) — available when trace is enabled.
+C<completion>, C<total>, C<calls>) — available when trace is enabled,
+nothing otherwise.
 
 =cut
 

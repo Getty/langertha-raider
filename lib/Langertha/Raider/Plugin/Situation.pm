@@ -21,7 +21,7 @@ extends 'Langertha::Plugin';
 
 Prepends a small C<[situation]> context block to the very first user message
 of a session: current local time, UTC offset, timezone, hostname, and
-C<$USER>. The model then knows what "now" means without needing to call
+the user (C<$USER>, else C<$LOGNAME>, else the password database). The model then knows what "now" means without needing to call
 C<bash "date">.
 
 The block is injected only once per Raider instance (on the first

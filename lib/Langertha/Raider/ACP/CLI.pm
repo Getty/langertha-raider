@@ -1,6 +1,6 @@
 package Langertha::Raider::ACP::CLI;
 our $VERSION = '0.503';
-# ABSTRACT: raider acp subcommand dispatcher (client side)
+# ABSTRACT: Internal dispatcher of the raider acp subcommands (client side)
 
 use strict;
 use warnings;
@@ -15,6 +15,15 @@ use Langertha::Raider::ACP::Client;
     raider acp ping  HOST:PORT
     raider acp prompt HOST:PORT "list files"
     raider acp connect HOST:PORT [--raider bjorn]
+
+=head1 DESCRIPTION
+
+B<Internal module.> Its interface may change without notice.
+
+Dispatches the C<raider acp> subcommands -- C<ping>, C<prompt> and
+C<connect> -- to an ACP server such as L<Langertha::Raider::Hall::ACP>,
+through L<Langertha::Raider::ACP::Client>. The endpoint is C<HOST:PORT>,
+or just C<PORT> for C<127.0.0.1>.
 
 =cut
 

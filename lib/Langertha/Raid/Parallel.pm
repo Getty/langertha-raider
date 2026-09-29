@@ -47,7 +47,8 @@ has merge_slot => (
 
 =attr merge_slot
 
-Artifact slot name where merged branch snapshots are stored.
+Artifact slot name where merged branch snapshots are stored. Defaults to
+C<parallel_branches>.
 
 =cut
 

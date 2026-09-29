@@ -18,8 +18,7 @@ From the shell:
 
 Hall is the multi-raider daemon. It owns a UNIX command/event socket,
 spawns named raiders as child processes, enforces C<1name> singleton
-slots with persistent FIFO queueing, and wires in optional Slice 4/5
-features:
+slots with persistent FIFO queueing, and wires in optional features:
 
 =over
 
@@ -104,17 +103,57 @@ hall passes it as one more C<--pack>, after those in C<packs>, unless
 C<packs> already names it. The hall ignores C<mcp> and C<isolated> on a
 raider entry; the first run of such a raider notes that in its slot log.
 
-C<preferred_lib_target> sets the hall's L</lib_target>.
+C<preferred_lib_target> sets the hall's L</lib_target>. C<longhouse: true>
+adds F<longhouse/lib> of the hall root to every raider's C<PERL5LIB> as
+well.
 
 C<engine> on a raider entry is optional. Without it the hall passes no
 C<--engine> and the spawned raider decides itself: the engine from its
 F<.raider.yml> first, then autodetection from the API keys in the
 environment.
 
+=head1 ENVIRONMENT
+
+=env RAIDER_HALL_RAIDER_BIN
+
+The F<raider> executable the hall starts its raiders with. Without it, or
+when it is not executable, the F<raider> next to the running script, then
+the one on C<PATH>.
+
+=env RAIDER_HALL_ACP_PORT
+
+A TCP port opens the ACP adapter on it, over C<acp: { port: ... }> of the
+config. C<raider hall start --acp-port N> sets it.
+
+=env RAIDER_HALL_ACP_HOST
+
+The address the ACP adapter binds to, over C<acp: { host: ... }>; default
+C<127.0.0.1>. C<raider hall start --acp-port N --acp-host H> sets it.
+
+Every raider the hall starts gets the hall's environment without the
+C<RAIDER_HALL_TELEGRAM_*> variables, plus:
+
+=over
+
+=item * C<RAIDER_HALL_SOCKET> -- the hall's control socket. F<raider>
+mounts the Hall tools (L<Langertha::Raider::HallTools>) when it is set.
+
+=item * C<RAIDER_HALL_ROOT>, C<RAIDER_HALL_SLOT> -- the hall root and the
+run's slot; C<RAIDER_HALL_MODE> is C<1>.
+
+=item * C<RAIDER_HALL_TELEGRAM_BOT>, C<RAIDER_HALL_TELEGRAM_CHAT_ID> and,
+for a forum topic, C<RAIDER_HALL_TELEGRAM_THREAD_ID> -- for a Telegram
+mission, the chat C<telegram_reply> answers.
+
+=item * C<PERL5LIB> -- extended by F<lib/perl5> of L</lib_target> (and
+F<longhouse/lib> with C<longhouse: true>).
+
+=back
+
 =head1 SEE ALSO
 
-L<Langertha::Raider::CLI>, L<Langertha::Raider::Hall::ACP>, L<Langertha::Raider::HallTools>,
-L<Langertha::Raider::Hall::CLI>.
+L<raider-hall>, L<Langertha::Raider::CLI>, L<Langertha::Raider::Hall::ACP>,
+L<Langertha::Raider::HallTools>, L<Langertha::Raider::Hall::CLI>.
 
 =cut
 

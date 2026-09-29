@@ -14,7 +14,7 @@ __END__
 Reserved namespace placeholder. The plugin injecting situational context (time,
 timezone, host, user) that used to live here was renamed and now lives in
 L<Langertha::Raider::Plugin::Situation> in the
-L<langertha-raider|https://metacpan.org/dist/langertha-raider> distribution, which
+L<Langertha-Raider|https://metacpan.org/dist/Langertha-Raider> distribution, which
 replaces the former App-Raider distribution. Nothing uses this package; it is
 retained only so the C<App::Raider::Plugin::Situation> namespace stays indexed to a
 dead stub on CPAN.

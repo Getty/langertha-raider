@@ -14,7 +14,7 @@ __END__
 Reserved namespace placeholder. The plugin for live ANSI-colored raid progress
 output that used to live here was renamed and now lives in
 L<Langertha::Raider::Plugin::Trace> in the
-L<langertha-raider|https://metacpan.org/dist/langertha-raider> distribution, which
+L<Langertha-Raider|https://metacpan.org/dist/Langertha-Raider> distribution, which
 replaces the former App-Raider distribution. Nothing uses this package; it is
 retained only so the C<App::Raider::Plugin::Trace> namespace stays indexed to a dead
 stub on CPAN.

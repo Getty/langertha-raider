@@ -31,6 +31,9 @@ accents to match the rest of the CLI.
 Set C<ANSI_COLORS_DISABLED=1> or construct with C<color =E<gt> 0> to render
 without ANSI sequences.
 
+A "thinking..." spinner runs while a model request is in flight when a
+L</loop> is given, colors are on and L</out> is a terminal.
+
 =attr color
 
 Whether to emit ANSI colors. Defaults to true when STDOUT is a terminal.
@@ -250,6 +253,12 @@ async sub plugin_after_tool_call {
 __PACKAGE__->meta->make_immutable;
 
 1;
+
+=head1 ENVIRONMENT
+
+=env ANSI_COLORS_DISABLED
+
+Set, the trace has no colors and no spinner, whatever L</color> says.
 
 =seealso
 
