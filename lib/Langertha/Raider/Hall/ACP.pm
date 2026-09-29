@@ -33,13 +33,20 @@ C<.raider-hall.yml> is used.
 
 =item * C<session/prompt> — spawn the raider with the user turn's text
 content, stream C<session/update> notifications from the hall event bus,
-return C<{ stopReason }> when the raider finishes. All prompts of an ACP
+return C<{ stopReason }> when the raider finishes. A run that
+B<completes> ends C<end_turn>, a B<cancelled> run ends C<cancelled>, and a
+B<failed> run (an engine error, a crash, a run that ended without a
+result) ends C<session/prompt> as a JSON-RPC error (code C<-32000>),
+not as a normal answer: its error text rides in the JSON-RPC error
+message and is never streamed as an C<agent_message_chunk>, so an editor
+tells a broken run apart from a reply. All prompts of an ACP
 session run in one raider session, bound as C<acp:SESSION> until the
 client disconnects (see L<Langertha::Raider::Hall/session_bindings>).
 A prompt that has to wait -- its C<1name> slot or its session is busy --
 gets no answer until its run has started and ended; then it is answered
-like any other, with C<end_turn> or C<cancelled>, also when the hall had
-to start that run without the session (C<hall.session_error>).
+like any other -- C<end_turn>, C<cancelled> or a JSON-RPC error -- also
+when the hall had to start that run without the session
+(C<hall.session_error>).
 
 =item * C<session/cancel> — cancel the running raider's run with a
 C<SIGINT> (L<Langertha::Raider::Hall/cancel_raider>): it ends the run as
@@ -326,12 +333,26 @@ sub _attach_subscription {
     return unless ($evt->{id} // '') eq $raider_id;
 
     if ($t eq 'raider.done') {
-      # The hall puts the run's outcome from its run.finished event on
-      # raider.done (response, or an error when the run failed or ended
-      # without one). Forward it as a final agent_message_chunk before
-      # closing the turn — otherwise the client only ever sees status
-      # events.
-      my $body = $evt->{response} // $evt->{error};
+      # The hall reports every finished run as raider.done, carrying the
+      # outcome from its run.finished event: status plus a response, or an
+      # error when the run failed or ended without one.
+      my $status = $evt->{status} // '';
+      my $cancelled = $evt->{signaled}
+        || $status =~ /^(?:cancelled|interrupted)$/;
+
+      # A failed run is a run error, not a model answer: end the turn as a
+      # JSON-RPC error and do NOT stream its error text as an
+      # agent_message_chunk — an editor would render that as a normal
+      # reply and, with stopReason end_turn, never learn the run broke.
+      if (!$cancelled && $status ne 'completed') {
+        return $self->_fail_run($session, $stream,
+          $evt->{error} // 'run ended without a result');
+      }
+
+      # Completed (or cancelled): forward the outcome text as a final
+      # agent_message_chunk before closing the turn — otherwise the client
+      # only ever sees status events.
+      my $body = $evt->{response} // ($cancelled ? $evt->{error} : undef);
       if (defined $body && length $body) {
         $self->_notify($stream, 'session/update', {
           sessionId => $self->_session_id_for($session),
@@ -343,16 +364,16 @@ sub _attach_subscription {
       }
       $self->_end_run_subscription($session);
       my $rid = delete $session->{pending_request_id};
-      my $cancelled = $evt->{signaled}
-        || ($evt->{status} // '') =~ /^(?:cancelled|interrupted)$/;
       $self->_reply($stream, $rid, {
         stopReason => $cancelled ? 'cancelled' : 'end_turn',
       }) if defined $rid;
     }
     elsif ($t eq 'raider.failed') {
-      $self->_end_run_subscription($session);
-      my $rid = delete $session->{pending_request_id};
-      $self->_reply($stream, $rid, { stopReason => 'refusal' }) if defined $rid;
+      # A run failure the hall might report out of band: treat it exactly
+      # like a failed raider.done — a JSON-RPC error, never 'refusal'.
+      # 'refusal' in ACP means the *model* declined, not that the run broke.
+      $self->_fail_run($session, $stream,
+        $evt->{error} // 'raider run failed');
     }
     else {
       # Forward other raider.* events as plaintext chunks so clients get
@@ -372,6 +393,18 @@ sub _attach_subscription {
   };
 
   $session->{_sub_stream} = $self->_subscribe('raider.', $handler);
+}
+
+# A failed run ends session/prompt as a JSON-RPC error, so an editor can
+# tell a broken run apart from a normal answer. The failure text rides in
+# the JSON-RPC error message, never as an agent_message_chunk.
+sub _fail_run {
+  my ($self, $session, $stream, $error) = @_;
+  $self->_end_run_subscription($session);
+  my $rid = delete $session->{pending_request_id};
+  $self->_reply_err($stream, $rid, -32000, "raider run failed: $error")
+    if defined $rid;
+  return;
 }
 
 # The run of the session's current prompt ended: stop listening to it.

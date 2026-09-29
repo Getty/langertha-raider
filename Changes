@@ -330,6 +330,9 @@ Revision history for Langertha-Raider
     - Fix engine built with an empty model when neither -m nor a table
       default is set (e.g. -e minimax): the engine's own default_model now
       applies, and config explain shows it.
+    - Hall ACP: a failed raider run ends session/prompt as a JSON-RPC
+      error (-32000) instead of streaming the error text as an
+      agent_message_chunk with stopReason end_turn.
 
 0.003     2026-04-21 01:46:09Z
 
