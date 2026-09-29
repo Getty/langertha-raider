@@ -1060,8 +1060,22 @@ async sub compress_history_f {
 
   my $request = $engine->chat_request(\@messages);
   my $response = await $engine->async_request_f($request);
-  my $data = $engine->parse_response($response);
-  my $summary = $engine->response_text_content($data);
+
+  # Read the summary through the engine's public chat_response (core ADR 0028),
+  # the parser chat_f uses: an error carried in a 200 body croaks instead of
+  # yielding '' silently, and Gemini thought parts / <think> tags stay out of the
+  # text -- the same reasons the tool loop reads its replies via
+  # tool_loop_response (karr k85). This is a plain (non-tool) chat, so
+  # chat_response is the right hook, not tool_loop_response. A duck-typed engine
+  # that lacks chat_response (the in-process test fixtures) falls back to the
+  # legacy response_text_content, which never croaks.
+  my $summary;
+  if ( $engine->can('chat_response') ) {
+    $summary = $engine->chat_response($response)->content // '';
+  } else {
+    my $data = $engine->parse_response($response);
+    $summary = $engine->response_text_content($data);
+  }
 
   # Replace working history with summary
   $self->history([
@@ -1085,6 +1099,12 @@ async sub compress_history_f {
 Async. Summarizes the current working history via LLM and replaces it
 with the summary. Uses C<compression_engine> if set, otherwise falls
 back to C<engine>. A marker is added to C<session_history>.
+
+The summary is read through the engine's public C<chat_response> (the parser
+L<Langertha::Role::Chat/chat_f> uses), so an error carried in a 200 body croaks
+instead of silently producing an empty summary, and Gemini thought parts stay
+out of the text. An engine that lacks C<chat_response> falls back to
+C<response_text_content>.
 
 =cut
 

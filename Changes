@@ -353,6 +353,11 @@ Revision history for Langertha-Raider
       not hit its token limit) is answered with an "arguments are not valid
       JSON" isError result the model can retry, instead of running the tool
       on {}; guarded in both the raid loop and respond_f.
+    - Raider: compress_history_f reads the summary through the engine's
+      public chat_response hook, so a 200 body carrying an error croaks
+      instead of silently producing an empty summary (Gemini thoughts
+      filtered as in core); engines without the hook fall back to
+      response_text_content.
 
 0.003    2026-04-21 01:46:09Z
 
