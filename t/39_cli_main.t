@@ -242,4 +242,20 @@ subtest 'bin/raider' => sub {
   is($? >> 8, 0, 'piped REPL ends');
 };
 
+subtest '--help lists every option the parser takes (k104)' => sub {
+  my $usage = Langertha::Raider::CLI::Main->usage;
+  my ($spec) = path($INC{'Langertha/Raider/CLI/Main.pm'})->slurp_utf8
+    =~ /getoptionsfromarray\(\\\@argv,\n(.*?)\n    \);/s;
+  ok($spec, 'found the Getopt spec') or return;
+  my @long = map { my ( $names, $neg ) = @$_;
+    my @n = grep { length > 1 } split /\|/, $names;
+    ( @n, $neg ? ( map { 'no-'.$_ } @n ) : () );
+  } map { [ /\A'([a-z|-]+)[=:]?[^'!]*(!)?'/ ] } $spec =~ /^\s+('[^']+')\s+=>/mg;
+  push @long, qw( json msgpack yaml stream-json stream-msgpack stream-yaml );   # %MACHINE_FLAG
+  ok(scalar(@long) > 25, 'options collected');
+  for my $name (@long) {
+    like($usage, qr/(?<![\w-])--\Q$name\E(?![\w-])/, '--'.$name.' in --help');
+  }
+};
+
 done_testing;

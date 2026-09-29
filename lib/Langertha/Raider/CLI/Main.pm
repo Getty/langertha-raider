@@ -192,7 +192,10 @@ Options:
       --max-iterations N   Hard safety cap on tool rounds per raid
                            (default: 10000 — effectively unlimited)
       --no-color           Disable ANSI colors
-      --no-trace           Hide live tool-call progress output
+      --trace / --no-trace Show / hide live tool-call progress output
+                           (default: shown when stdout is a terminal;
+                           with a machine output flag --trace sends it
+                           to stderr)
       --perl               Enable perl_eval / perl_check / perl_cpanm tools
       --pack NAME          Enable a bundled pack (repeatable)
       --no-pack NAME       Switch a pack off, also a detected or default

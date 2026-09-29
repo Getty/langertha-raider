@@ -397,6 +397,9 @@ Revision history for Langertha-Raider
     - Langertha::Raid::Parallel passes on a cancelled branch as the raid's
       result (after abort, before question and pause) instead of treating it
       as a branch with no text.
+    - The exported "how to use raider" Markdown no longer contains POD
+      markup; the bundled git-guru pack drops a pack.yml key the loader never
+      read; raider --help lists --trace next to --no-trace.
 
 0.003    2026-04-21 01:46:09Z
 

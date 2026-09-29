@@ -131,7 +131,7 @@ sub markdown {
   return <<"MD";
 # Using `raider`
 
-`raider` is a Perl CLI that wraps L<Langertha::Raider> with a fixed toolbox
+`raider` is a Perl CLI that wraps `Langertha::Raider` with a fixed toolbox
 and keeps a persistent conversation with an LLM. This is how to drive it.
 
 ## Current live configuration

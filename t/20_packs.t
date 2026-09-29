@@ -7,6 +7,7 @@ use Test::Raider::Env qw( isolate_home );
 isolate_home();
 use Langertha::Raider::CLI;  # populates $INC for pack discovery
 use Langertha::Raider::Packs;
+use YAML::PP;
 
 subtest 'build_packs discovers share/packs' => sub {
   my $root = path('share')->absolute;
@@ -119,6 +120,19 @@ subtest 'a pack without SKILL.md loads' => sub {
   $coll->enable('bare');
   ok($coll->is_active('bare'), 'bare pack can be enabled');
   unlike(join("\n", $coll->skill_texts), qr/Pack: bare/, 'no skill text contributed');
+};
+
+subtest 'shipped pack.yml files use only keys the loader reads (k104)' => sub {
+  my %known = map { $_ => 1 } qw( exclusive_group enabled_by_default tools detect );
+  for my $yml (sort { "$a" cmp "$b" } path('share/packs')->children) {
+    $yml = $yml->child('pack.yml');
+    next unless -f $yml;
+    my $config = YAML::PP->new->load_string($yml->slurp_utf8) // {};
+    is_deeply([ grep { !$known{$_} } sort keys %$config ], [],
+      $yml->parent->basename.': no ignored keys');
+  }
+  my $coll = Langertha::Raider::Packs::build_packs(root => path('share')->absolute);
+  is($coll->packs_by_name->{'git-guru'}->exclusive_group, 'power', 'git-guru stays a power pack');
 };
 
 done_testing;

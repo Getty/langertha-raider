@@ -87,4 +87,13 @@ subtest 'an additionally mounted tool shows up' => sub {
     'first sentence of the description, pipe escaped for the table');
 };
 
+subtest 'plain Markdown, no POD format codes (k104)' => sub {
+  my $skill = Langertha::Raider::Skill->new(app => app(perl => 1));
+  for my $variant (qw( markdown claude_skill )) {
+    my @pod = $skill->$variant =~ /\b([BCEFILSXZ]<[^>\n]*>)/g;
+    is(\@pod, [], $variant.' carries no POD markup');
+  }
+  like($skill->markdown, qr/wraps `Langertha::Raider` with/, 'module name as a code span');
+};
+
 done_testing;
