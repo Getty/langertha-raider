@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-29T17:26:33Z
+claimed_by: worker-followup
+class: standard
+completed: 2026-09-29T17:26:33Z
+created: 2026-09-29T17:05:20Z
+id: 100
+priority: medium
+started: 2026-09-29T17:07:04Z
+status: done
+tags:
+- adr-0005
+- tools
+- packs
+- defect
+title: /pack perl nach Server-Aufbau mountet keine perl_*-Tools
+updated: 2026-09-29T17:26:39Z
+---
+
+Aus #94. Wird perl per /pack perl eingeschaltet, nachdem die Tool-Server gebaut sind, wird nichts gemountet. Prompt laesst perl_* korrekt weg, aber Grant-Anzeige und gemountete Tools widersprechen sich. Entweder nachmounten (Tools dirty) oder den Grant ehrlich als nicht aktiv melden.
+
+2026-09-29 17:11 Reproduced with t/65_application_tool_remount.t (4 subtests, 3 failing before the fix: /pack on perl after raider build -> grant on, engine without perl_eval; /pack off -> reverse; no tools_dirty). Fix: Application splits the tool set into once-built parts (_stock_tool_servers, _perl_tool_server, _hall_tool_server); _build_tool_servers assembles from them per grant; new _remount_tool_servers diffs by refaddr, reuses clients of kept servers, adds/removes the perl client, mutates _tool_servers/_mcps in place (engine holds the same _mcps array as mcp_servers). reload_mission remounts first, then rebuilds mission, and sets raider->_tools_dirty when the set changed (continuation path).
+
+2026-09-29 17:24 Done. Remount instead of an honest-only grant. Application: the tool set is assembled from once-built parts (_stock_tool_servers = files/bash/web, _perl_tool_server, _hall_tool_server); _build_tool_servers picks them per perl_tools_grant. New _remount_tool_servers re-assembles, compares by refaddr, keeps kept servers and their clients, adds a client for a newly mounted server, removes dropped clients from the loop, and updates _tool_servers/_mcps in place (the engine's mcp_servers is that same _mcps array, so the raider's per-raid _gather_tools_f sees it). reload_mission (used by /pack on/off/toggle and /reload) remounts first, rebuilds the mission, and sets raider->_tools_dirty(1) when the set changed so a resumed continuation re-gathers too. Works both ways: /pack off perl unmounts. POD: reload_mission, perl_tools_enabled. Test t/65_application_tool_remount.t (3 of 4 subtests failed before the fix): /pack on perl after build -> engine answers with perl_eval, mission describes it, prompt == catalogue; /pack off unmounts, toggle remounts once; --perl + /pack off keeps the same server objects; tools_dirty set. Full suite: prove -I dev langertha -Ilib -r t -> 81 files, 720 tests, PASS (only live tests skipped). Also found: Application now makes two private calls into Langertha::Raider (_set_mission, as before, and now _tools_dirty), so it belongs to ADR 0017 consequence 4 (missing public API for 'mission/tools changed').
+
+Commit 3526818
