@@ -1906,6 +1906,42 @@ async sub _raid_f {
   return await $self->_run_raid_loop($state, 1);
 }
 
+# Reads one tool-loop turn's reply. An engine that carries the public
+# Langertha::Role::Tools->tool_loop_response hook (Langertha core from the
+# release that added it) together with a real chat_response reads the reply the
+# way core's own tool loops do: an error carried in a 200 body croaks instead of
+# ending the raid silently with '', Gemini thought parts and <think> tags stay
+# out of the final text, and a tool call whose arguments were cut off by the
+# token limit is dropped from the run and from the assistant echo (core
+# k321/k323/k324). A duck-typed engine that lacks either (the in-process test
+# fixtures, or any backend on a core older than the hook) falls back to the
+# legacy response_tool_calls / response_text_content readers, which never croak.
+# Returns ( \@tool_calls, $final_text, $echo_data ): the calls are
+# Langertha::ToolCall objects on the hook path and raw wire structures on the
+# fallback (both understood by _tool_call_name_input and by format_tool_results),
+# and $echo_data is the wire body to build the assistant echo from.
+sub _read_tool_loop_reply {
+  my ( $self, $engine, $data ) = @_;
+  if ( $engine->can('tool_loop_response') && $engine->can('chat_response') ) {
+    my $reply = $engine->tool_loop_response($data);
+    my ( $calls, $echo_data ) = $engine->tool_loop_calls( $reply, $data );
+    return ( $calls, $reply->content, $echo_data );
+  }
+  my $tool_calls = $engine->response_tool_calls($data);
+  my $text       = $engine->response_text_content($data);
+  ( $text ) = $engine->filter_think_content($text) if $engine->think_tag_filter;
+  return ( $tool_calls, $text, $data );
+}
+
+# The tool name and decoded arguments of one call, whether it is the
+# Langertha::ToolCall the tool_loop_response hook yields or the raw wire
+# structure an engine's response_tool_calls located (the fallback path).
+sub _tool_call_name_input {
+  my ( $self, $engine, $tc ) = @_;
+  return ( $tc->name, $tc->arguments ) if blessed $tc;
+  return $engine->extract_tool_call($tc);
+}
+
 async sub _run_raid_loop {
   my ( $self, $state, $start_iteration ) = @_;
   my $engine           = $state->{engine};
@@ -2016,15 +2052,14 @@ async sub _run_raid_loop {
       total  => $usage->total_tokens,
     } : undef;
 
-    # Extract tool calls
-    my $tool_calls = $engine->response_tool_calls($data);
+    # Read this turn's reply (see _read_tool_loop_reply): a 200 body that is an
+    # error croaks instead of silently ending the raid with '', Gemini thought
+    # parts stay out of the final text, and truncated calls are dropped.
+    my ( $tool_calls, $final_text, $echo_data ) = $self->_read_tool_loop_reply($engine, $data);
 
-    # No tool calls means done — extract final text
+    # No tool calls means done — use the reply's final text
     unless (@$tool_calls) {
-      my $text = $engine->response_text_content($data);
-      if ($engine->think_tag_filter) {
-        ($text) = $engine->filter_think_content($text);
-      }
+      my $text = $final_text;
 
       my $iter_t1 = $langfuse ? $engine->langfuse_timestamp : undef;
 
@@ -2093,7 +2128,7 @@ async sub _run_raid_loop {
         model                 => $engine->chat_model,
         input                 => $conversation,
         output                => $engine->json->encode([map {
-          ($engine->extract_tool_call($_))[0]
+          ($self->_tool_call_name_input($engine, $_))[0]
         } @$tool_calls]),
         start_time            => $iter_t0,
         end_time              => $post_llm_t,
@@ -2108,7 +2143,7 @@ async sub _run_raid_loop {
       # Safe point: no further tool call once a cancel is requested.
       return $self->_cancelled_result($state) if $self->cancel_requested;
       my $tc = $tool_calls->[$tc_idx];
-      my ( $name, $input ) = $engine->extract_tool_call($tc);
+      my ( $name, $input ) = $self->_tool_call_name_input($engine, $tc);
 
       # Plugin hook: inspect/transform before tool execution
       my @plugin_tc = await $self->plugin_pipeline_tool_call_f($name, $input);
@@ -2135,7 +2170,7 @@ async sub _run_raid_loop {
           $self->_continuation({
             state          => $state,
             iteration      => $iteration,
-            data           => $data,
+            data           => $echo_data,
             pending_tc     => $tc,
             # Only the calls AFTER this pausing self-tool are still pending.
             # The ones before it already ran and sit in results_so_far; carrying
@@ -2226,9 +2261,18 @@ async sub _run_raid_loop {
         next;
       }
 
-      # Normal MCP tool call
-      my $mcp = $tool_server_map->{$name}
-        or die "Tool '$name' not found on any MCP server";
+      # Normal MCP tool call. A name no server offers is answered with an error
+      # result so the batch runs to the end and the model can correct itself,
+      # instead of dying and losing the whole raid (core k332).
+      my $mcp = $tool_server_map->{$name};
+      unless ($mcp) {
+        push @results, { tool_call => $tc, result => {
+          content => [{ type => 'text', text => "unknown tool ".($name // '') }],
+          isError => JSON->true,
+        } };
+        $$raid_tool_calls++;
+        next;
+      }
 
       my $call_f = $mcp->call_tool($name, $input)->else(sub {
         my ( $error ) = @_;
@@ -2272,14 +2316,16 @@ async sub _run_raid_loop {
         metadata => {
           tool_calls => scalar @$tool_calls,
           tools_used => [map {
-            ($engine->extract_tool_call($_->{tool_call}))[0]
+            ($self->_tool_call_name_input($engine, $_->{tool_call}))[0]
           } @results],
         },
       );
     }
 
-    # Append assistant + tool results to conversation and session_history
-    my @tool_msgs = $engine->format_tool_results($data, \@results);
+    # Append assistant + tool results to conversation and session_history.
+    # $echo_data is the wire body without any tool call whose arguments were
+    # truncated, so the next turn never carries a call without a result.
+    my @tool_msgs = $engine->format_tool_results($echo_data, \@results);
     push @$conversation, @tool_msgs;
     $self->_push_session_history(@tool_msgs);
   }
@@ -2322,7 +2368,7 @@ async sub _respond_f {
   for my $rem_idx (0 .. $#$remaining) {
     return $self->_cancelled_result($state) if $self->cancel_requested;
     my $tc = $remaining->[$rem_idx];
-    my ( $name, $input ) = $engine->extract_tool_call($tc);
+    my ( $name, $input ) = $self->_tool_call_name_input($engine, $tc);
 
     if ($name =~ /^raider_/ && $self->has_raider_mcp) {
       my $self_result = await $self->_execute_self_tool_f($name, $input);
@@ -2382,8 +2428,17 @@ async sub _respond_f {
       next;
     }
 
-    my $mcp = $state->{tool_server_map}{$name}
-      or die "Tool '$name' not found on any MCP server";
+    # A name no server offers is answered with an error result so the model can
+    # correct itself, rather than dying and losing the whole raid (core k332).
+    my $mcp = $state->{tool_server_map}{$name};
+    unless ($mcp) {
+      push @results, { tool_call => $tc, result => {
+        content => [{ type => 'text', text => "unknown tool ".($name // '') }],
+        isError => JSON->true,
+      } };
+      ${$state->{raid_tool_calls}}++;
+      next;
+    }
 
     my $call_f = $mcp->call_tool($name, $input)->else(sub {
       my ( $error ) = @_;

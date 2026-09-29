@@ -333,6 +333,11 @@ Revision history for Langertha-Raider
     - Hall ACP: a failed raider run ends session/prompt as a JSON-RPC
       error (-32000) instead of streaming the error text as an
       agent_message_chunk with stopReason end_turn.
+    - Read raid tool-loop replies via Langertha::Role::Tools
+      tool_loop_response, so a 200 body carrying an error ends the raid
+      loudly instead of silently with "". Gemini thoughts and truncated
+      tool calls are dropped as in core, and an unknown tool returns an
+      error result instead of aborting the raid.
 
 0.003     2026-04-21 01:46:09Z
 
