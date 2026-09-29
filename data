@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-29T17:05:38Z
+claimed_by: worker-api
+class: standard
+completed: 2026-09-29T17:05:38Z
+created: 2026-09-29T16:42:42Z
+id: 96
+priority: low
+started: 2026-09-29T16:46:18Z
+status: done
+tags:
+- adr
+- api
+- docs
+title: Public-API-Inventar als ADR festhalten
+updated: 2026-09-29T17:05:43Z
+---
+
+Aus #22. Inventarisieren, was oeffentliche API ist (Engine Langertha::Raider, Raid*, Result, Plugins, Tool-Builder, CLI-Klassen, Hall, ACP) und was intern ist, bevor interne Module neu geschnitten werden. Ergebnis: ADR 0017 mit Liste public/internal und Regel (POD-dokumentiert = public; _-prefixed + nicht dokumentiert = intern).
+
+2026-09-29 16:51 Inventory done by script over lib/ + bin/ (packages, ABSTRACT, POD =attr/=method/=func vs subs/has, Internal markers, cross-class private calls, object system). 15 modules already carry 'B<Internal module.>'; Hall family + ACP::CLI are internal but unmarked. No ADR index exists (CONTEXT.md cites ADRs inline only). Writing docs/adr/0017.
+
+2026-09-29 16:53 Also found (not in scope, for the dispatcher): .claude/agents/raider-worker.md body is stale - says Langertha::Raider::Result lives in core (it ships here since the extraction) and 'No dist.ini/cpanfile/lib/ exist yet'.
+
+2026-09-29 16:53 Done: docs/adr/0017-public-api-inventory-and-the-internal-marker.md (accepted, 2026-09-29). Rule: public = package on the ADR's public list (not Internal-marked, not a stub) + name documented in its own POD and not _-prefixed; inherited core contracts (plugins, run_f, plugin hooks) stay core's; everything else internal; new packages start internal; wire/file formats (CLI, ADR 0013 output, ADR 0015 journal, config files, tool names, env vars) are public regardless of implementing module. Inventory: 20 public packages with their surface, 15 marked-internal + 9 unmarked-internal (Hall parts, ACP::CLI), 6 App::Raider stubs, Langertha::Raider::ACP reserved (ADR 0010). Consequences list 7 follow-up groups: CLI extends internal Application (interim: Application names public via CLI), missing Internal markers, undocumented public-looking names (Raider run_f/has_continuation/has_inline_mcp/has_last_prompt_tokens, Result has_*, Raid subclass helpers, Pack/Collection attrs, Hall methods, CLI env_var_for_engine, *_class resolvers), cross-class private calls (Runner->_last_prompt_tokens, Application->_set_mission, app->_engine, hall->_emit/_register_cmd/...), Raid vs Raider naming, non-Moose ACP::Client/SubStream/CLI dispatchers, doc gaps (no =opt/=env, raider-hall no POD, bin/raider DESCRIPTION). Verified by script over lib/+bin/ at ef7dd92; parallel diffs in Raider.pm/Application.pm add only _ helpers, no public-name change. No ADR index exists, nothing to update. Docs only, no commit. Proposed subject: 'ADR 0017: public API inventory and the internal marker (k96)'.
+
+Commit 0e68071
