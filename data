@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-29T01:34:18Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-29T01:34:18Z
+created: 2026-09-27T06:22:23Z
+id: 89
+priority: medium
+started: 2026-09-29T01:15:36Z
+status: done
+tags:
+- bug
+- context
+title: 'Kompression greift nur zwischen Raids: ein langer Raid wächst ungebremst über
+  max_context_tokens'
+updated: 2026-09-29T01:34:18Z
+---
+
+Live 2026-09-27: ein Raid mit 99 Tool-Calls (MiniMax-M3, --claude mit 12 Skills, ~20k Tokens Skill-Text im Systemprompt) endete mit 'history 2 msgs, 99268/40000 tok (248%)'.
+Ursache: _raid_f prüft _last_prompt_tokens gegen max_context_tokens * context_compress_threshold nur vor einem Raid (Raider.pm ~1844); innerhalb von _run_raid_loop wird nie komprimiert. Die POD sagt es selbst ('before the next raid'). Ein einzelner langer Auftrag sprengt so das Kontextfenster kleinerer Modelle.
+Fertig wenn: auch innerhalb der Tool-Schleife wird bei Überschreiten komprimiert (ältere Tool-Ergebnisse zuerst), aktivierte Skill-Inhalte bleiben dabei erhalten (Agent-Skills-Leitfaden: skill content von der Kompaktierung ausnehmen), Test mit Fake-Engine, die steigende input_tokens meldet.
+
+Committed 9551480
