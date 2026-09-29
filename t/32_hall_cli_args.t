@@ -27,12 +27,15 @@ sub run_cmd {
   local *Langertha::Raider::Hall::CLI::_send_command = sub {
     my ( $socket, $msg ) = @_;
     $sent = $msg->{payload};
-    return { id => 'r1', pid => 1, slot => 's1', log_path => 'x', log => '' };
+    return { id => 'r1', pid => 1, slot => 's1', log_path => 'x', events_path => 'x', log => '' };
   };
-  my $out = '';
+  local *Langertha::Raider::Hall::CLI::_follow_file = sub { 0 };
+  my ( $out, $err ) = ( '', '' );
   {
     local *STDOUT;
+    local *STDERR;
     open STDOUT, '>', \$out or die $!;
+    open STDERR, '>', \$err or die $!;
     Langertha::Raider::Hall::CLI->main(@argv);
   }
   chdir $orig_cwd or die "chdir $orig_cwd: $!";
@@ -74,11 +77,8 @@ subtest 'spawn: --attach does not leak into the mission' => sub {
       cmd     => 'spawn',
       name    => 'Bjorn',
       mission => 'raid the coast',
-      attach  => 1,
-    }, join(' ', @$argv) );
+    }, join(' ', @$argv).' (attaching is the CLI\'s part, not the hall\'s)' );
   }
-  my $p = run_cmd( 'spawn', 'Bjorn', 'raid' );
-  is( $p->{attach}, 0, 'attach off without the flag' );
 };
 
 subtest 'attach: ID is the positional, not an option' => sub {
@@ -167,6 +167,86 @@ subtest 'logs --follow on a finished raider prints its logs' => sub {
   is( [ map { $_->{cmd} } @sent ], [ 'attach', 'logs' ], 'attach, then logs' );
 };
 
+# attach and spawn --attach print the run's events file until the hall no
+# longer knows the raider (k102). The hall is faked: spawn answers with the
+# run, attach reports the events path while the raider "runs", every wait
+# appends an event, and after $alive attach polls it is gone.
+sub run_attach_stream {
+  my ( %arg ) = @_;
+  my $tmp = path( tempdir( CLEANUP => 1 ) );
+  $tmp->child('.raider-hall.socket')->touch;
+  my $events = $tmp->child('r42.events.jsonl');
+  $events->spew_raw(qq({"seq":1,"type":"run.started"}\n));
+  chdir "$tmp" or die "chdir $tmp: $!";
+
+  my ( @sent, $waits );
+  my $polls = 0;
+  no warnings 'redefine';
+  local *Langertha::Raider::Hall::CLI::_send_command = sub {
+    my ( $socket, $msg ) = @_;
+    my $p = $msg->{payload};
+    push @sent, $p;
+    return $arg{spawn} // { id => 'r42', pid => 1, slot => 's1', events_path => "$events" }
+      if $p->{cmd} eq 'spawn';
+    return { error => 'raider not found' } if $polls++ >= $arg{alive};
+    return { id => 'r42', pid => 1, slot => 's1', log_path => 'x', events_path => "$events" };
+  };
+  local *Langertha::Raider::Hall::CLI::_follow_wait = sub {
+    $waits++;
+    $events->append_raw(qq({"seq":).( $waits + 1 ).qq(,"type":"message"}\n));
+  };
+  my ( $out, $err ) = ( '', '' );
+  my $died;
+  {
+    local *STDOUT;
+    local *STDERR;
+    open STDOUT, '>', \$out or die $!;
+    open STDERR, '>', \$err or die $!;
+    $died = dies { Langertha::Raider::Hall::CLI->main( @{ $arg{argv} } ) };
+  }
+  chdir $orig_cwd or die "chdir $orig_cwd: $!";
+  return { out => $out, err => $err, died => $died, sent => \@sent, waits => $waits // 0 };
+}
+
+my $three_events = qq({"seq":1,"type":"run.started"}\n{"seq":2,"type":"message"}\n{"seq":3,"type":"message"}\n);
+
+subtest 'attach streams the events file until the raider is gone' => sub {
+  my $r = run_attach_stream( argv => [ 'attach', 'r42' ], alive => 3 );
+  is( $r->{died}, undef, 'lives' );
+  is( $r->{out}, $three_events, 'every event, appended ones included, and nothing else' );
+  is( [ map { $_->{cmd} } @{ $r->{sent} } ], [ ('attach') x 4 ], 'liveness polled via attach' );
+};
+
+subtest 'attach on a run the hall no longer knows dies' => sub {
+  my $r = run_attach_stream( argv => [ 'attach', 'r42' ], alive => 0 );
+  like( $r->{died}, qr/^Hall: raider not found/, 'dies with the hall error' );
+  is( $r->{out}, '', 'prints nothing' );
+};
+
+subtest 'spawn --attach: the run ID on stderr, the event stream on stdout' => sub {
+  my $r = run_attach_stream( argv => [ 'spawn', '--attach', 'Bjorn', 'raid' ], alive => 2 );
+  is( $r->{died}, undef, 'lives' );
+  is( $r->{out}, $three_events, 'stdout is the event stream alone' );
+  like( $r->{err}, qr/^Spawned raider r42 \(PID 1\) in slot s1\.$/m, 'run ID on stderr' );
+  is( [ map { $_->{cmd} } @{ $r->{sent} } ], [ 'spawn', ('attach') x 3 ], 'spawn, then follow' );
+};
+
+subtest 'spawn --attach: a run that ended before the first poll is printed whole' => sub {
+  my $r = run_attach_stream( argv => [ 'spawn', '--attach', 'Bjorn', 'raid' ], alive => 0 );
+  is( $r->{died}, undef, 'lives' );
+  is( $r->{out}, qq({"seq":1,"type":"run.started"}\n), 'what the run wrote' );
+  is( $r->{waits}, 0, 'no waiting' );
+};
+
+subtest 'spawn --attach on a queued mission does not attach' => sub {
+  my $r = run_attach_stream( argv => [ 'spawn', '--attach', '1bjorn', 'raid' ], alive => 5,
+    spawn => { queued => 1, slot => '1bjorn', queue_depth => 2 } );
+  is( $r->{died}, undef, 'lives' );
+  is( $r->{out}, "Mission queued for slot 1bjorn (queue depth: 2).\n", 'queued line' );
+  like( $r->{err}, qr/^Not attached: the mission has no run yet\.$/m, 'says why on stderr' );
+  is( [ map { $_->{cmd} } @{ $r->{sent} } ], ['spawn'], 'no attach' );
+};
+
 subtest 'kill: ID after --' => sub {
   my $p = run_cmd( 'kill', '--', 'r42' );
   is( $p, { cmd => 'kill', id => 'r42' }, 'kill -- r42' );
@@ -187,9 +267,10 @@ sub run_in {
   local *Langertha::Raider::Hall::CLI::_send_command = sub {
     my ( $s, $msg ) = @_;
     ( $socket, $sent ) = ( "$s", $msg->{payload} );
-    return { id => 'r1', pid => 1, slot => 's1', log_path => 'x', log => '',
+    return { id => 'r1', pid => 1, slot => 's1', log_path => 'x', events_path => 'x', log => '',
       killed => 1, raiders => [] };
   };
+  local *Langertha::Raider::Hall::CLI::_follow_file = sub { 0 };
   my $out = '';
   my $err;
   {
@@ -214,7 +295,7 @@ subtest 'DIR is consumed before the positionals that follow it' => sub {
 
   my ( $p, $s, $err ) = run_in( $cwd, 'spawn', "$hall", 'Bjorn', 'raid', 'the', 'coast' );
   is( $err, undef, 'spawn DIR NAME MISSION lives' );
-  is( $p, { cmd => 'spawn', name => 'Bjorn', mission => 'raid the coast', attach => 0 },
+  is( $p, { cmd => 'spawn', name => 'Bjorn', mission => 'raid the coast' },
     'spawn: NAME and MISSION follow DIR' );
   is( $s, $sock, 'spawn: socket of DIR' );
 
@@ -273,7 +354,7 @@ subtest 'a NAME or ID that happens to be a directory is not DIR' => sub {
   my $sock = $hall->child('.raider-hall.socket')->stringify;
 
   my ( $p, $s ) = run_in( "$hall", 'spawn', 'Bjorn', 'raid' );
-  is( $p, { cmd => 'spawn', name => 'Bjorn', mission => 'raid', attach => 0 },
+  is( $p, { cmd => 'spawn', name => 'Bjorn', mission => 'raid' },
     'spawn: plain directory NAME stays the NAME' );
   is( $s, $sock, 'spawn: socket of cwd' );
 

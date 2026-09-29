@@ -70,6 +70,10 @@ Revision history for Langertha-Raider
       exits.
     - A hall cron job with coalesce: true drops an occurrence (cron.coalesced)
       while its previous run is still running or waiting.
+    - raider hall attach ID prints the run's --stream-json events until the
+      raider exits; raider hall spawn --attach spawns and then attaches (the
+      run ID line goes to stderr, a queued mission is not attached). The
+      spawn reply names events_path.
     - telegram.in events carry the sender's first_name and username, also
       in group chats.
     - Document that engine: is optional for hall raiders, and the hall

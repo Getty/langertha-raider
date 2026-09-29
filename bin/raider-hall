@@ -70,12 +70,16 @@ The running raiders: slot, PID, name.
 
 Start raider C<NAME> on C<MISSION> and print its run ID. A name with a
 leading number (C<1bjorn>) is a singleton slot: a mission for a busy one
-waits in its queue. C<--attach> is accepted but has no effect yet.
+waits in its queue. C<--attach> then prints the run's event stream as
+C<attach> does, with the run ID line on stderr; a queued mission has no
+run yet and is not attached.
 
 =opt attach [DIR] ID
 
-Where the running raider C<ID> is: its slot, PID and slot log. For its
-output, see C<logs --follow>.
+The event stream of the running raider C<ID>: its C<--stream-json>
+events, one JSON object per line, from the start of the run and as they
+come, until the raider has exited. For the human-readable output, see
+C<logs --follow>; for an ended run, C<logs>.
 
 =opt logs [DIR] ID [--follow]
 

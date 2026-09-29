@@ -80,6 +80,10 @@ C<raider hall logs ID> shows the part of the slot log from that run's start
 line to its result line, and works for ended runs too: the slot is taken
 from the ID; see L</logs>.
 
+The C<spawn> reply and C<attach> name the run's C<events_path>;
+C<raider hall attach ID> and C<raider hall spawn --attach> print that
+file as it grows, until the hall has reaped the raider.
+
 =head1 CONFIG FILE
 
 C<.raider-hall.yml> in the hall root:
@@ -1050,9 +1054,8 @@ sub _find_raider_by_pid {
 
 sub _spawn_next_in_queue {
   my ($self, $slot, $base_name, $mission) = @_;
-  my ($attach, $telegram, $binding);
+  my ($telegram, $binding);
   if (ref $mission eq 'HASH') {
-    $attach = $mission->{attach};
     $telegram = $mission->{telegram};
     $binding = $mission->{binding};
     $mission = $mission->{mission};
@@ -1060,11 +1063,10 @@ sub _spawn_next_in_queue {
   return $self->_queue_on_binding($binding, {
     name => $slot,
     mission => $mission,
-    attach => $attach,
     $telegram ? ( telegram => $telegram ) : (),
     binding => $binding,
   }) if defined $binding && $self->_binding_busy($binding);
-  $self->_spawn_raider($slot, $base_name, $mission, $attach, $telegram, $binding);
+  $self->_spawn_raider($slot, $base_name, $mission, $telegram, $binding);
 }
 
 sub spawn {
@@ -1078,7 +1080,6 @@ sub _spawn {
   my ($self, %args) = @_;
   my $name = $args{name} // '';
   my $mission = $args{mission} // '';
-  my $attach = $args{attach} // 0;
   my $telegram = $args{telegram};
   my $binding = $args{binding};
 
@@ -1090,7 +1091,6 @@ sub _spawn {
   if ($slot && $self->_slot_busy($slot)) {
     push @{$self->singleton_queues->{$slot} //= []}, {
       mission => $mission,
-      attach => $attach,
       $telegram ? ( telegram => $telegram ) : (),
       defined $binding ? ( binding => $binding ) : (),
     };
@@ -1108,12 +1108,11 @@ sub _spawn {
   return $self->_queue_on_binding($binding, {
     name => $name,
     mission => $mission,
-    attach => $attach,
     $telegram ? ( telegram => $telegram ) : (),
     binding => $binding,
   }) if defined $binding && $self->_binding_busy($binding);
 
-  return $self->_spawn_raider($slot // $name, $base_name // $name, $mission, $attach, $telegram, $binding);
+  return $self->_spawn_raider($slot // $name, $base_name // $name, $mission, $telegram, $binding);
 }
 
 sub _parse_name {
@@ -1125,7 +1124,7 @@ sub _parse_name {
 }
 
 sub _spawn_raider {
-  my ($self, $slot, $base_name, $mission, $attach, $telegram, $binding) = @_;
+  my ($self, $slot, $base_name, $mission, $telegram, $binding) = @_;
 
   my $raider_config = $self->config->{raiders}{$base_name} // {};
   # No engine configured: leave it to raider (.raider.yml, then key autodetection).
@@ -1239,7 +1238,11 @@ sub _spawn_raider {
   # The binding's session could not be had: the run goes on unbound.
   $self->_emit('hall.session_error', { %$session_error, id => $id }) if $session_error;
 
-  return { id => $id, pid => $process->pid, slot => $slot, $self->_session_fields($raider) };
+  return {
+    id => $id, pid => $process->pid, slot => $slot,
+    events_path => $events_path->stringify,
+    $self->_session_fields($raider),
+  };
 }
 
 # session and binding of a bound run, for events and replies.

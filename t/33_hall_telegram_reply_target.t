@@ -75,7 +75,7 @@ subtest 'reply target survives the singleton queue' => sub {
     return { id => 'new', pid => 999, slot => $args[0] };
   };
   $hall->_reap_raider( 12345, 0 );
-  is( $spawned[0][4], { bot => 'ops', chat_id => 42 }, 'reply target replayed from the queue' );
+  is( $spawned[0][3], { bot => 'ops', chat_id => 42 }, 'reply target replayed from the queue' );
 };
 
 sub spawn_and_read_env {

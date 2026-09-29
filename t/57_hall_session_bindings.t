@@ -98,6 +98,8 @@ subtest 'a mission for a busy binding waits for it (ADR 0003: new input is queue
   my $info = $hall->attach( $first->{id} );
   ok( $info->{session}, 'attach names the session' );
   is( $info->{binding}, $binding, 'and the binding' );
+  like( $first->{events_path}, qr/\Q$first->{id}\E\.events\.jsonl\z/, 'the spawn reply names the events file' );
+  is( $info->{events_path}, $first->{events_path}, 'the one attach follows' );
   is( ( $hall->ps )[0]{session}, $info->{session}, 'ps names it too' );
 
   my $second = $hall->spawn( name => 'bjorn', mission => 'late', binding => $binding );

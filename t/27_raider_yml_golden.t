@@ -180,8 +180,8 @@ subtest 'Hall without engine leaves the choice to raider' => sub {
     push @cmds, $args{command};
     die "captured\n";
   };
-  eval { $hall->_spawn_raider('Bjorn', 'Bjorn', 'mission', 0) };
-  eval { $hall->_spawn_raider('Ivar',  'Ivar',  'mission', 0) };
+  eval { $hall->_spawn_raider('Bjorn', 'Bjorn', 'mission') };
+  eval { $hall->_spawn_raider('Ivar',  'Ivar',  'mission') };
 
   is(scalar @cmds, 2, 'both spawns reached the process');
   ok(!(grep { $_ eq '--engine' } @{ $cmds[0] }), 'no --engine when none configured');

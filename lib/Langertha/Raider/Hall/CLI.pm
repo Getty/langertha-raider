@@ -94,7 +94,7 @@ Subcommands:
   status [DIR]       Show hall status
   ps [DIR]           List running raiders
   spawn [DIR] NAME MISSION  Spawn a raider
-  attach [DIR] ID    Attach to a raider's event stream
+  attach [DIR] ID    Follow a running raider's event stream
   logs [DIR] ID      Fetch raider logs
   kill [DIR] ID      Terminate a raider
   session reset [DIR] BINDING  Start a new session for a binding
@@ -374,15 +374,21 @@ sub run_spawn {
       cmd => 'spawn',
       name => $name,
       mission => $mission,
-      attach => $opt{attach} ? 1 : 0,
     },
   });
 
   if ($result->{queued}) {
     print "Mission queued for slot $result->{slot} (queue depth: $result->{queue_depth}).\n";
+    print STDERR "Not attached: the mission has no run yet.\n" if $opt{attach};
   }
   elsif ($result->{id}) {
-    print "Spawned raider $result->{id} (PID $result->{pid}) in slot $result->{slot}.\n";
+    # Attached, stdout is the event stream alone.
+    my $out = $opt{attach} ? \*STDERR : \*STDOUT;
+    print {$out} "Spawned raider $result->{id} (PID $result->{pid}) in slot $result->{slot}.\n";
+    if ($opt{attach}) {
+      die "Hall: raider $result->{id} has no event stream\n" unless $result->{events_path};
+      return _follow_file($socket, $result->{id}, $result->{events_path});
+    }
   }
   elsif ($result->{error}) {
     my $e = JSON::MaybeXS->new->decode($result->{error});
@@ -396,6 +402,8 @@ sub print_spawn_help {
 raider hall spawn [DIR] NAME MISSION [--attach]
 
 Spawn a raider with the given NAME and MISSION in DIR (default: cwd).
+--attach then prints the run's event stream like 'attach' does; a
+mission that waits in a queue has no run yet and is not attached.
 EOF
   exit 0;
 }
@@ -423,19 +431,17 @@ sub run_attach {
   if ($result->{error}) {
     die "Hall: $result->{error}\n";
   }
-
-  print "Raider $id:\n";
-  print "  slot:   $result->{slot}\n";
-  print "  PID:    $result->{pid}\n";
-  print "  log:    $result->{log_path}\n";
-  return 0;
+  die "Hall: raider $id has no event stream\n" unless $result->{events_path};
+  return _follow_file($socket, $id, $result->{events_path});
 }
 
 sub print_attach_help {
   print <<"EOF";
 raider hall attach [DIR] ID
 
-Attach to a raider's event stream.
+Print the event stream of the running raider ID (its --stream-json
+events, one JSON object per line) and keep printing new events until
+the raider has exited. For an ended run, see 'logs'.
 EOF
   exit 0;
 }
@@ -473,22 +479,27 @@ sub _print_logs {
   return 0;
 }
 
-# Print the raider's log file and keep printing what is appended, until the
-# hall no longer knows the raider (it exited and was reaped). The CLI talks
-# to the hall over a local UNIX socket, so the log path is readable here.
 sub _follow_log {
   my ( $socket, $id ) = @_;
-  my $attach = { type => 'command', payload => { cmd => 'attach', id => $id } };
-  my $result = _send_command($socket, $attach);
+  my $result = _send_command($socket, { type => 'command', payload => { cmd => 'attach', id => $id } });
   # Already ended: nothing to follow, print what the hall still has.
   return _print_logs($socket, $id) if $result->{error};
-  my $log_path = $result->{log_path};
+  return _follow_file($socket, $id, $result->{log_path});
+}
+
+# Print a file of the raider and keep printing what is appended, until the
+# hall no longer knows the raider (it exited and was reaped); what it wrote
+# before that is still printed. The CLI talks to the hall over a local UNIX
+# socket, so the path is readable here.
+sub _follow_file {
+  my ( $socket, $id, $file ) = @_;
+  my $attach = { type => 'command', payload => { cmd => 'attach', id => $id } };
 
   local $| = 1;
   my $fh;
   while (1) {
     my $gone = _send_command($socket, $attach)->{error};
-    $fh //= path($log_path)->openr_raw if -f $log_path;
+    $fh //= path($file)->openr_raw if -f $file;
     if ($fh) {
       seek $fh, 0, 1;    # clear EOF so appended bytes are seen
       while ( read $fh, my $buf, 65536 ) { print $buf }

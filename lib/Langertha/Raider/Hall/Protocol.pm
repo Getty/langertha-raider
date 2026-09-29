@@ -32,8 +32,7 @@ sub setup_handlers {
     my ($hall, $stream, $payload) = @_;
     my $name = $payload->{name} // '';
     my $mission = $payload->{mission} // '';
-    my $attach = $payload->{attach} // 0;
-    my $result = $hall->spawn(name => $name, mission => $mission, attach => $attach);
+    my $result = $hall->spawn(name => $name, mission => $mission);
     $stream->write(JSON::MaybeXS->new->encode($result) . "\n");
   });
 

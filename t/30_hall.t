@@ -139,19 +139,19 @@ subtest 'queued singleton mission is replayed as text' => sub {
     mission => 'old mission',
   });
 
-  my $queued = $hall->spawn(name => '1bjorn', mission => 'next mission', attach => 1);
+  my $queued = $hall->spawn(name => '1bjorn', mission => 'next mission');
   ok($queued->{queued}, 'second singleton spawn queued');
 
   my @spawned;
   no warnings 'redefine';
   local *Langertha::Raider::Hall::_spawn_raider = sub {
-    my ($self, $slot, $base, $mission, $attach) = @_;
-    push @spawned, [$slot, $base, $mission, $attach];
+    my ($self, $slot, $base, $mission) = @_;
+    push @spawned, [$slot, $base, $mission];
     return { id => 'new', pid => 999, slot => $slot };
   };
 
   $hall->_reap_raider(12345, 0);
-  is_deeply($spawned[0], ['1bjorn', 'bjorn', 'next mission', 1],
+  is_deeply($spawned[0], ['1bjorn', 'bjorn', 'next mission'],
     'queued entry unpacked before spawning next raider');
 };
 
