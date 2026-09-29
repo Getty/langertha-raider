@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-29T17:58:40Z
+claimed_by: worker-misc
+class: standard
+completed: 2026-09-29T17:58:40Z
+created: 2026-09-29T17:48:49Z
+id: 104
+priority: low
+started: 2026-09-29T17:50:00Z
+status: done
+tags:
+- skill
+- packs
+- cli
+- defect
+title: 'Skill-Markdown enthaelt POD-Markup; git-guru pack type: power; --help ohne
+  --trace'
+updated: 2026-09-29T17:58:45Z
+---
+
+Aus #98, drei Kleinigkeiten: (1) Das von Langertha::Raider::Skill erzeugte Markdown enthaelt POD-Markup (L<Langertha::Raider>). (2) share/packs/git-guru/pack.yml setzt type: power, ein Key, den der Loader ignoriert -> entfernen oder Key sinnvoll machen (ADR 0012). (3) Der --help-Text in CLI::Main listet --trace nicht.
+
+2026-09-29 17:53 (1) Skill.pm heredoc had L<Langertha::Raider>, the only POD code in the generated Markdown; now a code span. Test: markdown + claude_skill carry no [BCEFILSXZ]<...> (t/66). (2) git-guru/pack.yml held only 'type: power' + a comment; Packs.pm reads exclusive_group/enabled_by_default/tools/detect, exclusive_group defaults to power. Deleted the file (like perl-hacker/testing-fu, which have none); git-guru still loads as power. Test: shipped pack.yml use only known keys (t/20). (3) --help lacked --trace (spec has 'trace!'); entry now '--trace / --no-trace' like bin/raider =opt. Test derives the long options from the Getopt spec + %MACHINE_FLAG and checks each is in usage (t/39); --trace was the only one missing. All three red before fix, green after.
+
+2026-09-29 17:57 Done: Skill.pm Markdown without POD (code span), share/packs/git-guru/pack.yml deleted (only held ignored 'type: power'; default exclusive_group is power), --help lists --trace / --no-trace. Regression tests in t/66, t/20, t/39 (each red before, green after). Full prove -r t: 79/82 green; t/30, t/32, t/33 (Hall) failed transiently while another worker edits Hall*.pm and those tests (k101/k102), passed on rerun, and are unrelated to this card.
+
+Commit a1ea128
