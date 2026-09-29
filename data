@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-29T18:25:51Z
+claimed_by: worker-bin-b
+class: standard
+completed: 2026-09-29T18:25:51Z
+created: 2026-09-29T18:04:34Z
+id: 106
+priority: medium
+started: 2026-09-29T18:06:42Z
+status: done
+tags:
+- binary
+- perl-tools
+- defect
+title: perl_eval/perl_check im Binary starten $^X statt eines System-Perl
+updated: 2026-09-29T18:25:51Z
+---
+
+Aus #97. Im PAR-Binary ist $^X nicht zuverlaessig ein Perl-Interpreter. perl_eval/perl_check muessen im Binary-Fall ein System-perl (File::Which) nehmen und laut scheitern, wenn keins da ist (Tool-Fehler mit klarer Meldung, Perl-Tools ggf. gar nicht mounten).
+
+2026-09-29 18:22 Decision: tools stay mounted and fail loud per call (the simpler consistent option): the grant/Application wiring is untouched, perl_eval/perl_check return an isError text 'perl_eval: no perl to run the code: this raider is the standalone binary, which has no perl interpreter of its own, and there is no perl on PATH. Install perl or put it on PATH.' Packed detection is a private PerlTools::_tool_perl with the same signal as k105's Hall::_packed_binary ($INC{'PAR.pm'} && $ENV{PAR_PROGNAME}); should be unified with it into one shared helper. Also found (out of scope): perl_cpanm still runs cpanm from PATH (fails with a start error without perl), and the lib's perl-version marker records $] of the running perl -- in the binary the packed perl, not the system perl that uses the lib.
+
+2026-09-29 18:22 Done: PerlTools resolves the tool perl per call: $^X unpacked (unchanged), File::Which::which('perl') inside a PAR binary; none -> tool error, nothing runs. POD (description, perl_eval, perl_check) updated. Verified: t/20_perltools.t two new subtests (packed -> PATH perl runs eval + check; packed without perl -> isError naming 'no perl' and PATH), red before / green after; t/23 green; full prove -r t green (84 files, 745 tests). Real binary built into scratchpad (build-binary.sh, dev langertha via RAIDER_BIN_EXTRA_INC) and driven by a fake OpenAI endpoint with --perl: with /usr/bin on PATH perl_eval ran /usr/bin/perl, perl_check valid; with PATH=empty dir both tools returned the clear error and the raid completed.
+
+Committed 52cd98d
