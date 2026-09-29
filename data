@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-29T18:06:02Z
+claimed_by: worker-binary
+class: standard
+completed: 2026-09-29T18:06:02Z
+created: 2026-09-29T16:42:47Z
+id: 97
+priority: medium
+started: 2026-09-29T16:46:22Z
+status: done
+tags:
+- binary
+- distribution
+title: Standalone-Binary raider via PAR::Packer + CI-Workflow
+updated: 2026-09-29T18:06:09Z
+---
+
+raider als Single-File-Binary ausliefern (kein Perl auf dem Ziel), Muster aus ~/dev/karr: scripts/build-binary.sh, scripts/verify-binary.sh, scripts/check-binary-libs.sh, .github/workflows/release-binaries.yml (Trigger: release published, x86_64 + aarch64, perl:5.40-bookworm, Assets anhaengen). Fallen: dynamisch geladene Langertha-Engines/Plugins/Raider-Module (-M Globs), share/ via File::ShareDir, XS-SSL-Libs. Lokal bauen und verifizieren; nichts veroeffentlichen.
+
+2026-09-29 17:55 Progress: build/verify/libs scripts + workflow written; local build 20M, verify green (help of all subcommands, archive module-load of all 171 Langertha::* with @INC=archive only, share diff, packs via dist_dir, offline raid vs fake OpenAI endpoint with read_file+bash+web_fetch, REPL, hall daemon + acp ping). Found and fixed pack gaps: IO::Async::Internals::Connector (binary hung on first HTTP request), MooseX::NonMoose meta roles, JSON::Schema::Modern/MooX::TypeTiny/Types::Standard (Role::OpenAPI), Path::IsDev heuristics (ProjectDistDir), attributes.pm (Cpanel::JSON::XS segfault). Emulating CI in perl:5.40-bookworm container now for the runtime lib set.
+
+2026-09-29 18:03 Also found (outside card scope, for new cards): (1) Hall spawn is broken inside the binary: Hall.pm runs ($^X, $raider_bin, ...), $^X is not the binary, so the child is 'perl <ELF>' -> 'Unrecognized character \x7F' (reproduced). Fix belongs in Hall.pm (exec $raider_bin directly when running from a PAR binary). (2) PerlTools perl_eval/perl_check run $^X = the system perl (/usr/bin/perl seen) -> on a Perl-less target the --perl tools cannot work. (3) raider has no --version flag; verify checks the packed $VERSION instead. (4) A module missing inside a Future chain hangs instead of dying (IO::Async::Internals::Connector; Net::SSLeay without libssl3 on bookworm-slim hangs https calls) -- robustness issue in the async error path. (5) CI needs Langertha 0.503 on CPAN (cpanm --info shows 0.502) before the first release run. (6) README needs a Binary section listing `libssl` and `libcrypto` in backticks, or the workflow's README check fails. (7) aarch64 job untested locally.
+
+2026-09-29 18:03 Done: scripts/build-binary.sh (reviewed + fixed), scripts/verify-binary.sh, scripts/check-binary-libs.sh (RUNTIME_LIBS=libssl libcrypto), .github/workflows/release-binaries.yml, .gitignore (/raider, /raider-*-linux-*, /pkg/), dist.ini gather_exclude ^.github/ ^scripts/. Verified: local build (Debian perl, dev langertha via RAIDER_BIN_EXTRA_INC) 20M, verify green; CI emulated in perl:5.40-bookworm (deps from CPAN, cpanfile pin lowered to 0.502 + dev langertha via EXTRA_INC since 0.503 is not on CPAN) -> 15M binary, verify green in a clean bookworm container, libs = libssl+libcrypto only; smoke in debian:bookworm-slim/trixie-slim ok (bookworm-slim lacks libssl3: https calls hang). Startup on a loaded box: warm ~1.3s vs perl CLI ~1.1s, cold ~4s. Nothing committed/published. See notes for out-of-scope defects.
+
+Commit 975abc6
