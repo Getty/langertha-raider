@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-29T18:44:04Z
+claimed_by: release
+class: standard
+completed: 2026-09-29T18:44:04Z
+created: 2026-09-29T18:42:10Z
+id: 111
+priority: medium
+started: 2026-09-29T18:42:15Z
+status: done
+tags:
+- changes
+- docs
+- release-prep
+title: Changes {{$NEXT}} aufraeumen und nach Themen gruppieren
+updated: 2026-09-29T18:44:04Z
+---
+
+Aus dem Release-Audit nach #109: {{$NEXT}} ~400 Zeilen, durch Anlagerung gewachsen, nicht gruppiert, verirrte Leerzeile nach dem --version-Bullet, alte Slice-1-5-Bullets mit App::Raider::*-Namen (inzwischen Stubs), interne/Prozess-Notizen statt nutzersichtbarer Aenderungen, Mehrfach-Bullets pro Thema (Telegram, hall-Argumente). GitHub::CreateRelease veroeffentlicht den Abschnitt woertlich als Release Notes. Zusammenfassen nach Thema: Distribution/Extraktion, Binary+--version, CLI, Tools, Hall, ACP, Fixes, Docs. Keine Kartennummern.
+
+Committed b5153b2
