@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-29T18:05:40Z
+claimed_by: worker-hall
+class: standard
+completed: 2026-09-29T18:05:40Z
+created: 2026-09-29T17:48:32Z
+id: 101
+priority: medium
+started: 2026-09-29T17:49:44Z
+status: done
+tags:
+- hall
+- cron
+- defect
+title: 'Hall::Cron: coalesce greift nie (running direkt nach spawn auf 0)'
+updated: 2026-09-29T18:05:45Z
+---
+
+Aus #98. Hall::Cron verwirft einen Lauf mit coalesce: true nie, weil running direkt nach der Rueckkehr von spawn auf 0 gesetzt wird. examples/multi-raider-hall/README.md dokumentiert das beabsichtigte Verhalten (Lauf wird ausgelassen, solange der vorige noch laeuft).
+
+2026-09-29 17:51 Cause: Cron::_fire set running=0 right after spawn returned. Fix: dropped the flag; _in_flight asks the hall — the spawned run ID still in raiders, or cron:ID binding busy/waiting in a queue. Regression test t/59_hall_cron_coalesce.t (red before, green after).
+
+2026-09-29 17:52 Done: Hall::Cron no longer tracks a running flag (was reset to 0 right after spawn). _in_flight asks the hall: the run it spawned is still in raiders (covers the unbound-on-session-error case), or cron:ID is busy / waiting in a binding or slot queue. coalesce now drops the occurrence with cron.coalesced. Files: lib/Langertha/Raider/Hall/Cron.pm (+DESCRIPTION), examples/multi-raider-hall/README.md (default-off wording), new t/59_hall_cron_coalesce.t (fake raider, hold mission; failed 2/3 before fix). Verified: prove t/30_hall.t t/57 t/59_hall_queues.t t/44 t/59_hall_cron_coalesce.t all pass.
+
+Commit f617255
