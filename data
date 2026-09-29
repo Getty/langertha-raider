@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-09-29T17:06:12Z
+claimed_by: worker-tools
+class: standard
+completed: 2026-09-29T17:06:12Z
+created: 2026-09-29T16:42:32Z
+id: 94
+priority: medium
+started: 2026-09-29T16:46:09Z
+status: done
+tags:
+- adr-0005
+- tools
+- prompt
+title: Tool-Liste im Prompt aus dem aktiven Tool-Set ableiten (ADR 0005)
+updated: 2026-09-29T17:06:18Z
+---
+
+Aus #22. Application::_tools_text ist handgeschrieben und unvollstaendig (perl_*, hall tools fehlen). ADR 0005: Prompt-Toolbeschreibung, Katalog fuer das Modell und Permission-Check leiten sich aus EINEM Tool-Set ab. Slice: Prompt-Toolliste aus den tatsaechlich gemounteten Tools (Name + Parameter aus inputSchema) generieren, keine zweite handgepflegte Liste. -M ersetzt sie weiterhin nicht (ADR 0014). Regressionstest: ein zusaetzlich gemountetes Tool erscheint im Prompt, ein nicht gemountetes nicht.
+
+2026-09-29 16:50 Assembly site: Application::_build_mcps is the only place tool servers are mounted (CLI/Hall/ACP all go through Application). Split it: new private _tool_servers (lazy, builder _build_tool_servers) holds the in-process MCP::Server objects (files, bash, web, perl when granted, hall when RAIDER_HALL_SOCKET); _build_mcps just wraps them in Net::Async::MCP clients. _tools_text renders from $server->tools (sync, same objects that answer tools/list) as name(required..., [optional sorted]). Chose reading ->tools over async list_tools because the mission is built synchronously and every mounted source is in-process today.
+
+2026-09-29 16:50 Also found (not fixed, outside this slice): (1) Langertha::Raider::Skill's bundled how-to-use-raider doc (lib/Langertha/Raider/Skill.pm ~l.141) still carries its own static 7-tool table without perl_*/hall tools -- a second hand-maintained list, candidate for the same derivation. (2) /pack on perl (or redetection) after the servers were built flips perl_tools_grant to enabled but mounts nothing, _tool_servers is built once; the prompt now truthfully omits perl_* in that case, but grant report and mounted set disagree -- belongs to the ADR 0005 policy work. (3) Deriving via $server->tools only works for in-process MCP::Server sources; once remote/extra_mcp sources are mounted the description must come from the async list_tools of the same clients.
+
+2026-09-29 17:00 Review of the interrupted edit: correct and minimal. All mission surfaces covered -- CLI builds via Application; Hall and Hall/ACP spawn the raider CLI subprocess (hall->spawn), so they also go through Application::mission/_build_tool_servers; no other in-process mission builder. _build_raider builds engine (->_mcps->_tool_servers) before mission, so prompt and catalogue read the same server objects. Building servers from mission adds no new side effect: mission is only consumed by _build_raider/reload_mission, which build the engine anyway. Running full suite next.
+
+2026-09-29 17:04 Done. Application: new private lazy _tool_servers (_build_tool_servers) holds the mounted in-process MCP servers (files, bash, web; perl when granted; hall when RAIDER_HALL_SOCKET); _build_mcps wraps exactly those in Net::Async::MCP clients; _tools_text renders from $server->tools as name(required..., [optional sorted]) via _tool_signature. Hand-written list gone; -M/--bare keep the item (ADR 0014). mission POD updated. Reviewed the interrupted edit: kept as-is, no fixes needed; all surfaces (CLI, Hall, Hall/ACP) reach it via Application (Hall spawns the CLI). Test t/64_application_tool_description.t: stock set exact, prompt names == engine list_tools names, perl/hall described only when mounted, extra mounted probe tool appears and is absent from stock app, -M/--bare keep it. Full suite: prove -I dev langertha -Ilib -r t -> 79 files, 713 tests, PASS (only live tests skipped). Open follow-ups stay as noted above (Skill.pm static table, /pack perl after mount, remote sources need async list_tools).
+
+Commit 18ec0c3
