@@ -98,7 +98,7 @@ has content => (
 
 =attr content
 
-Auxiliary text payload for non-final outcomes (question/pause/abort).
+Auxiliary text payload for non-final outcomes (question/pause/abort/cancelled).
 
 =cut
 

@@ -111,6 +111,9 @@ use Langertha::RunContext;
     if ($self->type eq 'abort') {
       return Langertha::Raider::Result->abort($self->content // 'abort');
     }
+    if ($self->type eq 'cancelled') {
+      return Langertha::Raider::Result->cancelled($self->content // 'cancelled');
+    }
     die "Unknown test result type: ".$self->type;
   }
 
@@ -244,6 +247,53 @@ subtest 'Parallel propagation and error path' => sub {
   my $dying_result = $dying->run_f(Langertha::RunContext->new(input => 'x'))->get;
   ok($dying_result->is_abort, 'branch exception becomes abort');
   like($dying_result->content, qr/parallel boom/, 'abort keeps branch failure reason');
+};
+
+subtest 'Parallel propagates a cancelled branch' => sub {
+  my $cancelling = Langertha::Raid::Parallel->new(steps => [
+    Test::Runnable::Step->new(name => 'ok', type => 'final', text => 'ok'),
+    Test::Runnable::Step->new(name => 'stopped', type => 'cancelled', content => 'Cancelled'),
+  ]);
+  my $ctx = Langertha::RunContext->new(input => 'x');
+  my $result = $cancelling->run_f($ctx)->get;
+  ok($result->is_cancelled, 'cancelled branch makes the parallel raid cancelled');
+  is($result->content, 'Cancelled', 'cancelled content is passed on');
+  ok(!$result->has_text, 'no folded final text');
+  is($ctx->state->{last_result_type}, 'cancelled', 'context records the cancelled type');
+
+  my $cancel_and_question = Langertha::Raid::Parallel->new(steps => [
+    Test::Runnable::Step->new(name => 'q', type => 'question', content => 'which one?'),
+    Test::Runnable::Step->new(name => 'p', type => 'pause', content => 'wait'),
+    Test::Runnable::Step->new(name => 'stopped', type => 'cancelled', content => 'Cancelled'),
+  ]);
+  ok($cancel_and_question->run_f(Langertha::RunContext->new(input => 'x'))->get->is_cancelled,
+    'cancelled outranks question and pause');
+
+  my $cancel_and_abort = Langertha::Raid::Parallel->new(steps => [
+    Test::Runnable::Step->new(name => 'stopped', type => 'cancelled', content => 'Cancelled'),
+    Test::Runnable::Step->new(name => 'bad', type => 'abort', content => 'stop'),
+  ]);
+  ok($cancel_and_abort->run_f(Langertha::RunContext->new(input => 'x'))->get->is_abort,
+    'abort still outranks cancelled');
+};
+
+subtest 'Sequential and Loop propagate a cancelled step' => sub {
+  my $ran = 0;
+  my $seq = Langertha::Raid::Sequential->new(steps => [
+    Test::Runnable::Step->new(name => 'stopped', type => 'cancelled', content => 'Cancelled', on_run => sub { $ran++ }),
+    Test::Runnable::Step->new(name => 'never', type => 'final', text => 'never', on_run => sub { $ran++ }),
+  ]);
+  ok($seq->run_f(Langertha::RunContext->new(input => 'x'))->get->is_cancelled,
+    'cancelled propagates out of sequential raid');
+  is($ran, 1, 'steps after cancelled are not executed');
+
+  my $loop = Langertha::Raid::Loop->new(
+    steps     => [Test::Runnable::Step->new(name => 'stopped', type => 'cancelled')],
+    max_loops => 3,
+  );
+  my $ctx = Langertha::RunContext->new(input => 'x');
+  ok($loop->run_f($ctx)->get->is_cancelled, 'cancelled propagates out of loop');
+  is($ctx->metadata->{loop_iterations}, 1, 'loop stops at the cancelled iteration');
 };
 
 subtest 'Loop max iterations and stop callback' => sub {

@@ -29,6 +29,10 @@ Aggregation strategy:
 
 =item * If any branch aborts, first abort is propagated.
 
+=item * Otherwise first C<cancelled> result is propagated
+(L<Langertha::Raider/cancel>): the parallel raid is cancelled as a whole, and
+the text of branches that finished is not folded into a final result.
+
 =item * Otherwise first question is propagated.
 
 =item * Otherwise first pause is propagated.
@@ -115,6 +119,7 @@ async sub run_f {
 
   my $winner =
        (grep { $_->{result}->is_abort } @outcomes)[0]
+    || (grep { $_->{result}->is_cancelled } @outcomes)[0]
     || (grep { $_->{result}->is_question } @outcomes)[0]
     || (grep { $_->{result}->is_pause } @outcomes)[0];
 

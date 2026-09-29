@@ -394,6 +394,9 @@ Revision history for Langertha-Raider
       documents run_f and its raid plugin hooks. The Hall parts and the
       raider acp dispatcher are marked internal (ADR 0017). README and the
       multi-raider-hall example corrected against the current code.
+    - Langertha::Raid::Parallel passes on a cancelled branch as the raid's
+      result (after abort, before question and pause) instead of treating it
+      as a branch with no text.
 
 0.003    2026-04-21 01:46:09Z
 
