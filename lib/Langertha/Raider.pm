@@ -1218,15 +1218,22 @@ sub _render_history_block {
   # Responses input_image, Anthropic image (langertha k326).
   return '[image]' if $type eq 'input_image' || $type eq 'image';
 
-  # Anthropic document (langertha k326): a text source gives its text, any
-  # other source (base64 PDF, url, file) is named, never dumped.
+  # Anthropic document (langertha k326): a text source gives its text, a
+  # content source (Citations custom content) its chunks, any other source
+  # (base64 PDF, url, file) is named, never dumped. The optional context the
+  # model reads beside it gets a line of its own.
   if ( $type eq 'document' ) {
     my $source = ref $block->{source} eq 'HASH' ? $block->{source} : {};
+    my $source_type = $source->{type} // '';
     my $has_title = defined $block->{title} && length $block->{title};
     my $marker    = $has_title ? '[document] ' . $block->{title} : '[document]';
-    return $marker
-      unless ( $source->{type} // '' ) eq 'text' && defined $source->{data};
-    return $has_title ? $marker . "\n" . $source->{data} : $source->{data};
+    my $text = $source_type eq 'text'    ? $source->{data} // ''
+      : $source_type eq 'content' ? _render_history_payload_value( $source->{content} )
+      : '';
+    my $context = defined $block->{context} && !ref $block->{context}
+      && length $block->{context} ? '[context] ' . $block->{context} : '';
+    return join "\n", grep { length }
+      ( $has_title || !length $text ? $marker : () ), $context, $text;
   }
   # Anthropic search_result: title and source URL, then its text blocks.
   if ( $type eq 'search_result' ) {

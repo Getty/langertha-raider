@@ -581,6 +581,75 @@ subtest 'anthropic document and search_result blocks' => sub {
     qr/example\.org/, 'query filter reaches a search_result title');
 };
 
+# Anthropic custom content documents (Citations) carry their text as a block
+# list in source.content -- a string is allowed too -- and any document may
+# carry an optional context field the model reads but never cites. Both are
+# what the model saw, so the rendering keeps them: the chunks as text, the
+# context on its own [context] line; a bare "[document]" would lose them.
+subtest 'anthropic content-source document and document context' => sub {
+  my $raider = Langertha::Raider->new(
+    engine     => MockEngine->new,
+    raider_mcp => 1,
+  );
+  my $pdf = 'JVBERi0xLjQKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSPj4Kc3RyZWFtCg==';
+  push @{$raider->session_history},
+    { role => 'user', content => [
+      { type => 'tool_result', tool_use_id => 'toolu_20',
+        content => [
+          { type => 'document', title => 'Stralsund log',
+            context => 'Harbour master export, 2026-09',
+            source => { type => 'content', content => [
+              { type => 'text', text => 'Pier 1 reopened' },
+              { type => 'text', text => 'Pier 4 dredging until Friday' },
+            ] },
+            citations => { enabled => 1 } },
+        ] },
+    ] },
+    { role => 'user', content => [
+      { type => 'document',
+        source => { type => 'content', content => 'Warnemuende tide table' } },
+    ] },
+    { role => 'user', content => [
+      { type => 'document', context => 'Scanned by the port office',
+        source => { type => 'base64', media_type => 'application/pdf', data => $pdf } },
+    ] },
+    { role => 'user', content => [
+      { type => 'document', context => 'Crew roster',
+        source => { type => 'text', media_type => 'text/plain', data => 'Anke, Jens' } },
+    ] };
+
+  my @warnings;
+  my $text;
+  {
+    local $SIG{__WARN__} = sub { push @warnings, $_[0] };
+    $text = $raider->_query_session_history_f({})->get;
+  }
+  is(scalar @warnings, 0, 'no warnings while rendering') or diag("warnings: @warnings");
+
+  my @entries = split /\n\n/, $text;
+  is(scalar @entries, 4, 'four history elements rendered') or diag($text);
+
+  is($entries[0],
+    "[user] tool_result: [document] Stralsund log\n"
+      . "[context] Harbour master export, 2026-09\n"
+      . "Pier 1 reopened\nPier 4 dredging until Friday",
+    'content-source document keeps title, context and every chunk');
+  is($entries[1], '[user] Warnemuende tide table',
+    'content-source document with a string content renders as its text');
+  is($entries[2], "[user] [document]\n[context] Scanned by the port office",
+    'base64 document shows its context, never its data');
+  is($entries[3], "[user] [context] Crew roster\nAnke, Jens",
+    'text-source document shows its context before its text');
+
+  unlike($text, qr/\Q$pdf\E/, 'base64 payload never leaks into the rendering');
+  unlike($text, qr/<document>|ARRAY\(0x|HASH\(0x/, 'no raw block markers or refs');
+
+  like($raider->_query_session_history_f({ query => 'dredging' })->get,
+    qr/Stralsund/, 'query filter reaches into content-source chunks');
+  like($raider->_query_session_history_f({ query => 'port office' })->get,
+    qr/\[context\]/, 'query filter reaches a document context');
+};
+
 subtest 'register_session_history_tool renders identically' => sub {
   my $raider = Langertha::Raider->new(
     engine     => MockEngine->new,
