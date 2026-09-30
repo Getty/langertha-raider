@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-09-30T04:13:13Z
+claimed_by: worker-repl
+class: standard
+completed: 2026-09-30T04:13:09Z
+created: 2026-09-30T03:46:44Z
+id: 113
+priority: medium
+started: 2026-09-30T03:46:58Z
+status: done
+tags:
+- repl
+- cli
+- feature
+title: 'REPL: !cmd fuehrt nur Shell aus, ?cmd fuehrt aus UND schickt an die KI'
+updated: 2026-09-30T04:13:13Z
+---
+
+Maintainer-Entscheid 2026-09-30: bewusste Trennung (anders als Claude Code, wo ! immer in den Kontext geht).
+- !CMD: Shell-Befehl im --root ausfuehren, Terminal erbt stdin/stdout/stderr (interaktiv moeglich), Exit-Code anzeigen. Geht NICHT an die KI, nicht in Session-Journal/History der Konversation.
+- ?CMD: Befehl ausfuehren, Ausgabe live zeigen UND mitschneiden, danach als User-Turn an die KI: Befehl, Exit-Code, (gekappte) Ausgabe. KI antwortet wie auf einen normalen Prompt; landet im Session-Journal wie ein normaler Turn.
+- Shell: $SHELL -c bzw. sh -c; Ctrl-C bricht den Befehl ab, nicht raider.
+- Ausgabe fuer die KI begrenzen (Kopf+Ende mit Auslassungsmarker), Grenze als Konstante.
+- /help, --help-Hinweis falls REPL-Hilfe existiert, README (REPL-Tabelle), bin/raider POD.
+- Nur REPL; one-shot/--json/ACP/Hall unveraendert. Eine Zeile, die nur aus ! oder ? besteht, ist ein normaler Prompt.
+
+2026-09-30 04:12 Decisions: (1) Ctrl-C during a command: raider ignores SIGINT/SIGQUIT while it runs (system() semantics); the child is in the foreground process group and gets the terminal's SIGINT. An interrupted ?CMD sends NOTHING (prints 'command interrupted (SIGINT), nothing sent to the model'): Ctrl-C in the REPL already means 'cancel this turn', and a surprise model call after aborting a hung or wrong command costs tokens. Re-run with head/timeout to send partial output. (2) ?CMD: stdin comes from /dev/null. Its output is captured, so it can't be interactive, and inheriting stdin would let a command eat piped REPL input. !CMD inherits fds 0/1/2 as the spec says. (3) Limit is shell_output_limit { 20_000 }, a method constant like Runner's terminate_grace, so it can be overridden. Head and tail are half each, with a '[... N characters omitted ...]' line between. Output is decoded as UTF-8 as it streams, a character cut across reads is carried over, and invalid bytes become U+FFFD. Also found: a natural-language prompt that starts with ! or ? gets run as a shell command, and there is no escape hatch because lines are trimmed. It's harmless in practice (usually 'command not found', exit 127, and for ? the model still sees the text), but a doubled prefix (!!/??) as an escape might be worth a decision later. Not implemented because the spec doesn't ask for it.
+
+2026-09-30 04:12 Done: REPL !CMD / ?CMD. REPL.pm: dispatch m{\A([!?])\s*(\S.*)\z} to run_shell / run_shell_prompt; shell_prompt, shell_output_limit (20000), _spawn_shell (fork, chdir --root, exec $SHELL||/bin/sh -c, UTF-8-encoded command, POSIX::_exit on failure), _decode_output, _shell_status_text. !CMD: terminal inherited, prints 'exit status N' / 'interrupted (SIGINT)' / 'killed by SIGx', no model call, no journal. ?CMD: live output plus capture (stdout+stderr merged), then run_prompt with the command, 'Result: exit status N' and output (head/tail cut), so it's journaled like any turn. Bare !/? is a prompt. Commands.pm /help, README REPL table plus a paragraph, bin/raider POD, REPL POD updated. Tests: new t/53_repl_shell_commands.t (8 subtests: !CMD no call + fd1 output + cwd + exit status; ?CMD exactly one call with command/status/output/root; stderr+UTF-8+exit 4; head/tail truncation; bare !/?; journal via SeqEngine Main: !CMD starts no session, ?CMD is one user turn; Ctrl-C to the process group during !CMD and ?CMD). Failed 7/8 against HEAD's REPL.pm (the bare-!/? guard passes by design), passes now. Full prove -I…/langertha/lib -Ilib -r t: 86 files, 756 tests PASS. Checked by hand in a real pty: Ctrl-C during !sleep and ?sleep interrupts the command and raider goes on. No new dependency: Encode/POSIX/Config are already packed, and it starts $SHELL, not perl. lib/Langertha/Raider.pm untouched.
+
+Committed 3e6f2a2, pushed to origin main
