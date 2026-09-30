@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-09-30T06:10:22Z
+claimed_by: raider-worker-k120
+class: standard
+completed: 2026-09-30T06:10:16Z
+created: 2026-09-30T06:00:03Z
+id: 120
+priority: high
+started: 2026-09-30T06:02:14Z
+status: done
+tags:
+- bug
+- adr-0005
+- tools
+title: 'Raider.pm: Fortsetzungs-Loop in _respond_f umgeht plugin_pipeline_tool_call_f
+  (kein tool.call nach ask_user/pause)'
+updated: 2026-09-30T06:10:22Z
+---
+
+Gefunden bei der ADR-0005-Analyse. Raider.pm hat zwei Tool-Dispatch-Loops: _execute_tool_calls_f und die Fortsetzung in _respond_f (ca. Z. 2690). Die Fortsetzung ruft plugin_pipeline_tool_call_f nie auf: nach raider_ask_user/raider_pause bekommen die restlichen Calls des Batches kein tool.call-Event (Journal hat Result ohne Call), jeder Gate an diesem Hook wird umgangen.
+Fix (= Slice B1 von ADR 0005): eine einzige Per-Call-Dispatch-Funktion, von beiden Loops benutzt. Test: Batch [ask_user, bash] -> tool.call fuer bash + Plugin-Hook laeuft; Regressionstest muss ohne Fix rot sein.
+
+2026-09-30 06:05 Root cause confirmed by reading: _respond_f's continuation loop (Raider.pm ~2690) duplicated the dispatch of _execute_tool_calls_f minus plugin_pipeline_tool_call_f, so calls queued after raider_ask_user/raider_pause ran with no plugin_before_tool_call (no tool.call event, gates skipped); Events then reported their tool.result under the ask_user call id. Fix: per-call _dispatch_tool_call_f (undecodable check, before-hook pipeline, self-tool/MCP routing), looped by _execute_tool_calls_f; _respond_f now calls _execute_tool_calls_f with the remaining calls and an iter rebuilt from the continuation. Regression test t/100_raider_resume_dispatch.t. NOTE: harness pinned me to worktree agent-a96e2510ea6a7c7e2 (writes to k120 refused); changes live there.
+
+2026-09-30 06:08 Also found (not fixed, outside the card): (1) the pausing self-tool's answer (respond_f pushes it directly) never runs plugin_after_tool_call, so raider_ask_user/raider_pause keep a tool.call without tool.result in the Events stream / Journal->unknown_calls (library+REPL only; Application never calls respond). (2) raider_wait in the main dispatch fires plugin_before_tool_call but _wait_self_tool_f never runs plugin_after_tool_call -> tool.call without tool.result. (3) Behaviour side effects of unification: raider_abort after resume now records metrics (was missing, cancel already did); remaining self-tool results/MCP calls/waits after resume now get Langfuse tool spans (were untraced).
+
+2026-09-30 06:08 Done: Raider.pm gets one per-call dispatch _dispatch_tool_call_f (undecodable check -> plugin_pipeline_tool_call_f -> self-tool/MCP routing), looped by _execute_tool_calls_f; _respond_f resumes the remaining calls via _execute_tool_calls_f (iter rebuilt from the continuation), its duplicate loop is gone. Regression test t/100_raider_resume_dispatch.t (Test2::V0, offline): 3/3 subtests FAIL against the original Raider.pm (-I snapshot), pass with fix. Targeted suite against installed Langertha: 12 files, 108 tests, all pass (100,86,87,95,99,81,97,93,62,47,49_cli_machine_output,50). Full suite not run (per brief). Files live in worktree agent-a96e2510ea6a7c7e2 (harness refused writes to k120): lib/Langertha/Raider.pm, t/100_raider_resume_dispatch.t -- that worktree also holds unrelated uncommitted provider work not from k120.
+
+2026-09-30 06:10 Committed as 56a0ec4
