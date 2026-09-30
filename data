@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-30T08:49:05Z
+claimed_by: raider-worker-k140
+class: standard
+completed: 2026-09-30T08:48:57Z
+created: 2026-09-30T08:46:41Z
+id: 140
+priority: low
+started: 2026-09-30T08:47:31Z
+status: done
+tags:
+- bug
+- config
+title: 'Config::add_skills schreibt leeres ''default: { skills: ~ }'' in die Projektdatei'
+updated: 2026-09-30T08:49:05Z
+---
+
+Aus #128 (Worker-Fund, Altbug): Config::add_skills schreibt ein leeres default: { skills: ~ } in die Projekt-Config, sobald dort eine default:-Sektion existiert (Config.pm ca. Z. 563 auf 3f1e2ea). Reproduzieren mit Test (Projektdatei mit default: {model: x}, dann add_skills), fixen, sodass nur tatsaechlich geaenderte Keys geschrieben werden.
+
+2026-09-30 08:48 Cause: add_skills' 'for my $raw ($data->{skills}, $data->{default}{skills})' aliases the elements, autovivifying default.skills=undef, which _update then dumped as 'skills: ~'. Fix: copy values into @raw first (Config.pm add_skills). Test added in t/28_config_resolver.t (fails without fix). set_model checked: always sets default.model, no vivify. Note: YAML::PP dump drops comments/ordering, unchanged existing writer behavior. Ran t/25,28_*,34_cli_explain_config: 39 tests pass.
+
+Committed as 5fe696d
