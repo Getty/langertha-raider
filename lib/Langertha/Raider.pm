@@ -1180,9 +1180,16 @@ sub _render_history_block {
   if ( ref $block->{functionResponse} eq 'HASH' ) {
     my $response = $block->{functionResponse}{response};
     my $result = ref $response eq 'HASH' ? $response->{result} : $response;
-    return 'tool_result: '
-      . ( defined $result && !ref $result ? $result : _render_history_args($result) );
+    # Gemini 3 carries a tool-result image beside the result string in
+    # functionResponse.parts[].inlineData (langertha k344).
+    return 'tool_result: ' . join "\n", grep { length }
+      ( defined $result && !ref $result ? $result : _render_history_args($result) ),
+      _render_history_payload_value( $block->{functionResponse}{parts} );
   }
+  # An image is named, never dumped as base64.
+  return '[image]'
+    if ref $block->{inlineData} eq 'HASH'
+    && ( $block->{inlineData}{mimeType} // '' ) =~ m{^image/};
 
   my $type = $block->{type} // '';
 
@@ -1197,13 +1204,14 @@ sub _render_history_block {
     if ref $block->{function} eq 'HASH';
 
   # Tool results: Anthropic nests the MCP content array, the Responses item
-  # carries the same payload JSON-encoded in {output}.
+  # carries the same payload JSON-encoded in {output} -- or, with an image,
+  # as an input_text / input_image part array (langertha k344).
   if ( $type eq 'tool_result' || $type eq 'function_call_output' ) {
     return 'tool_result: '
-      . ( defined $block->{output} && !ref $block->{output}
-          ? $block->{output}
-          : _render_history_payload_value( $block->{content} ) );
+      . _render_history_payload_value(
+          defined $block->{output} ? $block->{output} : $block->{content} );
   }
+  return '[image]' if $type eq 'input_image';
 
   # Unknown block: name it by its discriminator rather than dropping it.
   my $rest = _render_history_payload_value( $block->{content} );

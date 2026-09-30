@@ -388,6 +388,64 @@ subtest 'session history query filters on rendered payload' => sub {
   like($kiel, qr/Kiel: windy, 17C/, 'filter reaches into gemini functionResponse text');
 };
 
+# Since langertha k344 a tool result that carries an image goes out natively on
+# two wires when the model claims image_input (Langertha::ToolResult
+# to_responses / to_gemini): the Responses function_call_output.output becomes
+# an input_text / input_image part array instead of a string, and Gemini 3
+# moves the image into functionResponse.parts[].inlineData next to the
+# `result` string. Neither may render as an empty "tool_result:" -- the text
+# stays readable and the image shows up as a marker, never as base64.
+subtest 'tool-result images from native image wires (k344)' => sub {
+  my $raider = Langertha::Raider->new(
+    engine     => MockEngine->new,
+    raider_mcp => 1,
+  );
+  my $b64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAwS2OUAAAAABJRU5ErkJggg==';
+  push @{$raider->session_history},
+    { type => 'function_call_output', call_id => 'call_img',
+      output => [
+        { type => 'input_text',  text => 'Screenshot of Luebeck harbour' },
+        { type => 'input_image', image_url => "data:image/png;base64,$b64" },
+      ] },
+    { role => 'user', parts => [
+      { functionResponse => { name => 'screenshot', id => 'fc_1',
+        response => { result => 'Screenshot of Rostock harbour' },
+        parts    => [ { inlineData => { mimeType => 'image/png', data => $b64 } } ] } },
+    ] },
+    { role => 'user', parts => [
+      { functionResponse => { name => 'screenshot', id => 'fc_2',
+        response => { result => '' },
+        parts    => [ { inlineData => { mimeType => 'image/png', data => $b64 } } ] } },
+    ] };
+
+  my @warnings;
+  my $text;
+  {
+    local $SIG{__WARN__} = sub { push @warnings, $_[0] };
+    $text = $raider->_query_session_history_f({})->get;
+  }
+  is(scalar @warnings, 0, 'no warnings while rendering tool-result images')
+    or diag("warnings: @warnings");
+
+  my @entries = split /\n\n/, $text;
+  is(scalar @entries, 3, 'three history elements rendered') or diag($text);
+
+  is($entries[0],
+    "[function_call_output] tool_result: Screenshot of Luebeck harbour\n[image]",
+    'responses array output: input_text kept, input_image as [image]');
+  is($entries[1],
+    "[user] tool_result: Screenshot of Rostock harbour\n[image]",
+    'gemini functionResponse: result text kept, inlineData part as [image]');
+  is($entries[2], '[user] tool_result: [image]',
+    'gemini image-only functionResponse still shows the image');
+
+  unlike($text, qr/\Q$b64\E/, 'base64 payload never leaks into the rendering');
+  unlike($text, qr/<input_image>|ARRAY\(0x|HASH\(0x/, 'no raw block markers or refs');
+
+  my $filtered = $raider->_query_session_history_f({ query => 'Luebeck' })->get;
+  like($filtered, qr/Luebeck harbour/, 'query filter reaches into array output text');
+};
+
 subtest 'register_session_history_tool renders identically' => sub {
   my $raider = Langertha::Raider->new(
     engine     => MockEngine->new,
