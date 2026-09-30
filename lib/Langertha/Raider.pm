@@ -2454,8 +2454,10 @@ async sub _execute_tool_calls_f {
 # the first run of a batch and on resume alike (k120). Pushes its
 # { tool_call => ..., result => ... } onto $results, or returns the Result
 # that ends the raid (an interactive self-tool, which saves $remaining_tcs --
-# the calls queued after $tc -- for respond_f; an abort; a cancel during
-# raider_wait).
+# the calls queued after $tc -- for respond_f; an abort). Every call that
+# passed plugin_before_tool_call gets its result through
+# plugin_after_tool_call exactly once; a pausing self-tool gets it on
+# respond_f (k134).
 async sub _dispatch_tool_call_f {
   my ( $self, $state, $iter, $echo_data, $tc, $remaining_tcs, $results ) = @_;
   my $engine = $state->{engine};
@@ -2496,8 +2498,8 @@ async sub _dispatch_tool_call_f {
     my $self_result = await $self->_execute_self_tool_f($name, $input);
 
     # Handle interactive self-tool results
-    return $self->_pause_raid($state, $iter, $echo_data, $tc,
-      $remaining_tcs, $results, $self_result)
+    return $self->_pause_raid($state, $iter, $echo_data, $tc, $name, $input,
+      $tool_t0, $remaining_tcs, $results, $self_result)
       if $self_result->{type} eq 'question' || $self_result->{type} eq 'pause';
 
     return $self->_abort_raid($state, $self_result)
@@ -2506,7 +2508,6 @@ async sub _dispatch_tool_call_f {
     if ($self_result->{type} eq 'wait') {
       $result = await $self->_wait_self_tool_f(
         $state, $iter, $name, $input, $tool_t0, $self_result->{seconds});
-      return $self->_cancelled_result($state) unless $result;
     }
     else {
       # type eq 'result' — normal self-tool result
@@ -2523,15 +2524,21 @@ async sub _dispatch_tool_call_f {
 }
 
 # Saves the continuation respond_f resumes from when an interactive self-tool
-# stops the batch, and returns its question or pause Result. $remaining_tcs
-# are the calls of the batch after $tc, $results those that already ran.
+# stops the batch, and returns its question or pause Result. $name and $input
+# are the call as plugin_before_tool_call handed it on, for the
+# plugin_after_tool_call the answer runs through. $remaining_tcs are the
+# calls of the batch after $tc, $results those that already ran.
 sub _pause_raid {
-  my ( $self, $state, $iter, $echo_data, $tc, $remaining_tcs, $results, $self_result ) = @_;
+  my ( $self, $state, $iter, $echo_data, $tc, $name, $input, $tool_t0,
+    $remaining_tcs, $results, $self_result ) = @_;
   $self->_continuation({
     state          => $state,
     iteration      => $iter->{iteration},
     data           => $echo_data,
     pending_tc     => $tc,
+    pending_name   => $name,
+    pending_input  => $input,
+    pending_t0     => $tool_t0,
     remaining_tcs  => $remaining_tcs,
     results_so_far => $results,
     iter_span_id   => $iter->{span_id},
@@ -2561,17 +2568,17 @@ sub _abort_raid {
 }
 
 # Runs raider_wait: waits $seconds on the raid's loop unless a cancel cuts
-# the wait short. Returns the tool result, or nothing after a cancel.
+# the wait short. Returns the tool result -- a cancelled one after a cancel,
+# as for a cut-off MCP call -- through plugin_after_tool_call (k134).
 async sub _wait_self_tool_f {
   my ( $self, $state, $iter, $name, $input, $tool_t0, $seconds ) = @_;
   my $engine = $state->{engine};
   my $loop = $engine->async_loop // IO::Async::Loop->new;
   await $self->_until_cancelled($loop->delay_future(after => $seconds));
-  return if $self->cancel_requested;
-  my $text = "Waited $seconds seconds.";
-  $self->_trace_tool_call($state, $iter, $name, $input, $tool_t0, $text)
-    if $state->{langfuse};
-  return { content => [{ type => 'text', text => $text }] };
+  my $result = $self->cancel_requested
+    ? $self->_cancelled_tool_result($name)
+    : { content => [{ type => 'text', text => "Waited $seconds seconds." }] };
+  return await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0, $result);
 }
 
 # Calls the tool $name on the MCP source that registered it. A name no server
@@ -2690,10 +2697,14 @@ async sub _respond_f {
   my @results    = @{$cont->{results_so_far}};
   my $engine     = $state->{engine};
 
-  # Add the answer as the tool result for the pending self-tool call
-  my $answer_result = {
-    content => [{ type => 'text', text => "$answer" }],
-  };
+  my $iter = { iteration => $cont->{iteration}, span_id => $cont->{iter_span_id} };
+
+  # The answer is the tool result of the pending self-tool call. It runs
+  # through plugin_after_tool_call like every other result, so the call's
+  # tool.call event gets its tool.result (k134).
+  my $answer_result = await $self->_after_tool_call_f($state, $iter,
+    $cont->{pending_name}, $cont->{pending_input}, $cont->{pending_t0},
+    { content => [{ type => 'text', text => "$answer" }] });
   push @results, { tool_call => $pending_tc, result => $answer_result };
   ${$state->{raid_tool_calls}}++;
 
@@ -2704,7 +2715,6 @@ async sub _respond_f {
   # Every call handled here MUST leave a tool_result behind (or end the raid):
   # a trailing tool_use with no matching tool_result is a 400 on strict
   # providers.
-  my $iter = { iteration => $cont->{iteration}, span_id => $cont->{iter_span_id} };
   my $stop = await $self->_execute_tool_calls_f($state, $iter, $cont->{remaining_tcs}, $data, \@results);
   return $stop if defined $stop;
 
@@ -2764,7 +2774,9 @@ wait forever.
     my $result = await $raider->respond_f($answer);
 
 Continue a paused raid after a C<question> or C<pause> result. The answer
-is used as the tool result and the raid loop resumes. Returns the next
+is used as the tool result of the pausing self-tool call -- handed through
+C<plugin_after_tool_call> like any tool result -- and the raid loop resumes.
+Returns the next
 L<Langertha::Raider::Result>.
 
 =method respond

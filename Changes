@@ -241,6 +241,10 @@ Revision history for Langertha-Raider
       through the same dispatch as any other call: they run
       plugin_before_tool_call, so they get their tool.call event and
       plugin gates apply to them.
+    - The answer to a paused raider_ask_user or raider_pause call and the
+      result of raider_wait go through plugin_after_tool_call, so every
+      tool.call event gets its tool.result. A cancelled raider_wait gets a
+      cancelled tool result like a cut-off MCP call.
     - A plugin_before_llm_call that returns a fresh conversation also
       updates what a paused raid resumes with, so respond_f keeps every
       assistant and tool_result message from before the pause.
