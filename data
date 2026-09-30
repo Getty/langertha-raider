@@ -1,0 +1,20 @@
+---
+block_reason: 'Offene Getty-Entscheidungen: Credential-Speicherung, Alias-Schema,
+  Pinning, --allow-internal pro Alias (siehe Body)'
+blocked: true
+class: standard
+created: 2026-09-30T06:01:41Z
+id: 133
+priority: low
+status: backlog
+tags:
+- provider-discovery
+- m5
+- needs-decision
+title: 'Provider C3/C4: raider provider add ALIAS HOST + --provider ALIAS (gespeicherte
+  Bindung)'
+updated: 2026-09-30T06:01:49Z
+---
+
+Nach #118, #119, #131, #132. provider add: Fetch (#118), Endpunkte+Auth zeigen, interaktiv bestaetigen, headless -> Fehler; speichert Alias in ~/.raider/config.yml. --provider ALIAS nutzt die Bindung; zustimmungspflichtige Aenderung (#131) -> Fehler bis erneutes provider add; nie Autowahl aus API-Keys (Notiz #78).
+BLOCKIERT durch offene Getty-Entscheidungen: (1) Credential-Speicherung: Env-Var-Name-Referenz (Vorschlag) vs 0600-Secret-Datei vs Keyring vs Kommando; (2) Alias-Schema (providers: in config.yml); (3) was gepinnt wird (Vorschlag: Origin, issuer, Auth-Typen, kein TLS-Pin); (4) --allow-internal pro Alias speichern?
