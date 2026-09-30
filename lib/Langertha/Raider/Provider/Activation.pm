@@ -6,6 +6,7 @@ use namespace::autoclean;
 use Future::AsyncAwait;
 use URI;
 use Langertha::Manifest;
+use Langertha::Manifest::Builder;
 use Langertha::Raider::Provider::Fetch;
 
 =head1 SYNOPSIS
@@ -76,21 +77,24 @@ has fetch => (
 
 sub manifest_class { 'Langertha::Manifest' }
 
-# The adapter: manifest dialect => [ raider engine name, Langertha engine
-# class ]. It mirrors Langertha::Manifest::Builder's class => dialect table
-# the other way round. Each class takes the endpoint's base_url as its url.
-# anthropic-compat is the bare Anthropic-compatible base: no native
-# structured output, so response_format goes through the synthetic tool and
-# a forced tool_choice (ADR 0007, update of 2026-09-25).
-my %ENGINE_FOR_DIALECT = (
-  'openai-chat'      => [ openai             => 'Langertha::Engine::OpenAI' ],
-  'responses'        => [ responses          => 'Langertha::Engine::OpenAIResponses' ],
-  'perplexity-agent' => [ 'perplexity-agent' => 'Langertha::Engine::Perplexity' ],
-  'anthropic'        => [ anthropic          => 'Langertha::Engine::Anthropic' ],
-  'anthropic-compat' => [ 'anthropic-compat' => 'Langertha::Engine::AnthropicBase' ],
-  'gemini'           => [ gemini             => 'Langertha::Engine::Gemini' ],
-  'ollama'           => [ ollama             => 'Langertha::Engine::Ollama' ],
-  'aki'              => [ aki                => 'Langertha::Engine::AKI' ],
+sub builder_class { 'Langertha::Manifest::Builder' }
+
+# The adapter: manifest dialect => raider engine name (the .raider.yml
+# engine / -o name). The Langertha engine class comes from core
+# (Langertha::Manifest::Builder->engine_class_for_dialect); each class takes
+# the endpoint's base_url as its url. anthropic-compat is the bare
+# Anthropic-compatible base: no native structured output, so response_format
+# goes through the synthetic tool and a forced tool_choice (ADR 0007, update
+# of 2026-09-25) -- t/69 holds that core still answers AnthropicBase.
+my %ENGINE_NAME_FOR_DIALECT = (
+  'openai-chat'      => 'openai',
+  'responses'        => 'responses',
+  'perplexity-agent' => 'perplexity-agent',
+  'anthropic'        => 'anthropic',
+  'anthropic-compat' => 'anthropic-compat',
+  'gemini'           => 'gemini',
+  'ollama'           => 'ollama',
+  'aki'              => 'aki'
 );
 
 # Dialects Langertha knows but raider cannot run on, and why.
@@ -128,13 +132,14 @@ class.
 
 sub engine_for_dialect {
   my ( $self, $dialect ) = @_;
-  my $row = $ENGINE_FOR_DIALECT{$dialect} or return;
-  return @$row;
+  my $name = $ENGINE_NAME_FOR_DIALECT{$dialect} or return;
+  my $class = $self->builder_class->engine_class_for_dialect($dialect) or return;
+  return ( $name, $class );
 }
 
 sub mapped_dialects {
   my ( $self ) = @_;
-  return sort keys %ENGINE_FOR_DIALECT;
+  return sort keys %ENGINE_NAME_FOR_DIALECT;
 }
 
 sub unsupported_dialect {
@@ -299,7 +304,7 @@ __PACKAGE__->meta->make_immutable;
 
 =item * L<Langertha::Raider::EngineResolver> -- builds the engine from the activation
 
-=item * L<Langertha::Manifest::Builder> -- core's engine => dialect table this one mirrors
+=item * L<Langertha::Manifest::Builder> -- core's dialect => engine class table this one asks
 
 =back
 
