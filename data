@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-30T08:07:00Z
+claimed_by: raider-worker-k123
+class: standard
+completed: 2026-09-30T08:07:00Z
+created: 2026-09-30T06:00:25Z
+id: 123
+priority: low
+started: 2026-09-30T07:54:51Z
+status: done
+tags:
+- adr-0005
+- tools
+- explain
+title: 'ADR 0005 B4: Wirkungsklassen je Tool (read/write/network/code/message) in
+  config explain'
+updated: 2026-09-30T08:07:00Z
+---
+
+Statische Wirkungsklassen fuer files, bash, web, perl, hall (bash/perl_eval/perl -c = code, ADR 0005). In config explain neben der Tool-Quelle zeigen. Nur Information, keine Durchsetzung.
+
+2026-09-30 08:05 Decisions: table in new internal lib/Langertha/Raider/ToolEffects.pm (name-keyed; effects_for undef = unknown; [] = known, no outside effect). Classes: list_files/read_file=read; write_file/edit_file=write; bash=code; web_*=network; perl_eval/perl_check=code; perl_cpanm=network+code (downloads then runs build/test code); telegram_reply=message; hall_status=read; hall_spawn=message+code; raider_ask_user=message; wait/pause/abort=none; wait_for=code (host callback, cautious); session_history=read; manage_mcps=code; switch_engine=network. explain_config gains additive 'tools' [{name,source engine:N,effects}]; 'config explain' has no --json document yet (ADR 0013 covers run docs), so no version bump; human output prints a 'tools:' section. Caveat for #121 gate reuse: table is name-keyed, gate must combine with source (a foreign engine:N tool named read_file is not ours). Tests t/104_tool_effects.t (6 subtests) + 8 existing explain/tool-set files pass; t/24 not run (release-manager).
+
+2026-09-30 08:06 Done: ToolEffects table + explain_config tools field + human output; t/104_tool_effects.t green, related explain/tool-set tests green.
+
+Committed as 3ceea03
