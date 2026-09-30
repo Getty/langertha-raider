@@ -19,6 +19,7 @@ use Langertha::Raider::CLI::REPL;
 use Langertha::Raider::CLI::Runner;
 use Langertha::Raider::CLI::Sessions;
 use Langertha::Raider::Config;
+use Langertha::Raider::Config::Migrate;
 use Langertha::Raider::Hall::CLI;
 use Langertha::Raider::SessionStore;
 use Langertha::Raider::Skill;
@@ -33,7 +34,7 @@ use Langertha::Raider::Skill;
 B<Internal module.> Its interface may change without notice.
 
 Everything F<raider> does with its command line: the C<hall>, C<acp>,
-C<config explain>, C<session> and C<provider inspect> subcommands, option parsing, the skill exports, and
+C<config explain>, C<config migrate>, C<session> and C<provider inspect> subcommands, option parsing, the skill exports, and
 then either the REPL (L<Langertha::Raider::CLI::REPL>) or one prompt
 (L<Langertha::Raider::CLI::Runner>). L</run> returns the exit status.
 
@@ -42,12 +43,14 @@ then either the REPL (L<Langertha::Raider::CLI::REPL>) or one prompt
 =over
 
 =item C<0> -- success, including C<--help>, C<--version>, the exports, C<config explain>,
-C<session list>, C<session show>, C<session fork>, C<session rm>,
+C<config migrate> (also with nothing to migrate, and C<--dry-run>), C<session list>, C<session show>, C<session fork>, C<session rm>,
 C<provider inspect> of a valid manifest and leaving the REPL.
 
 =item C<1> -- the run failed: the engine, a tool or the network raised an
 error (with a machine format, the output is the C<failed> document); for
-C<provider inspect>: the manifest was refused (address, redirect), could
+C<config migrate>: the migration was refused (a new file or a backup
+already exists, F<.raider> is no directory, the home directory) or a step
+failed; for C<provider inspect>: the manifest was refused (address, redirect), could
 not be fetched or is not valid; for C<--provider> also: its endpoint is
 not usable (another origin, not https, a refused address, a dialect or
 auth type this raider has no adapter for, no models, a model on several
@@ -56,7 +59,8 @@ endpoints).
 =item C<2> -- usage error: unknown option, a C<-o> that is not
 C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
 machine format, a machine format with C<-i>, or an unknown machine format
-version; for sessions: a C<--session> value that is no session id,
+version; for C<config migrate>: a word after it or a machine format;
+for sessions: a C<--session> value that is no session id,
 more than one of C<--session>, C<--continue> and C<--no-session>, an unknown
 or ambiguous session, or C<--continue> without any session; for
 C<provider inspect>: no target or more than one, a target that is no
@@ -67,7 +71,8 @@ several models, or no C<-k> where the endpoint needs a key;
 C<--allow-internal> without C<--provider>.
 
 =item C<3> -- configuration error: the config file (F<.raider/config.yml>,
-else F<.raider.yml>) cannot be read, the
+else F<.raider.yml>; for C<config migrate> the F<.raider.yml> to migrate)
+cannot be read, the
 engine is unknown, or a pack detection rule is invalid.
 
 =item C<4> -- the session to continue (C<--session>, C<--continue>,
@@ -140,6 +145,7 @@ has in => (
 
 sub app_class     { 'Langertha::Raider::CLI' }
 sub config_class  { 'Langertha::Raider::Config' }
+sub migrate_class { 'Langertha::Raider::Config::Migrate' }
 sub machine_class { 'Langertha::Raider::CLI::Machine' }
 sub provider_class { 'Langertha::Raider::CLI::Provider' }
 sub repl_class    { 'Langertha::Raider::CLI::REPL' }
@@ -163,6 +169,8 @@ The C<--help> text.
 sub usage { <<'USAGE' }
 Usage: raider [options] [prompt...]
        raider config explain [options]     show each setting and its source
+       raider config migrate [--dry-run]   move .raider.yml / .raider.md to
+                                           .raider/ (see its --help)
        raider session list [options]       the project's sessions, newest first
        raider session show ID [--json]     one session, event by event
        raider session resume ID [options]  continue a session in the REPL
@@ -440,11 +448,14 @@ sub run {
   # raider config explain [options]: prints where each setting comes from
   # and exits without writing the config file or building an engine.
   my $config_cmd;
+  # raider config migrate [--dry-run] [options] writes files, so it is the
+  # subcommand only in front of the options.
   if (@argv && $argv[0] eq 'config') {
     shift @argv;
     $config_cmd = shift(@argv) // '';
+    return $self->migrate_command(@argv) if $config_cmd eq 'migrate';
     unless ($config_cmd eq 'explain') {
-      $self->_warn("Usage: raider config explain [options]\n");
+      $self->_warn("Usage: raider config explain [options] | raider config migrate [--dry-run] [options]\n");
       return EXIT_USAGE;
     }
   }
@@ -755,6 +766,115 @@ sub session_command {
   my $in_use = $error =~ / is in use\z/;
   $self->_warn($error.($in_use ? ' by another raider' : '')."\n");
   return $in_use ? EXIT_SESSION_IN_USE : EXIT_RUN_ERROR;
+}
+
+=method migrate_usage
+
+The C<raider config migrate --help> text.
+
+=cut
+
+sub migrate_usage { <<'USAGE' }
+Usage: raider config migrate [--dry-run] [options]
+
+Moves the legacy project files of the working directory (-r DIR) to the
+.raider/ layout: .raider.yml to .raider/config.yml and .raider.md to
+.raider/instructions.md, each only when it exists. Shows what it does
+first. Each new file is written atomically; the legacy file is renamed to
+.raider.yml.bak / .raider.md.bak, so afterwards the same settings are read
+from the new files. .raider/ is created with its .gitignore (sessions/,
+lib/).
+
+api_key (top level, default: or an engine section) is not copied into
+.raider/config.yml, which is meant to be shared: it is reported; move it
+to ~/.raider/config.yml or the engine's *_API_KEY environment variable.
+
+Nothing is merged: when .raider/config.yml or .raider/instructions.md (or
+a backup) already exists, nothing is written.
+
+Options:
+      --dry-run            Show what would happen, write nothing
+  -r, --root DIR           The project (default: cwd)
+      --no-color           Disable ANSI colors
+  -h, --help               Show this help
+
+The report is for humans only; there is no --json form.
+
+Exit status: 0 migrated, nothing to migrate or a dry run, 1 refused or
+failed, 2 usage error, 3 .raider.yml cannot be read.
+USAGE
+
+=method migrate_command
+
+    my $exit = $main->migrate_command(@argv);
+
+C<raider config migrate [--dry-run] [options]> through
+L<Langertha::Raider::Config::Migrate>: the report
+(L<Langertha::Raider::CLI::Output/migrate_report>) on L</output>, then,
+without C<--dry-run>, the migration. A refusal or a failed step is
+reported on L</err>. Takes C<--dry-run>, C<-r>, C<--no-color> and
+C<--help>; the other options of F<raider> are accepted and have no effect,
+as for the session commands. A word after it or a machine format is a
+usage error: the report is for humans only.
+
+=cut
+
+sub migrate_command {
+  my ( $self, @argv ) = @_;
+  # --dry-run belongs to this subcommand only, so it is taken out before
+  # the common options are parsed.
+  my $dry_run = 0;
+  my @rest;
+  while (@argv) {
+    my $arg = shift @argv;
+    if ($arg eq '--') { push @rest, $arg, @argv; last }
+    if ($arg eq '--dry-run') { $dry_run = 1; next }
+    push @rest, $arg;
+  }
+  my ( $opt, @words ) = $self->parse_options(@rest) or return EXIT_USAGE;
+  if ($opt->{help}) {
+    $self->output->emit($self->migrate_usage);
+    return EXIT_OK;
+  }
+  if (@words) {
+    $self->_warn("Usage: raider config migrate [--dry-run] [options]\n");
+    return EXIT_USAGE;
+  }
+  if ($opt->{machine}) {
+    $self->_warn("raider config migrate: no machine output, the report is for humans only\n");
+    return EXIT_USAGE;
+  }
+  $ENV{ANSI_COLORS_DISABLED} = 1 if $opt->{no_color};
+
+  my $migrate = $self->migrate_class->new(root => $opt->{root} // Path::Tiny->cwd->stringify);
+  my $plan = eval { $migrate->plan };
+  unless ($plan) {
+    $self->_warn($self->output->error_text($@)."\n");
+    return EXIT_CONFIG;
+  }
+  if (my @refused = @{ $plan->{refused} }) {
+    $self->_warn('raider config migrate: '.$_."\n") for @refused;
+    $self->_warn("raider config migrate: nothing written\n");
+    return EXIT_RUN_ERROR;
+  }
+  $self->output->migrate_report($plan, dry_run => $dry_run);
+  return EXIT_OK if $dry_run || !@{ $plan->{steps} };
+
+  my @results = $migrate->apply($plan);
+  $self->output->migrate_done(@results);
+  my $failed = 0;
+  for my $r (@results) {
+    my $s = $r->{step};
+    if ($r->{error}) {
+      $failed = 1;
+      $self->_warn('raider config migrate: '.$s->{from_label}.' not migrated, it stays in use: '
+        .$self->output->error_text($r->{error})."\n");
+    }
+    elsif ($r->{skipped}) {
+      $self->_warn('raider config migrate: '.$s->{from_label}." not migrated, stopped after the error above\n");
+    }
+  }
+  return $failed ? EXIT_RUN_ERROR : EXIT_OK;
 }
 
 =method provider_usage

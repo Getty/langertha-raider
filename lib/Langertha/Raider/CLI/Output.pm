@@ -21,8 +21,8 @@ use Term::ANSIColor qw( colored color );
 B<Internal module.> Its interface may change without notice.
 
 Everything the F<raider> CLI prints for a human goes through here: the
-blue/yellow palette, the agent/meta/error lines and the C<raider config
-explain> report. The machine output (C<--json> and friends) is
+blue/yellow palette, the agent/meta/error lines, the C<raider config
+explain> report and the C<raider config migrate> report. The machine output (C<--json> and friends) is
 L<Langertha::Raider::CLI::Machine>.
 
 =cut
@@ -238,6 +238,82 @@ sub config_report {
         @{ $t->{granted_by} } ? 'granted by '.join(', ', @{ $t->{granted_by} }) : 'not granted',
         $self->c(meta => '('.join('; ', @about).')')));
     }
+  }
+  return;
+}
+
+=method migrate_report
+
+    $out->migrate_report($plan, dry_run => 1);
+
+Prints what C<raider config migrate> does, from a
+L<Langertha::Raider::Config::Migrate/plan> that was not refused: per
+legacy file its new file, its backup and whether the content changes --
+copied unchanged, without the C<api_key> lines (their line numbers), or
+rewritten (then the new content follows, it holds no C<api_key>) -- and
+where an C<api_key> was left out; whether F<.raider/.gitignore> is
+created; with C<dry_run> that nothing was written. Never prints the value
+of an C<api_key>.
+
+=cut
+
+sub migrate_report {
+  my ( $self, $plan, %opt ) = @_;
+  unless (@{ $plan->{steps} }) {
+    $self->emit($self->c(meta => 'nothing to migrate: no .raider.yml or .raider.md in '.$plan->{root}), "\n");
+    return;
+  }
+  for my $s (@{ $plan->{steps} }) {
+    $self->emit($self->c(title => $s->{from_label}), ' -> ', $self->c(title => $s->{to_label}), "\n");
+    $self->emit('  ', $self->c(meta => 'backup:  '), $s->{backup_label},
+      $self->c(meta => ' ('.$s->{from_label}.' is renamed to it)'), "\n");
+    my $lines = $s->{lines}.' line'.( $s->{lines} == 1 ? '' : 's' );
+    my $content = $s->{rewritten} ? 'rewritten from the parsed YAML, comments and layout are not kept'
+      : @{ $s->{removed_lines} } ? 'copied without its api_key line'.( @{ $s->{removed_lines} } == 1 ? ' ' : 's ' )
+          .join(', ', @{ $s->{removed_lines} }).' ('.$lines.' left)'
+      : 'copied unchanged ('.$lines.')';
+    $self->emit('  ', $self->c(meta => 'content: '), $content, "\n");
+    $self->emit('  ', $self->c(warn => 'not copied: api_key in '.join(', ', map { $self->_layer_name($_) } @{ $s->{api_keys} })),
+      "\n") if @{ $s->{api_keys} };
+    if ($s->{rewritten}) {
+      my $text = $s->{bytes};
+      utf8::decode($text);
+      $self->emit('    ', $self->c(meta => '| '), $_, "\n") for split /\n/, $text;
+    }
+  }
+  $self->emit($self->c(meta => 'creates .raider/.gitignore (sessions/, lib/)'), "\n") if $plan->{gitignore};
+  if (my @keyed = grep { @{ $_->{api_keys} } } @{ $plan->{steps} }) {
+    $self->emit($self->c(warn => 'api_key is not copied: .raider/config.yml is meant to be shared, and a project'
+      .' must not choose a secret. Put the key into ~/.raider/config.yml (same place) or the engine\'s'
+      .' *_API_KEY environment variable. '.join(', ', map { $_->{backup_label} } @keyed)
+      .' still holds it: delete the backup once the key is moved.'), "\n");
+  }
+  $self->emit($self->c(meta => 'dry run: nothing written'), "\n") if $opt{dry_run};
+  return;
+}
+
+# A layer of Config::explain as the user reads it.
+sub _layer_name {
+  my ( $self, $layer ) = @_;
+  return $layer eq 'top' ? 'the top level' : $layer.':';
+}
+
+=method migrate_done
+
+    $out->migrate_done(@results);
+
+One line per step of L<Langertha::Raider::Config::Migrate/apply> that was
+done: C<migrated FROM -E<gt> TO (backup BACKUP)>. Failed and skipped
+steps are the caller's to report.
+
+=cut
+
+sub migrate_done {
+  my ( $self, @results ) = @_;
+  for my $r (grep { !$_->{error} && !$_->{skipped} } @results) {
+    my $s = $r->{step};
+    $self->emit('migrated ', $self->c(title => $s->{from_label}), ' -> ', $self->c(title => $s->{to_label}),
+      $self->c(meta => ' (backup '.$s->{backup_label}.')'), "\n");
   }
   return;
 }

@@ -112,6 +112,7 @@ from `~/.claude` are not read or reused as Anthropic API credentials.
 ```
 raider [options] [prompt...]        run a prompt (or open the REPL)
 raider config explain [options]     show each effective setting and its source
+raider config migrate [--dry-run]   move .raider.yml / .raider.md into .raider/
 raider session list | show | resume | fork | rm     see Sessions
 raider provider inspect HOST        show a provider's manifest, see Providers
 raider --provider HOST [options]    run on a provider's manifest endpoint, see Providers
@@ -286,6 +287,21 @@ model:
 ```bash
 raider config explain            # or /config inside the REPL
 raider -e openai config explain  # options may come first
+```
+
+To move a project to the new layout, `raider config migrate` turns `.raider.yml` into
+`.raider/config.yml` and `.raider.md` into `.raider/instructions.md` (each only if it
+exists) and shows what it does first; `--dry-run` stops there. The new files are
+written atomically, the legacy ones are renamed to `.raider.yml.bak` / `.raider.md.bak`,
+and `.raider/` gets its `.gitignore` — afterwards `raider config explain` shows the
+same settings from the new files. An `api_key` is **not** copied into
+`.raider/config.yml`, which is meant to be committed: it is reported (never printed),
+move it to `~/.raider/config.yml` or the engine's `*_API_KEY` variable. Nothing is
+merged — if a new file or a backup already exists, nothing is written.
+
+```bash
+raider config migrate --dry-run  # show what would happen
+raider config migrate -r ~/dev/app
 ```
 
 ## Sessions
@@ -676,8 +692,8 @@ vocabulary live in [`CONTEXT.md`](CONTEXT.md); it lands in small vertical slices
   `sessions/`, `memory/`) that never bleeds into projects, a `<project>/.raider/`
   config layer, and a `raider config migrate` from today's `.raider.yml` / `.raider.md`.
   *Today: per-project `.raider/config.yml` and `.raider/instructions.md` (or the
-  legacy `.raider.yml` and `.raider.md`) and the home `~/.raider/config.yml` under
-  them.*
+  legacy `.raider.yml` and `.raider.md`, which `raider config migrate` converts) and
+  the home `~/.raider/config.yml` under them.*
 - **Inspectable context & diagnostics** (ADR 0004) — a per-call, itemized
   `ContextPlan` you can read with `raider context explain`, a `raider doctor`
   health check, per-directory instruction walking, and an explicit workspace-trust

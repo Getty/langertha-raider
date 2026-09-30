@@ -94,7 +94,7 @@ Marked internal today:
 `::CLI::PromptBuilder`, `::CLI::Sessions`.
 Added since (rule 6, marked from the start): `::CLI::Provider`, `::Provider::Fetch`,
 `::Provider::Activation`, `::Provider::Change`, `::ToolArgs`, `::Approval`,
-`::ToolEffects`, `::Home`, `::Instructions`.
+`::ToolEffects`, `::Home`, `::Instructions`, `::Config::Migrate`.
 
 Internal by this ADR, still without the marker:
 `Langertha::Raider::Hall::ACP`, `::Hall::ACP::SubStream`, `::Hall::CLI`, `::Hall::Cron`,

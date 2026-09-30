@@ -23,6 +23,7 @@ exit Langertha::Raider::CLI::Main->new->run(@ARGV);
     raider --json "Summarize README.md" > result.json
     raider --stream-json "Run the tests" | jq -c 'select(.type == "tool.call")'
     raider config explain -m gpt-4o
+    raider config migrate --dry-run
     raider session list
     raider --continue "Now fix the first one"
     raider provider inspect provider.example --json
@@ -73,6 +74,27 @@ use is meant. When both exist, only F<.raider/instructions.md> is read,
 F<raider> warns that it ignores F<.raider.md>, and C<config explain> names
 the ignored file under C<instructions:>. The prompt-builder (C</prompt>)
 writes the file in use, and F<.raider.md> when there is none.
+
+C<raider config migrate [--dry-run] [-r DIR]> moves the legacy files of a
+project to the new layout: F<.raider.yml> to F<.raider/config.yml> and
+F<.raider.md> to F<.raider/instructions.md>, each only when it exists. It
+first shows what it does -- per file the new file, the backup and whether
+the content changes -- and with C<--dry-run> stops there. Each new file is
+written atomically with the legacy file's permissions, then the legacy
+file is renamed to F<.raider.yml.bak> or F<.raider.md.bak>, so afterwards
+the same settings are read from the new files; F<.raider/> is created with
+its F<.gitignore>. A step that fails leaves its legacy file in use. An
+C<api_key> (top level, C<default:> or an engine section) is not copied
+into F<.raider/config.yml>, which is meant to be shared: it is reported
+with where it was, never printed, and belongs in F<~/.raider/config.yml>
+or the engine's C<*_API_KEY> variable; its lines are dropped (comments
+stay), and where that would change the meaning of the file the file is
+rewritten from its parsed content, which drops comments and says so.
+Nothing is merged: when a new file or a backup already exists, when
+F<.raider> is no directory, or in the home directory itself (where
+F<.raider/config.yml> is the home file), nothing is written and the exit
+status is 1. Only C<config migrate> in front of the options is the
+subcommand. Its report is for humans only; there is no C<--json> form.
 
 Interactive mode (C<-i>) opens a REPL with conversation history retained
 across turns. With L<Term::ReadLine::Gnu> installed, line editing and
@@ -669,12 +691,13 @@ and compatibility rules are those of L</Versions>.
 =over
 
 =item C<0> -- success, including C<--help>, C<--version>, the exports, C<config explain>,
-C<session list>, C<session show>, C<session fork>, C<session rm>,
+C<config migrate> (also with nothing to migrate, and C<--dry-run>), C<session list>, C<session show>, C<session fork>, C<session rm>,
 C<provider inspect> of a valid manifest and leaving the REPL.
 
 =item C<1> -- the run failed: the engine, a tool or the network raised an
 error. With a machine output flag, the document says C<failed>. For
-C<provider inspect>: the manifest was refused, could not be fetched or is
+C<config migrate>: the migration was refused, also with C<--dry-run>, or
+a step failed. For C<provider inspect>: the manifest was refused, could not be fetched or is
 not valid (the document says C<refused> or C<failed>). For C<--provider>
 also: its endpoint cannot be used (another origin, not C<https>, a refused
 address, a dialect or auth type this raider has no adapter for, no
@@ -683,14 +706,16 @@ models, a model on several endpoints); see L</Using a provider>.
 =item C<2> -- usage error: unknown option, a C<-o> that is not
 C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
 machine output flag, a machine output flag with C<-i>, or an unknown format
-version; for C<provider inspect> also no target or more than one, a
+version; for C<config migrate> a word after it or a machine output flag;
+for C<provider inspect> also no target or more than one, a
 target that is no host or C<https> origin, or a C<--stream-*> flag; for
 C<--provider> a target that is none, C<-e>, C<-o engine=>, C<-o url=> or
 C<config explain> with it, a model the manifest does not list, no C<-m>
 where it lists several, or no C<-k> where the endpoint needs a key; and
 C<--allow-internal> without C<--provider>.
 
-=item C<3> -- configuration error: the config file (project or home) cannot be read, the
+=item C<3> -- configuration error: the config file (project or home; for
+C<config migrate> the F<.raider.yml> to migrate) cannot be read, the
 engine is unknown, or a pack detection rule is invalid.
 
 =item C<4> -- the session to continue (C<--session>, C<--continue>,

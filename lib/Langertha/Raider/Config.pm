@@ -4,6 +4,7 @@ our $VERSION = '0.503';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );
+use JSON::MaybeXS ();
 use Path::Tiny;
 use YAML::PP ();
 use Langertha::Raider::Detect;
@@ -115,7 +116,9 @@ has root => (
 L<Path::Tiny> of the file in use: L</native_file> when it exists, else
 L</legacy_file>. Decided once, when first asked. The writers write here, so
 without any file they create the legacy F<.raider.yml>, never
-F<.raider/config.yml>.
+F<.raider/config.yml>; only C<raider config migrate>
+(L<Langertha::Raider::Config::Migrate>, with L</migration_content>)
+creates that.
 
 =cut
 
@@ -1093,6 +1096,71 @@ sub set_model {
     return 1;
   });
   return;
+}
+
+=method remove_api_keys
+
+    my @where = $config->remove_api_keys($data);   # ('top', 'openai')
+
+Deletes C<api_key> from the top level and from every section of the
+parsed C<$data>, in place. Returns the layers it was in, named as in
+L</explain> (C<top>, C<default>, the engine sections sorted).
+
+=cut
+
+sub remove_api_keys {
+  my ( $self, $data ) = @_;
+  my @where;
+  push @where, 'top' if exists $data->{api_key};
+  delete $data->{api_key};
+  my @sections = sort { ( $a ne 'default' ) <=> ( $b ne 'default' ) || $a cmp $b }
+    grep { $self->_is_section($data, $_) } keys %$data;
+  for my $section (@sections) {
+    next unless exists $data->{$section}{api_key};
+    delete $data->{$section}{api_key};
+    push @where, $section;
+  }
+  return @where;
+}
+
+=method migration_content
+
+    my $m = $config->migration_content;
+    # { text => "...", api_keys => ['top', 'openai'],
+    #   removed_lines => [ 3, 9 ], rewritten => 0 }
+
+The legacy F<.raider.yml> (L</legacy_file>) as the content of a
+F<.raider/config.yml>, for C<raider config migrate>: the file as it is,
+but without any C<api_key> (L</remove_api_keys>), because a project must
+not choose a secret. The C<api_key> lines are dropped from the text, so
+comments and layout stay, when what is left parses to exactly the data
+without the keys; C<removed_lines> are their line numbers. Otherwise the
+data without the keys is written anew (C<rewritten>), losing comments and
+layout. Croaks like L</data> when the file does not parse; an absent file
+gives an empty text.
+
+=cut
+
+sub migration_content {
+  my ( $self ) = @_;
+  my $file = $self->legacy_file;
+  my $want = $self->_load($file);
+  my $text = -f $file ? $file->slurp_utf8 : '';
+  my @where = $self->remove_api_keys($want);
+  return { text => $text, api_keys => [], removed_lines => [], rewritten => 0 } unless @where;
+  my @lines = split /^/m, $text;
+  my ( @kept, @removed );
+  for my $n (0 .. $#lines) {
+    if ($lines[$n] =~ /\A[ \t]*api_key[ \t]*:(?:[ \t].*)?\r?\n?\z/) { push @removed, $n + 1 }
+    else                                                           { push @kept, $lines[$n] }
+  }
+  my $stripped = join '', @kept;
+  my $got = eval { YAML::PP->new->load_string($stripped) };
+  $got = {} if !$@ && !defined $got;
+  my $json = JSON::MaybeXS->new(canonical => 1, allow_nonref => 1, allow_blessed => 1, convert_blessed => 1);
+  return { text => $stripped, api_keys => \@where, removed_lines => \@removed, rewritten => 0 }
+    if ref $got eq 'HASH' && $json->encode($got) eq $json->encode($want);
+  return { text => $self->_dump($want), api_keys => \@where, removed_lines => [], rewritten => 1 };
 }
 
 __PACKAGE__->meta->make_immutable;
