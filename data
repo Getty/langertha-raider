@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-30T03:57:57Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-30T03:57:57Z
+created: 2026-09-30T03:45:39Z
+id: 112
+priority: medium
+started: 2026-09-30T03:45:55Z
+status: done
+tags:
+- history
+- render
+- langertha-k344
+title: 'Tool-Result-Renderer: function_call_output.output als Array (input_image/input_text)
+  rendern'
+updated: 2026-09-30T03:57:57Z
+---
+
+Aus langertha#358 (k344). Seit langertha k344 kann function_call_output.output auf Responses-Engines (OpenAIResponses, Perplexity) bei supports(image_input) ein Array aus input_text/input_image-Parts sein statt eines Strings. _render_history_block (lib/Langertha/Raider.pm ~1201-1205) behandelt output nur als String und faellt sonst auf {content} zurueck -> "tool_result: " leer. Fix: Array-output ueber _render_history_payload_value rendern; input_image-Part als "[image]" lesbar machen statt "<input_image>". Analog pruefen: Gemini functionResponse.parts mit inlineData (k344 Gemini 3) - nicht verschlucken. Regressionstest in t/ mit konstruierten History-Eintraegen (kein Live-Call).
+
+2026-09-30 03:53 Also found (outside scope, not fixed): (1) Gemini functionResponse.response as a structuredContent hash (langertha k336: response is the MCP structuredContent, no 'result' key) renders as an empty 'tool_result: ' in _render_history_block -- the payload is swallowed; fix would render the hash via _render_history_args when there is no 'result'. (2) Anthropic tool_result image block ({type=>'image',source=>{...}}, k326) renders as '<image>', while Responses/Gemini images now render '[image]' -- cosmetic inconsistency. Both for this board (langertha-raider).
+
+2026-09-30 03:54 Done: _render_history_block (lib/Langertha/Raider.pm) renders function_call_output/tool_result {output} through _render_history_payload_value, so an input_text/input_image array (langertha k344) is flattened instead of falling back to the absent {content}; input_image renders '[image]'; Gemini functionResponse appends functionResponse.parts via the same path and an inlineData part with image/* mimeType renders '[image]' (image-only result -> 'tool_result: [image]'). String output unchanged. Verified: new subtest 'tool-result images from native image wires (k344)' in t/86_raider_self_tools.t red before (4 fails), green after; full prove -I/home/getty/dev/langertha/lib -Ilib -r t PASS (85 files, 748 tests; t/live skipped, RAIDER_LIVE_TASKS unset). Not committed.
+
+2026-09-30 03:57 Committed as b7c1a05 (Raider.pm, t/86_raider_self_tools.t, Changes). t/86 re-run green.
