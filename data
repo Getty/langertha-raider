@@ -1,0 +1,45 @@
+---
+claimed_at: 2026-09-30T06:12:51Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-30T06:12:45Z
+created: 2026-09-30T04:52:35Z
+id: 118
+priority: medium
+started: 2026-09-30T04:52:45Z
+status: done
+tags:
+- provider-discovery
+- m5
+- cli
+title: 'raider provider inspect HOST: Manifest abrufen, validieren, anzeigen (Slice
+  1 von #23)'
+updated: 2026-09-30T09:19:39Z
+---
+
+Erster Schnitt aus #23, braucht keine Policy/Executor (ADR 0005) und kein ~/.raider (ADR 0011): nur lesen und anzeigen, nichts speichern, keine Credentials.
+- raider provider inspect HOST[:PORT] (oder volle https-URL): GET https://HOST/.well-known/langertha.json mit Limits (nur https; Groesse, Zeit, Redirects begrenzt; Redirect auf anderen Origin nicht folgen bzw. klar melden; keine Credentials/API-Keys mitsenden; Ziel-IPs Loopback/Link-Local/Private/Metadaten 169.254.169.254 abweisen, ausser explizit per --allow-internal fuer bewusst freigegebene interne Knarr/Skeid-Origins).
+- Validieren mit Langertha::Manifest (langertha#191, ADR 0029 in langertha, auf langertha main, noch nicht auf CPAN -> Langertha-Floor bleibt 0.503).
+- Ausgabe: provider_id, issuer, Endpunkte (id, dialect, base_url, auth_ref), Auth (id, type), Modelle (id, endpoint_ref, capabilities); Warnung fuer unbekannte dialects/auth types; extensions nur als inert erwaehnt. --json nach ADR 0013.
+- Fixtures F33 (Befehlsfeld -> abgelehnt/inert), F34 (Origin-Wechsel beim Redirect), F35 (interne Adresse) als Tests mit lokalem Fake-Server; kein Netz.
+- Doku: bin/raider POD, README Provider-Abschnitt (Roadmap-Eintrag anpassen: inspect ist da).
+
+2026-09-30 04:57 Plan: Langertha::Raider::Provider::Fetch (internal: target normalisation, address policy, bounded fetch over Net::Async::HTTP pinned to the checked IP with SNI/verifycn = host, own same-origin redirect loop) + Langertha::Raider::CLI::Provider (internal: inspect presentation, human + ADR 0013 document with status completed/failed/refused). Main dispatches 'provider inspect' like 'session'. Decisions: cloud-metadata, unspecified, multicast, 240/4 refused even with --allow-internal (a metadata service is never a knarr); exit 1 for refused/failed/invalid, 2 for bad target.
+
+2026-09-30 05:11 Implemented: lib/Langertha/Raider/Provider/Fetch.pm, lib/Langertha/Raider/CLI/Provider.pm, Main dispatch + usage, bin/raider PROVIDERS section, README Providers + Roadmap, verify-binary step 2 (provider inspect --help + refused localhost run through the packed resolver). Tests t/67_provider_fetch.t (fetch/policy/limits against a forked local HTTPS server with its own CA, t/lib/Test/Raider/FakeHTTPS.pm) and t/68_cli_provider_inspect.t (CLI, F33-F36). Found+fixed during work: aborting a Net::Async::HTTP request from inside on_header dies with 'Spurious on_read of connection while idle' -> abort deferred to loop->later, limit error kept synchronously.
+
+2026-09-30: Worker auf Wunsch des Maintainers gestoppt (mitten in den Mutation-Checks der Tests). Stand uncommittet im Worktree .claude/worktrees/agent-a96e2510ea6a7c7e2 (Branch worktree-agent-a96e2510ea6a7c7e2, Basis 3e6f2a2): neu lib/Langertha/Raider/CLI/Provider.pm, lib/Langertha/Raider/Provider/, t/67_provider_fetch.t, t/68_cli_provider_inspect.t, t/lib/Test/Raider/FakeHTTPS.pm; geaendert CLI/Main.pm, bin/raider, README.md, scripts/build-binary.sh, verify-binary.sh. Ungeprueft: Tests evtl. nicht vollstaendig gruen, volle Suite nicht gelaufen, Binary nicht gebaut. Uebernehmer: Worktree pruefen, fertigstellen, dann committen lassen; Worktree danach entfernen.
+
+2026-09-30 Übernahme: WIP auf main (ebb3eaf) rebased, t/67+t/68 grün gegen ~/dev/langertha/lib. Installiertes Langertha 0.503 hat kein Langertha::Manifest -> Hub um dzil install von langertha main gebeten; Manifest wird lazy geladen, damit CLI gegen CPAN-0.503 lauffähig bleibt.
+
+2026-09-30 06:01 Mutation checks done (31 mutants on Fetch.pm/CLI/Provider.pm, all killed by t/67+t/68 against installed Langertha): address policy (allow-internal gate, metadata never, all addresses checked, literals checked, v4-mapped, 240/4), origin check incl. scheme-only and port-only change (F34), Content-Length + streamed size limit incl. off-by-one, timeout, redirect limit, Authorization header, address pinning, TLS verify/verifycn name, ssl_options cannot override checks, connect fallback, CLI exit/invalid handling (F33), warnings, extensions note. Gaps fixed: downgrade redirect test now keeps host+port (scheme-only mutant survived before); new test that ssl_options cannot switch TLS checks off; new test for base_url warnings (plain http, private, metadata). Removed dead My::Redirect package in t/68. cpanfile: requires 'Langertha::Manifest' (hard dep, top-level use; Langertha floor stays 0.503 -> release manager bumps it at the joint release).
+
+2026-09-30 06:11 Done, commit-ready (uncommitted) in worktree agent-a96e2510ea6a7c7e2. New: Provider/Fetch.pm (bounded https fetch, address policy, pinned address, same-origin redirects, limits, no credentials), CLI/Provider.pm (human + ADR 0013 document, completed/refused/failed), t/67, t/68, t/lib/Test/Raider/FakeHTTPS.pm. Changed: CLI/Main.pm dispatch+usage, bin/raider PROVIDERS POD, README Providers+Roadmap, cpanfile requires Langertha::Manifest (hard dep; Langertha floor 0.503 must be bumped by the release manager at the joint release), build-binary.sh comment, verify-binary.sh provider step. Verified against installed Langertha (langertha main): prove -lr t = 88 files, 778 tests, PASS (3 live files skipped as designed); 31 mutants all killed; scripts/build-binary.sh (installed Langertha, no extra inc) + scripts/verify-binary.sh = verify: OK, Langertha::Manifest* packed; one-off: packed binary inspected a local fake HTTPS provider over real TLS (SSL_CERT_FILE) -> completed. Note: earlier comment 'Manifest wird lazy geladen' is obsolete - it is a top-level use.
+
+2026-09-30 Orchestrator: (1) Endpunkt-Hostnamen werden bei inspect NICHT per DNS aufgelöst (inspect zeigt nur an; Adressprüfung beim Benutzen gehört zu #119). (2) Teredo 2001::/32 bleibt vorerst öffentlich. (3) Metadata/unspecified/multicast/240/4 immer verweigert auch mit --allow-internal -> Frage an Getty, ob als ADR-0007-Nachtrag.
+
+Release note: the Langertha floor 0.503 in cpanfile must be raised to the Langertha version that ships Langertha::Manifest at the joint release.
+
+Committed as 4a8ec6c
+
+Langertha floor must now cover langertha #369, #374, #375, #376 and Langertha::Manifest (k142 adds the #369 use)
