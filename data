@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-30T05:03:29Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-30T05:03:22Z
+created: 2026-09-30T04:45:44Z
+id: 117
+priority: low
+started: 2026-09-30T04:52:47Z
+status: done
+tags:
+- history
+- render
+title: 'History-Renderer: Anthropic document mit source.type content und context-Feld'
+updated: 2026-09-30T05:03:29Z
+---
+
+Aus k116-Review. Ein Anthropic-document mit source {type=>"content", content=>[text-Bloecke]} rendert nur als "[document]", der Text geht verloren; das optionale context-Feld eines documents wird nicht gezeigt. Fix in _render_history_block (document-Zweig): content-Source ueber _render_history_payload_value rendern, context optional anhaengen. Test in t/86_raider_self_tools.t.
+
+2026-09-30 05:02 Done: _render_history_block document branch renders source.type content via _render_history_payload_value (string or block list; image chunks -> [image]), optional context as its own '[context] …' line after the title line and before the text (also for text and base64 sources). A text document without title still renders as bare text; no text -> [document] marker. Shape checked against platform.claude.com citations docs (custom content documents; title/context passed to the model, not cited). Test: new subtest in t/86_raider_self_tools.t, red first (2 of the new asserts failed), green after; full prove -r t PASS (86 files, 759 tests; t/82_live_raider.t and t/live/* skipped, no keys/live flags).
+
+2026-09-30 05:03 Committed as ebb3eaf (Render Anthropic content-source documents and document context (k117))
