@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-30T08:08:49Z
+claimed_by: raider-worker-k125
+class: standard
+completed: 2026-09-30T08:08:49Z
+created: 2026-09-30T06:00:39Z
+id: 125
+priority: medium
+started: 2026-09-30T06:55:44Z
+status: done
+tags:
+- adr-0011
+- config
+title: 'ADR 0011 A1: ein Ort fuer ~/.raider- und <root>/.raider-Pfade'
+updated: 2026-09-30T08:08:54Z
+---
+
+Interner Helper fuer Home (~/.raider) und Projekt (<root>/.raider); heute doppelt aufgeloest (Packs::_home_dir, SessionStore::_build_home). Packs und SessionStore darauf umstellen. Akzeptanz: bestehende Tests gruen, isolate_home() weiter wirksam. Reines Refactoring.
+
+2026-09-30 Worker bei Speicher-Thrashing hängen geblieben (Watchdog). Uncommitteter Teilstand im Worktree agent-a96e2510ea6a7c7e2: neu lib/Langertha/Raider/Home.pm, geändert Packs.pm, PerlTools.pm, SessionStore.pm; ungetestet. Wird fortgesetzt, sobald der Speicherdruck nachlässt.
+
+2026-09-30 08:08 Reviewed WIP, kept as is. Home.pm (home_dir/home_base/project_base) used by Packs, SessionStore, PerlTools; new t/25_raider_home.t. 12 files/128 tests pass (00_load, 20-24, 25_raider_home, 54-57, 61). Unchanged on purpose: Detect .raider/no-perl (relative marker), REPL .raider_history, Hall .raider-hall*. build-binary.sh packs all .pm under lib/Langertha.
+
+2026-09-30 08:08 Committed as 0b76f59
