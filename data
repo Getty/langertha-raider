@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-30T08:51:25Z
+claimed_by: raider-worker-k132
+class: standard
+completed: 2026-09-30T08:51:19Z
+created: 2026-09-30T06:01:34Z
+id: 132
+priority: low
+started: 2026-09-30T08:49:28Z
+status: done
+tags:
+- provider-discovery
+- adr-0011
+- config
+title: 'Provider C2: Writer fuer ~/.raider/config.yml (Backup, atomar)'
+updated: 2026-09-30T08:51:25Z
+---
+
+Nach #128. Home-config.yml schreiben: Backup + atomar, Config::_update wiederverwenden. Voraussetzung fuer provider add.
+
+2026-09-30 08:50 Done (uncommitted). Config::update_home($code): internal single entry point, same callback shape as _update (mutate parsed data, true = write, returns true if wrote). Decisions: backup = config.yml.bak next to it, one generation, 0600, only when a previous file existed; dump first (via new shared Config::_dump, also used by _update -> no duplicated YAML dump), then temp file in ~/.raider (Path::Tiny tempfile, 0600) + rename, so a failing dump/write leaves file+bak untouched and no temp litter; dir created 0700 only when absent (existing dir mode not changed); broken/non-mapping existing file croaks via _load, untouched; no home at all croaks. home==project root: home_file IS the project file (uses_home false); update_home writes that same file, clears data/home_data/uses_home caches; project writers stay project-only and keep working on it. Not done: no provider add/alias schema (k133). Tests: t/28_config_home_writer.t (8 subtests) + t/28_config_* + t/25_config.t = 5 files / 43 tests pass, installed Langertha.
+
+update_home + t/28_config_home_writer.t; see notes
+
+Committed as 3bd6f52
