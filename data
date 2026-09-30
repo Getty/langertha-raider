@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-30T09:02:13Z
+claimed_by: raider-worker-k129
+class: standard
+completed: 2026-09-30T09:02:07Z
+created: 2026-09-30T06:01:10Z
+id: 129
+priority: low
+started: 2026-09-30T08:51:48Z
+status: done
+tags:
+- adr-0011
+- config
+- explain
+title: 'ADR 0011 A5: project_tools parsen und nur in config explain zeigen'
+updated: 2026-09-30T09:02:13Z
+---
+
+Nach #128. project_tools aus ~/.raider/config.yml validieren; Selektoren "*" und Pfad-Globs gegen die kanonische Root matchen; explain zeigt requested vs granted je Tool. Keine Aenderung am Mounting (Durchsetzung haengt an offenen Fragen: ersetzt project_tools die Perl-Freigabe durch Pack-Detektion? Tool-Namen? Workspace-Namen brauchen die Registry aus ADR 0004).
+
+2026-09-30 08:54 Plan: Config: project_tools becomes a raider key (APP_KEY, may be a mapping; never reaches the engine) that the layered resolve skips: read only from the TOP level of the home file (home_data, or the file in use when it IS ~/.raider/config.yml); in the project file -> explain ignored 'project_tools' (only ~/.raider/config.yml grants tools, ADR 0011/0005); inside default:/engine sections of either file -> ignored (top level of the home file only). New lazy Config->project_tools validates (croak 'Invalid project_tools setting ...', like no_detect: map of selector -> list of names or comma string); CLI::Main parses it up front with the files (exit 3). Selectors: '*' = every project; starts with / or ~/ (or is ~) = path glob against realpath(root): ** any chars, * and ? not crossing /, everything else literal, trailing / dropped, ~ = Home->home_dir, the wildcard-free leading dir is realpath'd when it exists; ~user and relative paths with / croak; anything else = workspace name, accepted, shown 'not matched: workspace names are not supported yet' (ADR 0004 registry). Request side: the only existing request mechanism is a pack's tools: (pack.yml, e.g. perl pack -> perl) -> explain shows per name requested_by (active packs) and granted_by (matching selectors); no project-level request key invented. known = ToolEffects name, mounted tool name, or the tool group 'perl' (the one group name raider grants today); unknown shown, not an error. -o project_tools is ignored and reported. Mounting untouched.
+
+2026-09-30 09:01 Decisions (provisional, for Getty): (1) Request side: no project-level request key exists, none invented; the only request mechanism today is a pack's tools: in pack.yml (perl pack -> perl), so explain shows requested_by = active packs. (2) known: 'tool' = ToolEffects name or mounted tool, 'tool group' = perl (the one group name perl_tools_grant honours), undef = unknown (shown, no error). 'telegram' therefore shows unknown -- the service name vs tool name (telegram_reply) question is open. (3) Glob semantics: whole-path match against realpath(root); ** any chars, * / ? not crossing /, rest literal ([ { included); trailing / dropped; ~ and ~/ = Home->home_dir; wildcard-free leading dirs realpath'd when they exist. ~user, relative paths with /, and names with * ? croak (fail loud rather than guess). (4) Invalid shape croaks 'Invalid project_tools setting project_tools[.SEL]: ...'; CLI::Main validates it up front with the files -> exit 3 one clean line. A project-file project_tools is not validated (it is ignored anyway). (5) project_tools inside default:/engine sections of either file: ignored + reported ('read only at the top level of ~/.raider/config.yml'), like engine: inside a section. -o project_tools: ignored + reported. (6) Run in ~ itself: the one file is the home file and grants. Open (not decided): does project_tools replace today's Perl grant from pack detection; which tool/service names exist (telegram etc.); workspace-name selectors need the ADR 0004 registry; is project_tools also allowed in raiders/<name>.yml later.
+
+2026-09-30 09:01 Done (uncommitted, tree commit-ready). Config.pm: project_tools is a raider key (APP_KEY, may be a mapping, never reaches the engine) skipped by the layered resolve; new lazy attr project_tools (top level of the home file only: home_data, or the file in use when it is ~/.raider/config.yml), normalize_project_tools (validation, croaks), project_tools_matches (selector kind all/path/workspace, matched + reason vs realpath(root)); explain adds project_tools {file,label,selectors} and lists project-file / section project_tools as ignored; update_home clears the cache; _is_home_file factored out of _build_uses_home. Application::explain_config: project_tools.tools per name {granted_by, requested_by (active packs' tools:), known}; -o project_tools ignored+reported; excluded from values. Output::config_report: 'project tools: <label>' section with selectors: and tools:. CLI::Main validates project_tools up front (exit 3). Docs: Config/Application/Output POD, bin/raider DESCRIPTION, README config section. Mounting untouched (_build_tool_servers / perl_tools_grant unchanged; test asserts identical mounted tools + perl grant with/without project_tools, Perl and non-Perl workspace). Test t/28_config_project_tools.t (11 subtests; mutation-checked: * crossing / and project-file grant both turn it red). Targeted run, installed Langertha: 20 files / 161 tests pass (00, 22, 23, 25 x2, 27, 28 x5, 29, 34, 36, 37, 39, 59_engine_resolver, 64, 65, 105); t/28_config_project_tools + t/34 + t/28_config_home_layer also pass against dev-tree Langertha.
+
+Committed as 5d5a195
