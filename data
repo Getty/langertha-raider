@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-30T07:55:13Z
+claimed_by: raider-worker-k136
+class: standard
+completed: 2026-09-30T07:55:13Z
+created: 2026-09-30T07:50:48Z
+id: 136
+priority: high
+started: 2026-09-30T07:50:56Z
+status: done
+tags:
+- bug
+- tests
+- release
+title: 'dzil install scheitert: t/24 erwartet Checkout-Pfad share/packs, t/69 responses-Aktivierung
+  unter Last flaky'
+updated: 2026-09-30T07:55:18Z
+---
+
+t/24_pack_discovery.t Z.61: like($caveman->path, qr{share/packs/caveman$}) schlaegt im gebauten Dist (prove -b / cpanm) deterministisch fehl, Pfad ist dort blib/lib/auto/share/dist/Langertha-Raider/packs/caveman -> dzil install nicht moeglich. Test muss beide Layouts akzeptieren (Semantik "shipped share" pruefen, nicht Checkout-Layout).
+t/69_provider_activation.t Z.260 "responses: activation": status failed statt completed waehrend dzil install unter hoher Speicherlast (skeid-Install parallel, PSI full ~17 %); einzeln im gebauten Dist gruen. Ursache finden (Timeout? Fake-Server-Start? Ports?), Test robust machen, ohne Pruefung zu schwaechen. Repro-Log: ~/.cpanm/work/1790753318.1094981/build.log.
+
+2026-09-30 07:54 t/24 cause (proven, reproduced with prove -b in the install-e7af6b6 build): the test pinned the checkout layout share/packs/caveman; File::ShareDir resolves blib/lib/auto/share/dist/Langertha-Raider/packs first in a built dist. Fixed: accept share/ or auto/share/dist/Langertha-Raider/ (origin shipped still checked). No other test assumes the share/ layout (t/20 uses share/ as a project root, passes both layouts). #125 WIP in Packs.pm does not touch shipped-dir resolution. t/69 cause: the error was not logged, so not proven. Journal shows no OOM kill in 09:28-09:51, so the fake server child was not killed. Only status failed + no engine for a static manifest, with every earlier dialect ok = the fetch failed; the likely path is Fetch timeout (default 10s) under swap pressure (the whole make test ran 21 min). Reproduced the exact signature by letting the fake server sleep 11s on /dialect-responses.json. responses fails only because it sorts last, not because of a responses dialect issue. Fix, tests only: fetcher() in t/69 and t/67 gets timeout => 120 (the t/67 timeout subtests pass their own timeout => 1). t/69 now diags the activation error when it fails. Also found: t/68 and t/70 go through the CLI with Fetch's default 10s and cannot set a timeout from the test, so under the same load they are exposed the same way. That needs a code-side seam (e.g. an env/attr for the fetch timeout) and is for the dispatcher to decide.
+
+2026-09-30 07:54 Done: t/24 accepts both share layouts; t/69 and t/67 fetchers use timeout 120 and t/69 diags the activation error. Verified: prove -l of t/20,24,67,69 in the checkout, plus a variant of t/69 with an 11s server stall (red before the fix, green after). prove -b of the same four copies against the install-e7af6b6 blib passes. No lib/ changes.
+
+2026-09-30 07:55 Committed as ef54111
