@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-09-30T09:27:48Z
+claimed_by: raider-worker-k141
+class: standard
+completed: 2026-09-30T09:27:42Z
+created: 2026-09-30T09:13:48Z
+id: 141
+priority: medium
+started: 2026-09-30T09:20:10Z
+status: done
+tags:
+- provider-discovery
+- security
+- needs:langertha#375
+title: 'Provider-Modus: Engine-Connect per connect_address auf die geprüfte IP pinnen
+  (langertha #375, ADR 0037)'
+updated: 2026-09-30T09:27:48Z
+---
+
+Aus #119: raider prueft die Adressen des Endpunkt-Hosts (Adress-Policy, --allow-internal), die Engine loest den Namen beim Connect aber neu auf -> DNS-Rebinding-Fenster. langertha #375 (ADR 0037) bringt connect_address. Umsetzung: Activation/EngineResolver uebergeben die gepruefte Adresse an die Engine, TLS verifiziert weiter gegen den Hostnamen. Test mit Fake-HTTPS: Name loest nach der Pruefung anders auf -> Verbindung geht trotzdem an die gepruefte IP. Braucht installiertes langertha mit #375; Floor-Hinweis auf #118.
+
+2026-09-30 09:22 Start: read ADR 0037 (core k375, installed 0.503), Activation/Fetch/EngineResolver, t/69/t/70. Plan: Activation adds connect_address = first address of the use-time check of the endpoint host (all addresses must pass the policy, as for the manifest; an IP literal stands for itself; a scoped address -> failed); EngineResolver forces connect_address from the activation last (no -o/.raider.yml override) and croaks on a provider activation without one; max_redirect(0) examined against the pin.
+
+2026-09-30 09:26 Decisions: (1) Multi-address: every address of the endpoint host must pass the policy (unchanged, same as the manifest fetch: one refused address refuses the host); the engine is pinned to the FIRST address of the use-time check (system-preferred order, the one Fetch tries first). No fallback to a second address for the engine (core pins one). A scoped first address (fe80::1%eth0) -> status failed, never an unpinned engine. IP literal host stands for itself (never resolved). (2) EngineResolver sets connect_address from the activation LAST (-o connect_address= / .raider.yml cannot override) and croaks on a provider activation without one. (3) Redirect settings max_redirect(0)+requests_redirectable([]) KEPT: not redundant - the pin refuses another host on both backends, but follows a same-host other-port hop (other origin, no key); raider's rule is the origin. t/70 control proves it (pinned core engine without raider's settings follows 127.0.0.1:P -> 127.0.0.1:Q). (4) Shared client: raider builds exactly one engine in provider mode via build_engine and injects neither user_agent nor _async_http; core's per-engine default clients apply. Nothing to change.
+
+2026-09-30 09:27 Done, commit-ready (uncommitted). Changed: lib/Langertha/Raider/Provider/Activation.pm (completed activation carries connect_address = first address of the use-time check; scoped first address -> failed; POD item 6), lib/Langertha/Raider/EngineResolver.pm (provider mode passes connect_address last, croaks without one; POD + comment: max_redirect(0) kept for origin confinement, host confinement is now core's pin), bin/raider + README (Using a provider / Providers: engine connects to the checked address), t/69 (default activation has connect_address; new subtest: first of several, one refused refuses all, scoped -> failed, IP literal never resolved; per dialect: engine->connect_address and user_agent pin = 127.0.0.1 despite -o/.raider.yml connect_address; no unpinned engine), t/70 (run on provider.invalid:PORT - never resolves, works only through the pin; TLS: pinned engine on wrong.invalid fails hostname verification async+sync, no request reaches the server, control provider.invalid works; control: pinned core engine without raider settings follows a same-host other-port redirect -> why max_redirect(0) stays). Verified against installed Langertha 0.503 (with k375): t/00 t/59 t/67 t/68 t/69 t/70 t/71x2 t/72 = 9 files, 175 tests PASS. Mutants killed: resolver passes no connect_address (t/69 24+ fails, t/70 run on provider.invalid + TLS control fail); activation picks the last address (t/69 fails); redirect settings removed (t/69 + t/70 'did not follow it' fail). Not run: full suite, binary build/verify (no new dependency; core's pin code is in the Langertha dist the binary already packs). Floor: runtime now needs core k375 (connect_address) - cpanfile Langertha 0.503 = current langertha main; the joint release must carry k375.
+
+2026-09-30 09:27 Committed as fe1393b
