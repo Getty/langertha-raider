@@ -18,6 +18,7 @@ use IO::Async::OS;
 use Langertha::Usage;
 use Langertha::Raider::ConnectCheck qw( connect_error );
 use Langertha::Raider::Result;
+use Langertha::Raider::ToolArgs qw( tool_args_problems );
 use Langertha::RunContext;
 
 with 'Langertha::Role::PluginHost', 'Langertha::Role::Runnable';
@@ -95,6 +96,11 @@ B<Key features:>
 =item * Mission (system prompt) separate from engine's system_prompt
 
 =item * Automatic MCP tool calling loop
+
+=item * Tool arguments checked against the tool's C<inputSchema> before it
+runs: a missing C<required> key or a top-level property of the wrong type
+answers the call with an error result the model can correct, and the tool
+does not run
 
 =item * Cumulative metrics tracking
 
@@ -2024,6 +2030,7 @@ async sub _raid_f {
     langfuse         => $langfuse,
     trace_id         => $trace_id,
     tool_server_map  => $tool_server_map,
+    tool_schemas     => $self->_tool_schemas($all_tools),
     formatted_tools  => $formatted_tools,
     model_params     => $model_params,
     user_msgs        => \@user_msgs,
@@ -2090,6 +2097,32 @@ sub _undecodable_tool_result {
   return {
     content => [{ type => 'text',
       text => "arguments are not valid JSON: " . ( $tc->arguments_error // 'not a JSON object' ) }],
+    isError => JSON->true,
+  };
+}
+
+# The inputSchema of every tool the raid offers, by name, from the tool set
+# _gather_tools_f assembled -- so for a name several sources offer, the schema
+# of the source that won and was shown to the model. MCP lists and the
+# self-tools carry inputSchema; input_schema is taken too.
+sub _tool_schemas {
+  my ( $self, $all_tools ) = @_;
+  return { map {
+    ( $_->{name} => $_->{inputSchema} // $_->{input_schema} )
+  } grep { ref $_ eq 'HASH' && defined $_->{name} } @$all_tools };
+}
+
+# The error result a call whose arguments clearly break its tool's inputSchema
+# is answered with (a required key missing, a top-level property of the wrong
+# type; Langertha::Raider::ToolArgs says what counts). undef when they pass,
+# and for a tool without a known schema. Same shape as the bad-JSON result.
+sub _invalid_args_tool_result {
+  my ( $self, $state, $name, $input ) = @_;
+  my $schema = $state->{tool_schemas}{$name // ''} or return undef;
+  my @problems = tool_args_problems($schema, $input) or return undef;
+  return {
+    content => [{ type => 'text',
+      text => "arguments do not match the input schema of tool '".$name."': ".join('; ', @problems) }],
     isError => JSON->true,
   };
 }
@@ -2242,6 +2275,7 @@ async sub _refresh_tools_f {
   my ( $all_tools, $new_map ) = await $self->_gather_tools_f;
   $state->{formatted_tools} = $engine->format_tools($all_tools);
   $state->{tool_server_map} = $new_map;
+  $state->{tool_schemas} = $self->_tool_schemas($all_tools);
   $state->{model_params} = $self->_langfuse_model_parameters($engine)
     if $state->{langfuse};
   $self->_tools_dirty(0);
@@ -2486,6 +2520,20 @@ async sub _dispatch_tool_call_f {
   ( $name, $input ) = @plugin_tc;
 
   my $tool_t0 = $state->{langfuse} ? $engine->langfuse_timestamp : undef;
+
+  # Arguments that clearly break the tool's inputSchema do not run the tool:
+  # the model gets an error result it can correct (ADR 0005 "validate", k122).
+  # Checked after plugin_before_tool_call, so it is the call that would run --
+  # and the one the Events plugin recorded as tool.call -- that is held
+  # against the schema, and the error result takes the same
+  # plugin_after_tool_call path as any other result: one tool.result.
+  if ( my $invalid = $self->_invalid_args_tool_result($state, $name, $input) ) {
+    my $result = await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0, $invalid, 1);
+    push @$results, { tool_call => $tc, result => $result };
+    ${$state->{raid_tool_calls}}++;
+    return;
+  }
+
   my $result;
 
   # Virtual self-tools. A raider_-prefixed name routes here only when no tool

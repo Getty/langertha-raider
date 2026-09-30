@@ -251,6 +251,13 @@ Revision history for Langertha-Raider
     - Langertha::Raider::Result is always true in boolean context, so
       `if (my $r = $raider->raid(...))` no longer skips question, pause and
       abort results with empty text. Stringification is unchanged.
+    - Langertha::Raider checks each tool call's arguments against the tool's
+      inputSchema before running it: a missing required key or a top-level
+      property of the wrong type gets an error result the model can correct,
+      and the tool does not run. The check is lenient: numeric strings, 0/1
+      booleans and null for an optional property pass. raider_ask_user
+      called without question returns that error instead of dying with a
+      Result type-constraint error.
 
   [Sessions]
     - Every run is recorded in a session journal,
