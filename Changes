@@ -127,6 +127,7 @@ Revision history for Langertha-Raider
       *_API_KEY in the environment or .raider.yml. The endpoint must be https
       on the manifest's origin; internal addresses need --allow-internal, as
       for provider inspect. Not combinable with -e, -o engine= or -o url=.
+      The REPL banner shows the -k key as set without printing it.
 
   [Packs]
     - Packs are also found in <project>/.raider/packs/<name>/ and

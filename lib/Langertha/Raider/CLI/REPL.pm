@@ -194,9 +194,16 @@ sub banner {
   my $line = sub { $out->emit($out->c(meta => $_[0]), $out->c(title => $_[1]), "\n") };
 
   my $env = $app->api_key_env;
-  my $env_display = defined $env
-    ? ($ENV{$env} ? $env.' (set)' : $env.' (missing)')
-    : '(no API key required)';
+  my $resolver = $app->engine_resolver;
+  my $env_display = $resolver->has_provider
+    # --provider: the key comes from -k, never from the environment, and
+    # only an endpoint with an auth_ref needs one. Never print the key.
+    ? ( defined $resolver->provider->{auth}
+        ? 'auth '.$resolver->provider->{auth}.' ('.( length $resolver->api_key ? 'set' : 'missing' ).')'
+        : '(no API key required)' )
+    : defined $env
+      ? ($ENV{$env} ? $env.' (set)' : $env.' (missing)')
+      : '(no API key required)';
   my $model = $app->has_model ? $app->model : '(engine default)';
   my $source = $app->mission_source;
   my $persona = $source eq '-M'         ? 'from -M (.raider.md not used)'
