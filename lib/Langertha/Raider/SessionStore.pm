@@ -9,6 +9,7 @@ use Fcntl qw( O_WRONLY O_CREAT O_EXCL );
 use POSIX qw( strftime );
 use Path::Tiny;
 use Time::HiRes ();
+use Langertha::Raider::Home;
 use Langertha::Raider::Session;
 use Langertha::Raider::Session::Journal;
 
@@ -70,7 +71,7 @@ has home => (
   builder => '_build_home',
 );
 
-sub _build_home { $ENV{HOME} // (getpwuid($<))[7] }
+sub _build_home { Langertha::Raider::Home->home_dir }
 
 =attr principal
 
@@ -123,7 +124,9 @@ The F<sessions> directory under L</base>.
 
 sub base {
   my ( $self ) = @_;
-  return path($self->scope eq 'project' ? $self->root : $self->home)->absolute->child('.raider');
+  return $self->scope eq 'project'
+    ? Langertha::Raider::Home->project_base($self->root)
+    : Langertha::Raider::Home->home_base($self->home);
 }
 
 sub dir { $_[0]->base->child('sessions') }

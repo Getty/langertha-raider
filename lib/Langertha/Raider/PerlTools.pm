@@ -10,6 +10,7 @@ use MCP::Server;
 use IPC::Run qw( run start timeout );
 use JSON::MaybeXS ();
 use Langertha::Raider::Binary qw( packed_binary );
+use Langertha::Raider::Home;
 use Langertha::Raider::SessionStore;
 
 use Exporter 'import';
@@ -76,7 +77,7 @@ sub build_perl_tools_server {
 
   my $resolve_lib_target = sub {
     return path($lib_target_override)->absolute($root)->stringify if defined $lib_target_override;
-    return path($root)->child('.raider', 'lib')->stringify;
+    return Langertha::Raider::Home->project_base($root)->child('lib')->stringify;
   };
 
   my $perl5lib_for = sub {

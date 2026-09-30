@@ -10,6 +10,7 @@ use YAML::PP ();
 use JSON::MaybeXS ();
 use File::ShareDir ();
 
+use Langertha::Raider::Home;
 use Langertha::Raider::Packs::Collection;
 use Langertha::Raider::Packs::Pack;
 
@@ -119,23 +120,21 @@ sub _pack_defaults {
   return \@filtered;
 }
 
-sub _home_dir { $ENV{HOME} // (getpwuid($<))[7] }
-
 # [ origin, directory ] in search order.
 sub _pack_search_paths {
   my (%args) = @_;
   my $root = path($args{root} // '.')->absolute;
-  my $home_dir = $args{home} // _home_dir();
+  my $home_dir = $args{home} // Langertha::Raider::Home->home_dir;
   my $home = defined $home_dir ? path($home_dir)->absolute : undef;
   my @search_paths;
 
-  my $project = $root->child('.raider', 'packs');
+  my $project = Langertha::Raider::Home->project_base($root)->child('packs');
   if (-d $project) {
     my $is_home = $home && -d $home && $root->realpath eq $home->realpath;
     push @search_paths, [ project => $project ] unless $is_home;
   }
   if ($home) {
-    my $p = $home->child('.raider', 'packs');
+    my $p = Langertha::Raider::Home->home_base($home)->child('packs');
     push @search_paths, [ home => $p ] if -d $p;
   }
 
