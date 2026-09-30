@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-30T08:47:09Z
+claimed_by: raider-worker-k128
+class: standard
+completed: 2026-09-30T08:47:09Z
+created: 2026-09-30T06:01:04Z
+id: 128
+priority: medium
+started: 2026-09-30T08:35:18Z
+status: done
+tags:
+- adr-0011
+- config
+title: 'ADR 0011 A4: Home-Schicht ~/.raider/config.yml unter der Projektschicht'
+updated: 2026-09-30T08:47:09Z
+---
+
+Nach #126. Reihenfolge default < home < project < CLI; explain zeigt Quelle home. Merge je Key (vorlaeufiger Default, zur Bestaetigung): Skalare -> Projekt ueberschreibt; skills -> vereinigt; packs -> ersetzt; no_detect -> Vereinigung; detect -> je Pack (ADR 0012). api_key aus Home erlaubt (Home ist privat).
+
+2026-09-30 08:38 Plan: Config gains a home layer (home_file = Home->home_base/config.yml, uses_home, home_data parsed/validated like the project file, same croaks). Each file resolves its own layers (top < default: < engine section) unchanged; then home is combined under the project: scalars/packs/everything else project wins (home source goes into shadowed), skills union (home layers first, dedup as today), no_detect union (lists/comma strings flattened, dedup), detect per pack when both are maps ({%home,%project}), else project value replaces. Merged keys carry merged_with in explain. Sources: home layers named 'home top'/'home default'/'home <engine>', labelled 'home', 'home default:', 'home <engine>:' (Config->layer_label); explain gains home_file (only when loaded) and config explain prints 'home: <path>'. Labels for packs:/perl:/detect: rules follow the file the value came from. home==project (realpath of home config equals the file in use): home layer not loaded, the file is the project file. Broken home YAML croaks like the project file (CLI::Main parses both up front -> exit 3). Writers untouched (project file only). No ~/.raider.yml is read anywhere today (grep: only Packs ~/.raider/packs, SessionStore, REPL ~/.raider_history).
+
+2026-09-30 08:46 Edge decisions: (1) home==project: uses_home is false when ~/.raider/config.yml and the project file in use have the same realpath (also via symlinked HOME or root) -> read once, labelled .raider/config.yml, writers write it. (2) detect: only merged per pack when both files hold a map; project detect: false replaces a home map (off), and a project map over home detect: false switches detection ON (project over home; detection grants nothing). (3) Broken home YAML / invalid home shape croaks exactly like the project file; CLI::Main parses both up front -> exit 3 with the home path. Empty home file = used, adds nothing. (4) Home skill dirs given as relative paths still resolve against the project root (unchanged loader) -- open question. (5) add_skills does not look at home skills: --claude with claude already in home still writes it to the project file (writers stay project-only). Also found (pre-existing, not fixed): Config::add_skills autovivifies default: {skills: ~} in the project file when a default: section exists (foreach aliasing over $data->{default}{skills}, HEAD line 563) -- a candidate ticket for this board.
+
+2026-09-30 08:46 Done (uncommitted, tree commit-ready). Config.pm: home_file (Home->home_base/config.yml), uses_home, home_data (same parser/validation via _load), home_label 'home'; _resolve resolves each file's layers as before (_resolve_file, byte-identical when no home) and lays the project over the home: scalars/packs/api_key/engine replaced, skills union (home first, dedup), no_detect union (lists + comma strings flattened), detect per pack when both are maps; merged keys carry merged_with. New layer_label/value_label/detect_rule_label; explain gets home_file (only when used). Application: _yml_source -> layer_label, perl grant / packs: / detect: rule labels name 'home' when the value came from there, explain_config carries merged_with (and lists it in shadowed when -o wins). Output: 'home:   <path>' line, ', merged with home'. CLI::Main parses home_data up front (exit 3). Docs: bin/raider DESCRIPTION + exit 3, README config section/roadmap, Config/Application/Output POD. Test t/28_config_home_layer.t (12 subtests: no home, scalars, engine+api_key, CLI precedence, skills, packs, perl, no_detect, detect, home==root incl. symlinks, writers, broken home). Verified with installed Langertha: 30 files / 237 tests pass (00, 20, 22-27, 28 x4, 29, 30_cli_reload, 34, 36-39, 49_mission_scope, 59_engine_resolver, 61, 64, 65, 68-71, 105). Open: see earlier note (relative home skill dirs, add_skills autoviv bug, project map re-enabling detection over home detect: false).
+
+Committed as 24e8a89
