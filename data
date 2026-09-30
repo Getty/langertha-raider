@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-30T04:42:27Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-30T04:42:21Z
+created: 2026-09-30T03:54:52Z
+id: 114
+priority: low
+started: 2026-09-30T04:21:35Z
+status: done
+tags:
+- history
+- render
+title: 'History-Renderer: Gemini functionResponse.response als Structured-Content-Hash
+  ohne result rendert leer'
+updated: 2026-09-30T04:42:27Z
+---
+
+Aus k112-Review. _render_history_block: functionResponse.response ist bei Core k336 ein Structured-Content-Hash ohne {result}-Key -> $result undef -> "tool_result: " leer, Inhalt geht verloren. Fix: ohne result den ganzen response-Hash (oder dessen content) rendern. Regressionstest in t/86_raider_self_tools.t mit konstruiertem Eintrag in Core-k336-Form (ToolResult to_gemini lesen).
+
+2026-09-30 04:30 Done: _render_history_block renders a Gemini functionResponse.response as its {result} only when that is the sole key (Langertha's string form); any other hash is the tool's MCP structuredContent (core ToolResult to_gemini, k336) and renders whole as canonical JSON, parts (k344 inlineData) still appended as [image]. A structuredContent that itself has a result key beside others is no longer truncated to result. Red->green: new subtest 'gemini structured functionResponse and anthropic image block' in t/86_raider_self_tools.t (constructed entries, shape confirmed against dev-core to_gemini). Full prove -I../langertha/lib -Ilib -r t PASS (86 files, 757 tests; t/82_live_raider + t/live/* skipped, live-gated). Not committed.
+
+Committed in d0f9812 (with k115).
