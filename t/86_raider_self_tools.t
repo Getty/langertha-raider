@@ -446,6 +446,64 @@ subtest 'tool-result images from native image wires (k344)' => sub {
   like($filtered, qr/Luebeck harbour/, 'query filter reaches into array output text');
 };
 
+# Langertha::ToolResult to_gemini (langertha k336) sends the tool's MCP
+# structuredContent as functionResponse.response when it has one -- a hash
+# with the tool's own keys and no `result` key. Rendering only {result} would
+# turn that into an empty "tool_result:", so the whole structured payload has
+# to show up (canonical JSON), and a tool's own `result` key next to other keys
+# must not hide them. to_anthropic (langertha k326) maps an MCP image to an
+# Anthropic {type => 'image', source => {...}} block, which renders as the same
+# [image] marker as the Responses and Gemini images.
+subtest 'gemini structured functionResponse and anthropic image block' => sub {
+  my $raider = Langertha::Raider->new(
+    engine     => MockEngine->new,
+    raider_mcp => 1,
+  );
+  my $b64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAwS2OUAAAAABJRU5ErkJggg==';
+  push @{$raider->session_history},
+    { role => 'user', parts => [
+      { functionResponse => { name => 'get_weather', id => 'fc_3',
+        response => { city => 'Wismar', temp_c => 14, conditions => [ 'fog', 'drizzle' ] } } },
+    ] },
+    { role => 'user', parts => [
+      { functionResponse => { name => 'lookup', id => 'fc_4',
+        response => { result => 'found', count => 3 } } },
+    ] },
+    { role => 'user', content => [
+      { type => 'tool_result', tool_use_id => 'toolu_09',
+        content => [
+          { type => 'text', text => 'Screenshot of Stralsund harbour' },
+          { type => 'image',
+            source => { type => 'base64', media_type => 'image/png', data => $b64 } },
+        ] },
+    ] };
+
+  my @warnings;
+  my $text;
+  {
+    local $SIG{__WARN__} = sub { push @warnings, $_[0] };
+    $text = $raider->_query_session_history_f({})->get;
+  }
+  is(scalar @warnings, 0, 'no warnings while rendering') or diag("warnings: @warnings");
+
+  my @entries = split /\n\n/, $text;
+  is(scalar @entries, 3, 'three history elements rendered') or diag($text);
+
+  is($entries[0],
+    '[user] tool_result: {"city":"Wismar","conditions":["fog","drizzle"],"temp_c":14}',
+    'gemini structuredContent response without result renders as JSON');
+  is($entries[1], '[user] tool_result: {"count":3,"result":"found"}',
+    'a structured result key does not hide its sibling keys');
+  is($entries[2], "[user] tool_result: Screenshot of Stralsund harbour\n[image]",
+    'anthropic tool_result image block renders as [image]');
+
+  unlike($text, qr/\Q$b64\E/, 'base64 payload never leaks into the rendering');
+  unlike($text, qr/<image>|ARRAY\(0x|HASH\(0x/, 'no raw block markers or refs');
+
+  my $filtered = $raider->_query_session_history_f({ query => 'Wismar' })->get;
+  like($filtered, qr/Wismar/, 'query filter reaches into structured response');
+};
+
 subtest 'register_session_history_tool renders identically' => sub {
   my $raider = Langertha::Raider->new(
     engine     => MockEngine->new,

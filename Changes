@@ -209,11 +209,13 @@ Revision history for Langertha-Raider
       clear_session_history empties session_history and its embeddings
       together.
     - The session history renderer (session_history tool, history query)
-      no longer drops a tool result that carries an image: a Responses
-      function_call_output whose output is an input_text / input_image
-      part array, and a Gemini functionResponse with inlineData parts
-      (both sent natively by Langertha when the model takes image input),
-      keep their text and show the image as [image], never as base64.
+      no longer drops or blanks the tool results Langertha sends natively:
+      a Responses function_call_output whose output is an input_text /
+      input_image part array, a Gemini functionResponse with inlineData
+      parts, and an Anthropic tool_result with image blocks keep their
+      text and show each image as [image], never as base64. A Gemini
+      functionResponse carrying the tool's structured content is shown
+      whole, as JSON, instead of as an empty "tool_result:".
     - A raid paused by an interactive self-tool (raider_ask_user etc.) in
       the middle of a parallel-tool batch no longer re-runs the calls that
       completed before it or drops the self-tools queued after it:

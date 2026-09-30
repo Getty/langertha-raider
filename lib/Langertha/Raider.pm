@@ -1179,7 +1179,11 @@ sub _render_history_block {
   }
   if ( ref $block->{functionResponse} eq 'HASH' ) {
     my $response = $block->{functionResponse}{response};
-    my $result = ref $response eq 'HASH' ? $response->{result} : $response;
+    # A bare {result} is Langertha's string form; any other hash is the tool's
+    # MCP structuredContent (langertha k336) and renders whole, as JSON.
+    my $result = ref $response eq 'HASH'
+      && keys %$response == 1 && exists $response->{result}
+      ? $response->{result} : $response;
     # Gemini 3 carries a tool-result image beside the result string in
     # functionResponse.parts[].inlineData (langertha k344).
     return 'tool_result: ' . join "\n", grep { length }
@@ -1211,7 +1215,8 @@ sub _render_history_block {
       . _render_history_payload_value(
           defined $block->{output} ? $block->{output} : $block->{content} );
   }
-  return '[image]' if $type eq 'input_image';
+  # Responses input_image, Anthropic image (langertha k326).
+  return '[image]' if $type eq 'input_image' || $type eq 'image';
 
   # Unknown block: name it by its discriminator rather than dropping it.
   my $rest = _render_history_payload_value( $block->{content} );
