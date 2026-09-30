@@ -67,7 +67,7 @@ Agent profiles to show in the banner (C<claude>, C<openai>).
 
 =attr saved_profiles
 
-Profiles saved to F<.raider.yml> by this start, marked C<(saved)>.
+Profiles saved to the config file by this start, marked C<(saved)>.
 
 =attr customize_prompt
 

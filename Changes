@@ -90,6 +90,10 @@ Revision history for Langertha-Raider
     - -o with raider's own keys (perl, packs=a,b, skills=a,b,
       preferred_lib_target, engine) configures raider like .raider.yml and
       overrides it; only engine attributes reach the engine.
+    - raider reads the project config from .raider/config.yml (same keys as
+      .raider.yml). When both files exist only .raider/config.yml is loaded,
+      raider warns on start, and raider config explain names the file in use
+      and the ignored one. /model and saved skills write to the file in use.
     - .raider.yml has one reader and writer, Langertha::Raider::Config
       (internal). Top-level keys apply next to default: and engine sections,
       so /model or a skills: hash no longer drops packs, perl or engine

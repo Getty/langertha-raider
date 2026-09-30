@@ -93,7 +93,7 @@ sub cmd_help {
     '  /skill [PATH]         export plain-markdown skill doc',
     '  /skill-claude [PATH]  export Claude Code SKILL.md with frontmatter',
     '  /config               show each setting and where it came from',
-    '  /model [NAME]         set+save model to .raider.yml',
+    '  /model [NAME]         set+save model to the config file',
     '  /model list [FILTER]  list available models (optionally filtered)',
     '  /packs                list all available packs and their state',
     '  /pack on NAME         enable a pack (toggle on)',

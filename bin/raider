@@ -41,6 +41,15 @@ Optional profile, pack, and Perl-native tool flags let the same CLI load
 project agent instructions, persona/power bundles, and C<perl_eval> /
 C<perl_check> / C<perl_cpanm> tools.
 
+Settings of a project live in its config file: F<.raider/config.yml> in the
+working directory, or else the legacy F<.raider.yml> there. Both take the
+same keys; where this page names F<.raider.yml>, the file in use is meant.
+When both exist, only F<.raider/config.yml> is read: F<raider> warns on
+standard error that it ignores F<.raider.yml>, and C<config explain> names
+the file in use and the ignored one. What F<raider> saves (C</model>,
+C<--claude>, C<--openai>, C<--skills>) goes to the file in use, and to
+F<.raider.yml> when there is none.
+
 Interactive mode (C<-i>) opens a REPL with conversation history retained
 across turns. With L<Term::ReadLine::Gnu> installed, line editing and
 persistent input history (F<~/.raider_history>) are enabled automatically —
@@ -65,8 +74,8 @@ Subcommands are dispatched before normal raider startup: C<raider hall ...>
 manages a Raider Hall daemon, and C<raider acp ...> runs the bundled ACP
 client. C<raider config explain [options]> takes the normal options and
 prints every effective setting with its source -- a command-line flag, a
-F<.raider.yml> layer, an environment variable or the built-in default --
-without writing F<.raider.yml> or contacting a model; C</config> prints the
+layer of the config file, an environment variable or the built-in default --
+without writing the config file or contacting a model; C</config> prints the
 same inside the REPL. The options may also come first
 (C<raider -e openai config explain>); there only the exact words
 C<config explain> are the subcommand, any other prompt starting with
@@ -159,8 +168,8 @@ instead and never reach the engine.
 =opt -r, --root DIR
 
 The working directory, default the current one. The file tools are
-confined to it, C<bash> starts in it, and F<.raider.yml>, F<.raider.md>
-and F<.raider/> are read from it.
+confined to it, C<bash> starts in it, and F<.raider/config.yml> (or
+F<.raider.yml>), F<.raider.md> and F<.raider/> are read from it.
 
 =opt -M, --mission TEXT
 
@@ -656,7 +665,7 @@ C<config explain> with it, a model the manifest does not list, no C<-m>
 where it lists several, or no C<-k> where the endpoint needs a key; and
 C<--allow-internal> without C<--provider>.
 
-=item C<3> -- configuration error: F<.raider.yml> cannot be read, the
+=item C<3> -- configuration error: the config file cannot be read, the
 engine is unknown, or a pack detection rule is invalid.
 
 =item C<4> -- the session to continue (C<--session>, C<--continue>,

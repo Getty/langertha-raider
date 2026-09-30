@@ -39,7 +39,9 @@ use Langertha::Raider;
 B<Internal module.> Its interface may change without notice.
 
 The application service the surfaces share (ADR 0002): for one workspace
-(L</root>) it reads F<.raider.yml> (L<Langertha::Raider::Config>), picks
+(L</root>) it reads the project config file (L<Langertha::Raider::Config>:
+F<.raider/config.yml>, else the legacy F<.raider.yml>; below, F<.raider.yml>
+stands for whichever is in use), picks
 the engine through L<Langertha::Raider::EngineResolver>, activates the
 packs (L<Langertha::Raider::Packs>, ADR 0012), compiles the mission (ADR
 0004, ADR 0014), mounts the tool servers -- files
@@ -448,7 +450,7 @@ sub perl_tools_grant {
   return { enabled => 1, reason => $self->source_label('perl') } if $self->perl;
   my $yml = $self->_load_yml_options->{perl};
   if (defined $yml) {
-    my $where = exists $self->_cli_app_options->{perl} ? $self->source_label('engine_options') : '.raider.yml';
+    my $where = exists $self->_cli_app_options->{perl} ? $self->source_label('engine_options') : $self->config->label;
     return { enabled => $yml ? 1 : 0, reason => 'perl: '.( $yml ? 'true' : 'false' ).' ('.$where.')' };
   }
   my $packs = $self->packs;
@@ -551,7 +553,8 @@ L<Langertha::Raider::Packs::Collection/activation_report>. An invalid rule
 croaks.
 
 Detection only decides which packs are active, it grants nothing (ADR
-0005). Rules from the project's F<.raider.yml> are evaluated and packs
+0005). Rules from the project's F<.raider.yml> or F<.raider/config.yml>
+are evaluated and packs
 from its F<.raider/packs/> are loaded right away: the workspace trust
 decision of ADR 0004, which is meant to gate both, does not exist yet.
 
@@ -597,7 +600,7 @@ sub _explicit_packs {
   return ( $self->pack_names, flag => $self->source_label('pack_names') ) if $self->has_pack_names;
   my $opt = $self->_cli_app_options->{packs};
   return ( $opt, flag => $self->source_label('engine_options packs') ) if defined $opt;
-  return ( $self->config->options($self->engine_name)->{packs}, config => '.raider.yml packs:' );
+  return ( $self->config->options($self->engine_name)->{packs}, config => $self->config->label.' packs:' );
 }
 
 =method detection_state
@@ -639,7 +642,7 @@ sub _detect_packs {
     next unless $pack->has_detect;
     $rules{$name} = [ 'pack default', $pack->detect, $pack->path.'/pack.yml detect' ];
   }
-  $rules{$_} = [ '.raider.yml detect:', $settings->{rules}{$_}, 'detect.'.$_ ] for keys %{$settings->{rules}};
+  $rules{$_} = [ $self->config->label.' detect:', $settings->{rules}{$_}, 'detect.'.$_ ] for keys %{$settings->{rules}};
 
   my %no_pack = map { $_ => 1 } @{$self->no_pack_names};
   my $detect = $self->detect_class->new(root => $self->root);
@@ -759,7 +762,8 @@ has cli_skill_sources => (
 
 =attr config
 
-The L<Langertha::Raider::Config> for F<.raider.yml> in L</root>.
+The L<Langertha::Raider::Config> of L</root>: F<.raider/config.yml>, else
+F<.raider.yml>.
 
 =cut
 
@@ -1491,10 +1495,13 @@ Where each effective setting came from, constructor arguments included.
 The shape of L<Langertha::Raider::Config/explain>, with C<source> (and
 C<shadowed>) naming an argument by its L</source_label> (the command line
 names its flags: C<-e>, C<-m>, C<-k>, C<-o>, C<--pack>, C<--perl>,
-C<--claude/--openai/--skills>), a F<.raider.yml> layer
-(C<.raider.yml>, C<.raider.yml default:>, C<.raider.yml openai:>), an
+C<--claude/--openai/--skills>), a layer of the config file by its
+L<Langertha::Raider::Config/label> (C<.raider.yml>, C<.raider.yml default:>,
+C<.raider/config.yml openai:>), an
 environment variable (C<env OPENAI_API_KEY>) or C<default>. API key values
-are never included. Builds no engine.
+are never included. Builds no engine. C<file> is the config file in use and
+C<ignored_files> the config files next to it that are not loaded
+(L<Langertha::Raider::Config/ignored_files>).
 
 C<detection> says whether pack detection runs (C<on>, or C<off> with what
 switched it off) and C<packs> is the
@@ -1628,7 +1635,8 @@ sub _tool_effects_class { 'Langertha::Raider::ToolEffects' }
 
 sub _yml_source {
   my ($self, $layer) = @_;
-  return $layer eq 'top' ? '.raider.yml' : '.raider.yml '.$layer.':';
+  my $label = $self->config->label;
+  return $layer eq 'top' ? $label : $label.' '.$layer.':';
 }
 
 # One explain entry from candidates [ source, value, shadowed ], highest

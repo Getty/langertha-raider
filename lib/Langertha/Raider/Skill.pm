@@ -140,7 +140,7 @@ and keeps a persistent conversation with an LLM. This is how to drive it.
 - Model: **$model**
 - Persona: $persona
 - Working root: `@{[ $app->root ]}`
-- `.raider.yml` loaded: $yml_loaded
+- `@{[ $config->label ]}` loaded: $yml_loaded
 - Web-search providers active: $web
 
 ## Minimal usage
@@ -194,7 +194,7 @@ that edits `.raider.md` for you).
 | `/skill [PATH]`          | Export plain-markdown how-to-use doc                 |
 | `/skill-claude [PATH]`   | Export Claude Code SKILL.md with YAML frontmatter    |
 | `/config`                | Show each setting and where it came from             |
-| `/model [NAME]`          | Save NAME as model to `.raider.yml` (next start)     |
+| `/model [NAME]`          | Save NAME as model to the config file (next start)   |
 | `/model list [FILTER]`   | List the engine's models                             |
 | `/packs`                 | List the packs and which are active                  |
 | `/pack on NAME`          | Enable a pack, reloads the mission                   |
@@ -205,7 +205,7 @@ that edits `.raider.md` for you).
 ## Loading project skills
 
 Profile flags preload per-tool agent files into the mission and persist
-themselves to `.raider.yml` after first use:
+themselves to the config file after first use:
 
 - `--claude` — loads `CLAUDE.md` and any `.claude/skills/*/SKILL.md`.
 - `--openai` / `--codex` — loads `AGENTS.md`.
@@ -214,7 +214,11 @@ themselves to `.raider.yml` after first use:
 When a well-known file is present but its profile isn't active, the startup
 banner shows a `seeing FILE, ignoring (use --<profile> to load)` hint.
 
-## Engine options via `.raider.yml`
+## Engine options via the config file
+
+The config file is `.raider/config.yml` in the working root, else the
+legacy `.raider.yml` there; both take the same keys. With both present only
+`.raider/config.yml` is read, and raider warns about the other.
 
 Flat form:
 

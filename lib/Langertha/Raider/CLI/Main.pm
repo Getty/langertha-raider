@@ -66,7 +66,8 @@ with it, a model the manifest does not list, no C<-m> where it lists
 several models, or no C<-k> where the endpoint needs a key;
 C<--allow-internal> without C<--provider>.
 
-=item C<3> -- configuration error: F<.raider.yml> cannot be read, the
+=item C<3> -- configuration error: the config file (F<.raider/config.yml>,
+else F<.raider.yml>) cannot be read, the
 engine is unknown, or a pack detection rule is invalid.
 
 =item C<4> -- the session to continue (C<--session>, C<--continue>,
@@ -183,14 +184,15 @@ Options:
                            manifest (/.well-known/langertha.json) declares;
                            nothing is stored. -m picks one of its models
                            (a must when it lists several); the key comes
-                           only from -k, never from .raider.yml or the
-                           environment. Not with -e, -o engine= or -o url=
+                           only from -k, never from the config file or
+                           the environment. Not with -e, -o engine= or -o url=
       --allow-internal     With --provider: allow a loopback, private,
                            link-local or reserved provider address
   -o, --option KEY=VALUE   Engine attribute (repeatable), e.g.
                            -o temperature=0.2 -o response_size=4096
-                           Merged over .raider.yml; CLI wins. raider's own
-                           .raider.yml keys (perl, packs=a,b, skills=a,b,
+                           Merged over the config file (.raider/config.yml,
+                           else .raider.yml); CLI wins. raider's own
+                           config keys (perl, packs=a,b, skills=a,b,
                            no_detect=a,b, detect=false,
                            preferred_lib_target, engine) configure raider.
   -r, --root DIR           Working directory (default: cwd). File tools are
@@ -435,7 +437,7 @@ sub run {
   }
 
   # raider config explain [options]: prints where each setting comes from
-  # and exits without writing .raider.yml or building an engine.
+  # and exits without writing the config file or building an engine.
   my $config_cmd;
   if (@argv && $argv[0] eq 'config') {
     shift @argv;
@@ -523,13 +525,16 @@ sub run {
   local $SIG{INT}  = $machine ? sub { $self->interrupt_startup(INT  => $machine, $t0) } : $SIG{INT};
   local $SIG{TERM} = $machine ? sub { $self->interrupt_startup(TERM => $machine, $t0) } : $SIG{TERM};
 
-  # The one reader/writer of .raider.yml. Parsed up front so a broken file
-  # stops raider here, with its path in the message.
+  # The one reader/writer of the project config (.raider/config.yml, else
+  # .raider.yml). Parsed up front so a broken file stops raider here, with
+  # its path in the message. A legacy file next to the new one is not
+  # loaded, and said so (ADR 0011).
   my $config = $self->config_class->new(root => $opt->{root} // Path::Tiny->cwd->stringify);
   unless (eval { $config->data; 1 }) {
     $self->_warn($self->output->error_text($@)."\n");
     return EXIT_CONFIG;
   }
+  $self->_warn('warning: ignoring '.$_->{file}.': '.$_->{reason}."\n") for $config->ignored_files;
   $args{config} = $config;
 
   # --provider: the manifest decides engine, model and URL before anything
@@ -565,7 +570,7 @@ sub run {
   }
   $args{cli_skill_sources} = \@skill_specs if @skill_specs;
 
-  # Persist --claude / --openai / --skills to .raider.yml so the user doesn't
+  # Persist --claude / --openai / --skills to the config file so the user doesn't
   # need to retype them every invocation. Track which profiles were freshly
   # persisted this run for the banner "(saved)" hint.
   my %saved_now = $config_cmd ? ()

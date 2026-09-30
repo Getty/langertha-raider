@@ -1,5 +1,5 @@
 package Langertha::Raider::Config;
-# ABSTRACT: Internal resolver and writer for the legacy .raider.yml
+# ABSTRACT: Internal resolver and writer for the project config file
 our $VERSION = '0.503';
 use Moose;
 use namespace::autoclean;
@@ -7,6 +7,7 @@ use Carp qw( croak );
 use Path::Tiny;
 use YAML::PP ();
 use Langertha::Raider::Detect;
+use Langertha::Raider::Home;
 
 =head1 SYNOPSIS
 
@@ -26,7 +27,12 @@ use Langertha::Raider::Detect;
 B<Internal module.> Its interface may change without notice; use
 L<Langertha::Raider::CLI> instead.
 
-The one place that reads and writes the legacy F<.raider.yml> in L</root>.
+The one place that reads and writes the project config of L</root>. The
+file in use (L</file>) is F<.raider/config.yml> (ADR 0011) when it exists,
+else the legacy F<.raider.yml>; both take the same keys. When both exist,
+only F<.raider/config.yml> is loaded: the legacy file is not read and is
+reported by L</ignored_files>.
+
 The file is read in three layers, later ones winning:
 
 =over
@@ -65,7 +71,7 @@ my %PROFILE_KEYWORD = (
 
 =attr root
 
-Directory holding F<.raider.yml>. Required.
+The project directory. Required.
 
 =cut
 
@@ -77,7 +83,10 @@ has root => (
 
 =attr file
 
-L<Path::Tiny> of the F<.raider.yml> in L</root>.
+L<Path::Tiny> of the file in use: L</native_file> when it exists, else
+L</legacy_file>. Decided once, when first asked. The writers write here, so
+without any file they create the legacy F<.raider.yml>, never
+F<.raider/config.yml>.
 
 =cut
 
@@ -87,7 +96,60 @@ has file => (
   lazy_build => 1,
 );
 
-sub _build_file { path($_[0]->root)->child('.raider.yml') }
+sub _build_file {
+  my ( $self ) = @_;
+  return -f $self->native_file ? $self->native_file : $self->legacy_file;
+}
+
+sub home_class { 'Langertha::Raider::Home' }
+
+=method native_file
+
+L<Path::Tiny> of F<.raider/config.yml> in L</root>, present or not.
+
+=method legacy_file
+
+L<Path::Tiny> of F<.raider.yml> in L</root>, present or not.
+
+=method is_native
+
+True when L</file> is F<.raider/config.yml>.
+
+=method label
+
+The file in use relative to L</root>, C<.raider/config.yml> or
+C<.raider.yml>: how reports name it as a source.
+
+=cut
+
+sub native_file { $_[0]->home_class->project_base($_[0]->root)->child('config.yml') }
+
+sub legacy_file { path($_[0]->root)->child('.raider.yml') }
+
+sub is_native { $_[0]->file eq $_[0]->native_file ? 1 : 0 }
+
+sub label { $_[0]->is_native ? $_[0]->home_class->dir_name.'/config.yml' : '.raider.yml' }
+
+=method ignored_files
+
+    for my $ign ($config->ignored_files) {
+      warn 'ignoring '.$ign->{file}.': '.$ign->{reason}."\n";
+    }
+
+The config files that are present but not loaded, each as C<file>
+(absolute path) and C<reason>: the legacy F<.raider.yml> while
+F<.raider/config.yml> is in use. Empty otherwise.
+
+=cut
+
+sub ignored_files {
+  my ( $self ) = @_;
+  return unless $self->is_native && -f $self->legacy_file;
+  return {
+    file   => $self->legacy_file->absolute->stringify,
+    reason => 'both .raider.yml and '.$self->label.' exist; only '.$self->label.' is loaded',
+  };
+}
 
 =attr data
 
@@ -146,7 +208,7 @@ sub _build_data {
 
 =method file_exists
 
-True when F<.raider.yml> exists.
+True when L</file> exists.
 
 =cut
 
@@ -422,8 +484,10 @@ sub profiles {
 Where each effective value came from:
 
     {
-      file    => '/path/.raider.yml',
+      file    => '/path/.raider/config.yml',
       exists  => 1,
+      label   => '.raider/config.yml',
+      ignored_files => [ { file => '/path/.raider.yml', reason => '...' } ],
       engine  => 'openai',
       values  => [
         { key => 'temperature', value => 0.7, source => 'openai',
@@ -437,6 +501,8 @@ Where each effective value came from:
 C<source> is a layer (C<top>, C<default> or the engine name);
 C<applies_to> says whether the value reaches the engine constructor or
 configures raider itself. C<skills> gets one entry per layer, as they merge.
+C<file> is the file in use, C<label> its L</label> and C<ignored_files>
+the L</ignored_files>.
 
 =cut
 
@@ -457,11 +523,13 @@ sub explain {
     { key => 'skills', value => $_->{value}, source => $_->{source}, merged => 1, applies_to => 'raider' }
   } @{ $r->{skills} };
   return {
-    file    => $self->file->stringify,
-    exists  => $self->file_exists,
-    engine  => $engine,
-    values  => \@values,
-    ignored => $r->{ignored},
+    file          => $self->file->stringify,
+    exists        => $self->file_exists,
+    label         => $self->label,
+    ignored_files => [ $self->ignored_files ],
+    engine        => $engine,
+    values        => \@values,
+    ignored       => $r->{ignored},
   };
 }
 

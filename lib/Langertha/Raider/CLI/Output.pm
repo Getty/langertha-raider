@@ -148,7 +148,9 @@ sub render_inline_code {
 
 =method config_report
 
-Prints a report of L<Langertha::Raider::Application/explain_config>: one line per
+Prints a report of L<Langertha::Raider::Application/explain_config>: the
+config file in use and any config file ignored next to it (a legacy
+F<.raider.yml> beside F<.raider/config.yml>); one line per
 setting with its value, source, what it overrides and whether it applies to
 the engine or to raider; the instructions source (C<-M>, C<.raider.md>,
 C<default>) with C<(bare)> under C<--bare>; each pack with its state, the
@@ -164,6 +166,9 @@ sub config_report {
   my $json = JSON::MaybeXS->new(canonical => 1, allow_nonref => 1);
   $self->emit($self->c(meta => 'file:   '), $self->c(title => $report->{file}),
     $self->c(meta => $report->{exists} ? '' : ' (not present)'), "\n");
+  for my $ign (@{ $report->{ignored_files} // [] }) {
+    $self->emit('  ', $self->c(warn => 'ignored file '.$ign->{file}.': '.$ign->{reason}), "\n");
+  }
   $self->emit($self->c(meta => 'engine: '), $self->c(title => $report->{engine}), "\n");
   $self->emit($self->c(meta => 'instructions: '), $self->c(title => $report->{instructions}),
     $self->c(meta => $report->{bare} ? ' (bare)' : ''), "\n") if defined $report->{instructions};
