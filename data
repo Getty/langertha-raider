@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-30T09:19:52Z
+claimed_by: raider-worker-k142
+class: standard
+completed: 2026-09-30T09:19:46Z
+created: 2026-09-30T09:13:53Z
+id: 142
+priority: low
+started: 2026-09-30T09:18:03Z
+status: done
+tags:
+- provider-discovery
+- needs:langertha#369
+title: 'Provider-Modus: engine_class_for_dialect aus Core statt eigener Dialekt-Tabelle
+  (langertha #369)'
+updated: 2026-09-30T09:19:52Z
+---
+
+Aus #119: raider hat eine eigene Dialekt->Engine-Tabelle in Provider::Activation (Rundreise-Test gegen Core dialect_for_engine). langertha #369 bringt Langertha::Manifest::Builder->engine_class_for_dialect. Pruefen und umstellen, wenn die Core-Antwort dieselbe ist; raider-eigene Entscheidungen (lmstudio unsupported mangels Tool-Calling, anthropic-compat konservativ) bleiben als raider-Policy obendrauf. Tests: jede bekannte Dialekt-Zuordnung wie bisher.
+
+2026-09-30 09:18 Activation: class now from Langertha::Manifest::Builder->engine_class_for_dialect (core answers identical to the old table, incl. AnthropicBase for anthropic-compat); raider keeps dialect->engine-name table (core has none), lmstudio unsupported, unknown-dialect error. Core also maps lmstudio; raider's unsupported list still wins. t/69 unchanged; t/67-72,59,00 green (171 tests). Needs Langertha with #369 (floor in cpanfile still 0.503 - bump to the release carrying #369).
+
+2026-09-30 09:19 Done, see notes; tests green
+
+Committed as 4a5b07e
