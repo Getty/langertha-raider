@@ -42,7 +42,8 @@ B<Internal module.> Its interface may change without notice.
 The application service the surfaces share (ADR 0002): for one workspace
 (L</root>) it reads the project config file (L<Langertha::Raider::Config>:
 F<.raider/config.yml>, else the legacy F<.raider.yml>; below, F<.raider.yml>
-stands for whichever is in use), picks
+stands for whichever is in use, laid over the home file
+F<~/.raider/config.yml>), picks
 the engine through L<Langertha::Raider::EngineResolver>, activates the
 packs (L<Langertha::Raider::Packs>, ADR 0012), compiles the mission (ADR
 0004, ADR 0014), mounts the tool servers -- files
@@ -454,7 +455,8 @@ sub perl_tools_grant {
   return { enabled => 1, reason => $self->source_label('perl') } if $self->perl;
   my $yml = $self->_load_yml_options->{perl};
   if (defined $yml) {
-    my $where = exists $self->_cli_app_options->{perl} ? $self->source_label('engine_options') : $self->config->label;
+    my $where = exists $self->_cli_app_options->{perl} ? $self->source_label('engine_options')
+      : $self->config->value_label($self->engine_name, 'perl');
     return { enabled => $yml ? 1 : 0, reason => 'perl: '.( $yml ? 'true' : 'false' ).' ('.$where.')' };
   }
   my $packs = $self->packs;
@@ -547,8 +549,9 @@ Without explicit packs the bundled defaults (C<enabled_by_default>) are
 on.
 
 Detection rules come from a pack's F<pack.yml> (C<detect:>, the pack
-default) and from C<detect:> in F<.raider.yml>, which replaces the pack
-default per pack name. Each rule is evaluated against L</root> with
+default) and from C<detect:> in F<~/.raider/config.yml> and
+F<.raider.yml>, which replace the pack default per pack name, the
+project's rule over the home's. Each rule is evaluated against L</root> with
 L<Langertha::Raider::Detect> when L</packs> is built and on
 L</redetect_packs> (C</reload>), never per model call. A detected pack is
 added to the enabled ones; in an exclusive group it gives way to an
@@ -604,7 +607,8 @@ sub _explicit_packs {
   return ( $self->pack_names, flag => $self->source_label('pack_names') ) if $self->has_pack_names;
   my $opt = $self->_cli_app_options->{packs};
   return ( $opt, flag => $self->source_label('engine_options packs') ) if defined $opt;
-  return ( $self->config->options($self->engine_name)->{packs}, config => $self->config->label.' packs:' );
+  my $engine = $self->engine_name;
+  return ( $self->config->options($engine)->{packs}, config => $self->config->value_label($engine, 'packs').' packs:' );
 }
 
 =method detection_state
@@ -646,7 +650,8 @@ sub _detect_packs {
     next unless $pack->has_detect;
     $rules{$name} = [ 'pack default', $pack->detect, $pack->path.'/pack.yml detect' ];
   }
-  $rules{$_} = [ $self->config->label.' detect:', $settings->{rules}{$_}, 'detect.'.$_ ] for keys %{$settings->{rules}};
+  $rules{$_} = [ $self->config->detect_rule_label($self->engine_name, $_), $settings->{rules}{$_}, 'detect.'.$_ ]
+    for keys %{$settings->{rules}};
 
   my %no_pack = map { $_ => 1 } @{$self->no_pack_names};
   my $detect = $self->detect_class->new(root => $self->root);
@@ -767,7 +772,7 @@ has cli_skill_sources => (
 =attr config
 
 The L<Langertha::Raider::Config> of L</root>: F<.raider/config.yml>, else
-F<.raider.yml>.
+F<.raider.yml>, over F<~/.raider/config.yml>.
 
 =cut
 
@@ -1524,11 +1529,15 @@ C<shadowed>) naming an argument by its L</source_label> (the command line
 names its flags: C<-e>, C<-m>, C<-k>, C<-o>, C<--pack>, C<--perl>,
 C<--claude/--openai/--skills>), a layer of the config file by its
 L<Langertha::Raider::Config/label> (C<.raider.yml>, C<.raider.yml default:>,
-C<.raider/config.yml openai:>), an
-environment variable (C<env OPENAI_API_KEY>) or C<default>. API key values
+C<.raider/config.yml openai:>), a layer of the home file
+F<~/.raider/config.yml> (C<home>, C<home default:>, C<home openai:>), an
+environment variable (C<env OPENAI_API_KEY>) or C<default>. A value merged
+from both files (C<no_detect>, C<detect>) names the home layer in
+C<merged_with>. API key values
 are never included. Builds no engine. C<file> is the config file in use and
 C<ignored_files> the config files next to it that are not loaded
-(L<Langertha::Raider::Config/ignored_files>).
+(L<Langertha::Raider::Config/ignored_files>); C<home_file> is the home
+file, present only when it is loaded.
 
 C<detection> says whether pack detection runs (C<on>, or C<off> with what
 switched it off) and C<packs> is the
@@ -1561,13 +1570,15 @@ sub explain_config {
   my $opts     = { %{ $self->_cli_engine_options }, %$app_opts };
   my $opt_label = $self->source_label('engine_options');
 
-  # .raider.yml values as candidates: [ source, value, shadowed ]
+  # Config file values as candidates: [ source, value, shadowed,
+  # merged_with ]
   my ( %yml, @yml_skills );
   for my $v (@{ $report->{values} }) {
     my $candidate = [
       $self->_yml_source($v->{source}),
       $v->{value},
       [ map { $self->_yml_source($_) } @{ $v->{shadowed} } ],
+      ( $v->{merged_with} ? [ map { $self->_yml_source($_) } @{ $v->{merged_with} } ] : () ),
     ];
     if ($v->{merged}) {
       push @yml_skills, { %$v, source => $candidate->[0], shadowed => [] };
@@ -1664,14 +1675,11 @@ sub _tool_effects_report {
 
 sub _tool_effects_class { 'Langertha::Raider::ToolEffects' }
 
-sub _yml_source {
-  my ($self, $layer) = @_;
-  my $label = $self->config->label;
-  return $layer eq 'top' ? $label : $label.' '.$layer.':';
-}
+sub _yml_source { $_[0]->config->layer_label($_[1]) }
 
-# One explain entry from candidates [ source, value, shadowed ], highest
-# priority first; the fallback counts only when no candidate is set.
+# One explain entry from candidates [ source, value, shadowed,
+# merged_with ], highest priority first; the fallback counts only when no
+# candidate is set.
 sub _explain_entry {
   my ($self, $key, $applies_to, $candidates, $fallback) = @_;
   my @have = grep { defined } @$candidates;
@@ -1682,8 +1690,9 @@ sub _explain_entry {
     key        => $key,
     value      => $win->[1],
     source     => $win->[0],
-    shadowed   => [ @{ $win->[2] // [] }, map { ( $_->[0], @{ $_->[2] // [] } ) } @rest ],
+    shadowed   => [ @{ $win->[2] // [] }, map { ( $_->[0], @{ $_->[3] // [] }, @{ $_->[2] // [] } ) } @rest ],
     applies_to => $applies_to,
+    ( $win->[3] ? ( merged_with => $win->[3] ) : () ),
   };
 }
 

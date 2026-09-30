@@ -50,6 +50,14 @@ the file in use and the ignored one. What F<raider> saves (C</model>,
 C<--claude>, C<--openai>, C<--skills>) goes to the file in use, and to
 F<.raider.yml> when there is none.
 
+Under the project file lies the home file F<~/.raider/config.yml>, with
+the same keys: built-in defaults, then the home file, then the project
+file, then the command line. The project replaces a home value, except
+that C<skills> and C<no_detect> add up and C<detect:> rules are replaced
+per pack. F<raider> never writes the home file. Run in the home directory
+itself, F<~/.raider/config.yml> is the project file and is read once. A
+home file that does not parse stops F<raider> like a broken project file.
+
 The project instructions follow the same rule: F<.raider/instructions.md>
 in the working directory, or else the legacy F<.raider.md> there, is added
 to the default persona. Where this page names F<.raider.md>, the file in
@@ -674,7 +682,7 @@ C<config explain> with it, a model the manifest does not list, no C<-m>
 where it lists several, or no C<-k> where the endpoint needs a key; and
 C<--allow-internal> without C<--provider>.
 
-=item C<3> -- configuration error: the config file cannot be read, the
+=item C<3> -- configuration error: the config file (project or home) cannot be read, the
 engine is unknown, or a pack detection rule is invalid.
 
 =item C<4> -- the session to continue (C<--session>, C<--continue>,

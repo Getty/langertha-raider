@@ -33,7 +33,10 @@ else the legacy F<.raider.yml>; both take the same keys. When both exist,
 only F<.raider/config.yml> is loaded: the legacy file is not read and is
 reported by L</ignored_files>.
 
-The file is read in three layers, later ones winning:
+Under the project file lies the home file F<~/.raider/config.yml> (ADR
+0011; L</home_file>), with the same keys: default E<lt> home E<lt>
+project E<lt> command line. Each file is read in three layers, later ones
+winning:
 
 =over
 
@@ -51,7 +54,29 @@ Every other top-level hash is the section of an engine that is not active.
 C<skills> is merged across the layers instead of replaced. C<engine> is read
 from C<top> and C<default> only, as it picks the engine section.
 
-A file that does not parse, whose top level is not a mapping, or that holds
+Then the project file's values are laid over the home file's, per key:
+
+=over
+
+=item C<skills> -- both files' lists, home first, duplicates dropped
+
+=item C<no_detect> -- both files' pack names, home first, duplicates
+dropped
+
+=item C<detect> -- when both are maps, per pack: the project's entry for a
+pack replaces the home's (ADR 0012); otherwise the project's value
+replaces the home's
+
+=item everything else, C<packs> and C<api_key> included -- the project's
+value replaces the home's
+
+=back
+
+The writers never touch the home file. When the home file is the file in
+use -- raider runs in the home directory itself -- it is read once, as the
+project file, and there is no home layer.
+
+A file, project or home, that does not parse, whose top level is not a mapping, or that holds
 a mapping under one of raider's own keys other than C<skills> and C<detect>
 (see L</is_app_key>) -- at top level or in any section, active or not -- is
 an error: readers croak and the writer refuses to
@@ -102,6 +127,56 @@ sub _build_file {
 }
 
 sub home_class { 'Langertha::Raider::Home' }
+
+=attr home_file
+
+L<Path::Tiny> of F<config.yml> in the user's F<~/.raider>
+(L<Langertha::Raider::Home/home_base>), present or not; undef when there
+is no home at all.
+
+=cut
+
+has home_file => (
+  is         => 'ro',
+  isa        => 'Maybe[Path::Tiny]',
+  lazy_build => 1,
+);
+
+sub _build_home_file {
+  my ( $self ) = @_;
+  my $base = $self->home_class->home_base;
+  return defined $base ? $base->child('config.yml') : undef;
+}
+
+=attr uses_home
+
+True when L</home_file> is read as the home layer: it exists and is not
+the file in use (L</file>, compared by real path). Decided once, when
+first asked.
+
+=cut
+
+has uses_home => (
+  is         => 'ro',
+  isa        => 'Bool',
+  lazy_build => 1,
+);
+
+sub _build_uses_home {
+  my ( $self ) = @_;
+  my $home = $self->home_file;
+  return 0 unless defined $home && -f $home;
+  return 0 if -f $self->file && $home->realpath eq $self->file->realpath;
+  return 1;
+}
+
+=method home_label
+
+C<home>: how reports name the home file as a source.
+
+=cut
+
+sub home_label { 'home' }
 
 =method native_file
 
@@ -166,6 +241,24 @@ has data => (
   lazy_build => 1,
 );
 
+=attr home_data
+
+L</home_file> parsed like L</data>, croaking like it; empty unless
+L</uses_home>.
+
+=cut
+
+has home_data => (
+  is         => 'ro',
+  isa        => 'HashRef',
+  lazy_build => 1,
+);
+
+sub _build_home_data {
+  my ( $self ) = @_;
+  return $self->uses_home ? $self->_load($self->home_file) : {};
+}
+
 # A YAML::PP error as one line. Its detailed report ("Line : 2",
 # "Column : 3", "Expected : ..." or "Message : ...") is summed up as
 # "line 2, column 3: expected EOL, got COLON"; a short error keeps its
@@ -184,7 +277,11 @@ sub _parse_error {
 
 sub _build_data {
   my ( $self ) = @_;
-  my $file = $self->file;
+  return $self->_load($self->file);
+}
+
+sub _load {
+  my ( $self, $file ) = @_;
   return {} unless -f $file;
   my $data;
   eval { $data = YAML::PP->new->load_string($file->slurp_utf8); 1 }
@@ -222,33 +319,100 @@ sub _may_be_mapping {
 }
 
 sub _is_section {
-  my ( $self, $key ) = @_;
-  return !$self->_may_be_mapping($key) && ref $self->data->{$key} eq 'HASH';
+  my ( $self, $data, $key ) = @_;
+  return !$self->_may_be_mapping($key) && ref $data->{$key} eq 'HASH';
 }
 
+# The layers of one file, named top, default and the engine; with a
+# $prefix (the home file: 'home ') in front of each name.
 sub _layers {
-  my ( $self, $engine ) = @_;
-  my $data = $self->data;
-  my @layers = ( [ top => { map { $_ => $data->{$_} } grep { !$self->_is_section($_) } keys %$data } ] );
-  push @layers, [ default => $data->{default} ] if $self->_is_section('default');
-  push @layers, [ $engine => $data->{$engine} ]
-    if defined $engine && $engine ne 'default' && $self->_is_section($engine);
+  my ( $self, $engine, $data, $prefix ) = @_;
+  my @layers = ( [ $prefix.'top' => { map { $_ => $data->{$_} } grep { !$self->_is_section($data, $_) } keys %$data } ] );
+  push @layers, [ $prefix.'default' => $data->{default} ] if $self->_is_section($data, 'default');
+  push @layers, [ $prefix.$engine => $data->{$engine} ]
+    if defined $engine && $engine ne 'default' && $self->_is_section($data, $engine);
   return @layers;
 }
 
-# One pass over the layers: effective value and source per key, the shadowed
-# sources, the skills of every layer, and what was ignored.
+# Effective value and source per key, the shadowed sources, the skills of
+# every layer, and what was ignored: the project file over the home file,
+# merged per key as DESCRIPTION says. merged_with names the home layer a
+# merged key took values from; project is the project file on its own.
 sub _resolve {
   my ( $self, $engine ) = @_;
+  my $project = $self->_resolve_file($engine, $self->data, '');
+  return $project unless $self->uses_home;
+  my $home = $self->_resolve_file($engine, $self->home_data, $self->home_label.' ');
+
+  my %value    = %{ $home->{value} };
+  my %source   = %{ $home->{source} };
+  my %shadowed = map { $_ => [ @{ $home->{shadowed}{$_} } ] } keys %{ $home->{shadowed} };
+  my %merged_with;
+  for my $key (sort keys %{ $project->{value} }) {
+    my $value  = $project->{value}{$key};
+    my @before = @{ $project->{shadowed}{$key} // [] };
+    if (exists $value{$key}) {
+      if (my $merged = $self->_merge_home($key, $value{$key}, $value)) {
+        $value = $merged->[0];
+        $merged_with{$key} = [ $source{$key} ];
+      }
+      else {
+        unshift @before, $source{$key};
+      }
+      unshift @before, @{ $shadowed{$key} // [] };
+    }
+    $value{$key}  = $value;
+    $source{$key} = $project->{source}{$key};
+    if (@before) { $shadowed{$key} = \@before } else { delete $shadowed{$key} }
+  }
+  return {
+    value       => \%value,
+    source      => \%source,
+    shadowed    => \%shadowed,
+    merged_with => \%merged_with,
+    skills      => [ @{ $home->{skills} }, @{ $project->{skills} } ],
+    ignored     => [ @{ $home->{ignored} }, @{ $project->{ignored} } ],
+    project     => $project,
+  };
+}
+
+# A key set in both files: [ merged value ] for the keys that merge
+# (no_detect: union; detect: per pack when both are maps), else nothing,
+# and the project value replaces the home one.
+sub _merge_home {
+  my ( $self, $key, $home, $project ) = @_;
+  if ($key eq 'no_detect') {
+    my %seen;
+    return [ [ grep { ref || !$seen{$_}++ } map { $self->_name_list($_) } $home, $project ] ];
+  }
+  return [ { %$home, %$project } ] if $key eq 'detect' && ref $home eq 'HASH' && ref $project eq 'HASH';
+  return;
+}
+
+# A no_detect value as a list: its items, or a string split on commas. A
+# value of any other shape stays one item, for normalize_detect to reject.
+sub _name_list {
+  my ( $self, $value ) = @_;
+  return ()      unless defined $value;
+  return @$value if ref $value eq 'ARRAY';
+  return $value  if ref $value;
+  return split /\s*,\s*/, $value;
+}
+
+# One pass over the layers of one file: effective value and source per
+# key, the shadowed sources, the skills of every layer, and what was
+# ignored.
+sub _resolve_file {
+  my ( $self, $engine, $data, $prefix ) = @_;
   my ( %value, %source, %shadowed, @skills, @ignored );
-  for my $layer ($self->_layers($engine)) {
+  for my $layer ($self->_layers($engine, $data, $prefix)) {
     my ( $name, $hash ) = @$layer;
     for my $key (sort keys %$hash) {
       if ($key eq 'skills') {
         push @skills, { source => $name, value => $hash->{$key} };
         next;
       }
-      if ($key eq 'engine' && $name ne 'top' && $name ne 'default') {
+      if ($key eq 'engine' && $name ne $prefix.'top' && $name ne $prefix.'default') {
         push @ignored, { key => $name.'.engine', reason => 'engine: inside an engine section' };
         next;
       }
@@ -257,10 +421,10 @@ sub _resolve {
       $source{$key} = $name;
     }
   }
-  for my $key (sort keys %{ $self->data }) {
-    next unless $self->_is_section($key);
+  for my $key (sort keys %$data) {
+    next unless $self->_is_section($data, $key);
     next if $key eq 'default' || (defined $engine && $key eq $engine);
-    push @ignored, { key => $key, reason => 'section of an inactive engine' };
+    push @ignored, { key => $prefix.$key, reason => 'section of an inactive engine' };
   }
   return {
     value    => \%value,
@@ -269,6 +433,58 @@ sub _resolve {
     skills   => \@skills,
     ignored  => \@ignored,
   };
+}
+
+=method layer_label
+
+    $config->layer_label('default');       # '.raider/config.yml default:'
+    $config->layer_label('home openai');   # 'home openai:'
+
+How reports name a layer of L</explain>: the label of its file (L</label>,
+or L</home_label> for a C<home> layer), then the section and a colon
+unless it is the top level.
+
+=cut
+
+sub layer_label {
+  my ( $self, $layer ) = @_;
+  my $file   = $self->label;
+  my $prefix = $self->home_label.' ';
+  if (index($layer, $prefix) == 0) {
+    $file  = $self->home_label;
+    $layer = substr $layer, length $prefix;
+  }
+  return $layer eq 'top' ? $file : $file.' '.$layer.':';
+}
+
+=method value_label
+
+    my $where = $config->value_label($engine_name, 'packs');   # 'home'
+
+The label of the file the effective value of a key comes from:
+L</home_label> when only the home file sets it, else L</label>.
+
+=method detect_rule_label
+
+    my $from = $config->detect_rule_label($engine_name, 'perl');   # 'home detect:'
+
+Where the effective C<detect:> entry of a pack comes from: the label of
+its file, as L</value_label>, and C<detect:>.
+
+=cut
+
+sub value_label {
+  my ( $self, $engine, $key ) = @_;
+  return $self->label unless $self->uses_home;
+  return exists $self->_resolve($engine)->{project}{value}{$key} ? $self->label : $self->home_label;
+}
+
+sub detect_rule_label {
+  my ( $self, $engine, $pack ) = @_;
+  return $self->label.' detect:' unless $self->uses_home;
+  my $project = $self->_resolve($engine)->{project}{value}{detect};
+  my $from_project = ref $project eq 'HASH' ? exists $project->{$pack} : defined $project;
+  return ( $from_project ? $self->label : $self->home_label ).' detect:';
 }
 
 =method engine
@@ -498,11 +714,15 @@ Where each effective value came from:
       ignored => [ { key => 'anthropic', reason => 'section of an inactive engine' } ],
     }
 
-C<source> is a layer (C<top>, C<default> or the engine name);
-C<applies_to> says whether the value reaches the engine constructor or
-configures raider itself. C<skills> gets one entry per layer, as they merge.
+C<source> is a layer (C<top>, C<default> or the engine name), for the
+home file prefixed with C<home> (C<home top>, C<home default>, ...;
+L</layer_label> names them); C<applies_to> says whether the value reaches
+the engine constructor or configures raider itself. C<skills> gets one
+entry per layer, as they merge. A C<no_detect> or C<detect> merged from
+both files names the home layer it took values from in C<merged_with>.
 C<file> is the file in use, C<label> its L</label> and C<ignored_files>
-the L</ignored_files>.
+the L</ignored_files>; C<home_file> is L</home_file>, present only when
+L</uses_home>.
 
 =cut
 
@@ -517,6 +737,7 @@ sub explain {
       source     => $r->{source}{$key},
       shadowed   => $r->{shadowed}{$key} // [],
       applies_to => $APP_KEY{$key} ? 'raider' : 'engine',
+      ( $r->{merged_with} && $r->{merged_with}{$key} ? ( merged_with => $r->{merged_with}{$key} ) : () ),
     }
   } sort keys %{ $r->{value} };
   push @values, map {
@@ -527,6 +748,7 @@ sub explain {
     exists        => $self->file_exists,
     label         => $self->label,
     ignored_files => [ $self->ignored_files ],
+    ( $self->uses_home ? ( home_file => $self->home_file->stringify ) : () ),
     engine        => $engine,
     values        => \@values,
     ignored       => $r->{ignored},

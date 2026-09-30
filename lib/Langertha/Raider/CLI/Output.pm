@@ -150,9 +150,10 @@ sub render_inline_code {
 
 Prints a report of L<Langertha::Raider::Application/explain_config>: the
 config file in use and any config file ignored next to it (a legacy
-F<.raider.yml> beside F<.raider/config.yml>); one line per
-setting with its value, source, what it overrides and whether it applies to
-the engine or to raider; the instructions source (C<-M>,
+F<.raider.yml> beside F<.raider/config.yml>); the home file
+F<~/.raider/config.yml> when it is loaded; one line per
+setting with its value, source, what it was merged with, what it overrides
+and whether it applies to the engine or to raider; the instructions source (C<-M>,
 C<.raider/instructions.md>, C<.raider.md>, C<default>) with C<(bare)> under
 C<--bare>, and any instructions file ignored next to the one in use (a
 legacy F<.raider.md> beside F<.raider/instructions.md>); each pack with its state, the
@@ -171,6 +172,8 @@ sub config_report {
   for my $ign (@{ $report->{ignored_files} // [] }) {
     $self->emit('  ', $self->c(warn => 'ignored file '.$ign->{file}.': '.$ign->{reason}), "\n");
   }
+  $self->emit($self->c(meta => 'home:   '), $self->c(title => $report->{home_file}), "\n")
+    if defined $report->{home_file};
   $self->emit($self->c(meta => 'engine: '), $self->c(title => $report->{engine}), "\n");
   $self->emit($self->c(meta => 'instructions: '), $self->c(title => $report->{instructions}),
     $self->c(meta => $report->{bare} ? ' (bare)' : ''), "\n") if defined $report->{instructions};
@@ -180,6 +183,7 @@ sub config_report {
   for my $v (@{ $report->{values} }) {
     my $value = ref $v->{value} ? $json->encode($v->{value}) : $v->{value} // '';
     my $from  = 'from '.$v->{source};
+    $from .= ', merged with '.join(', ', @{ $v->{merged_with} }) if @{ $v->{merged_with} // [] };
     $from .= ', overrides '.join(', ', @{ $v->{shadowed} }) if @{ $v->{shadowed} // [] };
     $from .= ', merged' if $v->{merged};
     $self->emit(sprintf("  %s %s  %s\n", $self->c(title => sprintf('%-22s', $v->{key})), $value,

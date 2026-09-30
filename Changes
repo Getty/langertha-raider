@@ -94,6 +94,11 @@ Revision history for Langertha-Raider
       .raider.yml). When both files exist only .raider/config.yml is loaded,
       raider warns on start, and raider config explain names the file in use
       and the ignored one. /model and saved skills write to the file in use.
+    - raider reads ~/.raider/config.yml under the project config (default <
+      home < project < command line). Project values replace home ones,
+      skills and no_detect add up, detect: rules are replaced per pack.
+      raider config explain names home values "home" and prints the home
+      file. A broken home file stops raider (exit 3); raider never writes it.
     - raider reads the project instructions from .raider/instructions.md, else
       .raider.md. When both exist only .raider/instructions.md is used, raider
       warns on start, and raider config explain names the ignored file under

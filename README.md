@@ -204,8 +204,9 @@ schema and every exit status — is in `perldoc raider`.
 ## Configuration — `.raider/config.yml` or `.raider.yml`
 
 Configuration is per-project: `.raider/config.yml` in the working root, or else the
-legacy `.raider.yml` there (see [Roadmap](#roadmap--planned) for the planned
-`~/.raider/` home model). Both take the same keys; below, `.raider.yml` stands for
+legacy `.raider.yml` there, over the home file `~/.raider/config.yml` (see
+[Roadmap](#roadmap--planned) for the rest of the planned `~/.raider/` home model).
+All take the same keys; below, `.raider.yml` stands for
 whichever file is in use. When both exist, only `.raider/config.yml` is read —
 raider warns that it ignores `.raider.yml`, and `raider config explain` shows the
 conflict. What raider saves (`/model`, `--claude`, `--openai`, `--skills`) goes to
@@ -214,11 +215,18 @@ later ones winning:
 
 ```
 built-in defaults
-  < .raider.yml top-level keys
-    < .raider.yml default: section
-      < .raider.yml <engine>: section (openai:, anthropic:, ...)
-        < command-line -o / flags
+  < ~/.raider/config.yml (same three layers as below)
+    < .raider.yml top-level keys
+      < .raider.yml default: section
+        < .raider.yml <engine>: section (openai:, anthropic:, ...)
+          < command-line -o / flags
 ```
+
+A project value replaces a home value, with three exceptions: `skills` and
+`no_detect` from both files add up, and `detect:` rules are replaced per pack.
+raider never writes the home file; run in `~` itself, `~/.raider/config.yml` is the
+project file and is read once. `raider config explain` names home values `home`
+(`home default:`, `home openai:`) and prints the home file's path.
 
 Flat form, or per-engine with a shared `default:` layer:
 
@@ -652,7 +660,8 @@ vocabulary live in [`CONTEXT.md`](CONTEXT.md); it lands in small vertical slices
   `sessions/`, `memory/`) that never bleeds into projects, a `<project>/.raider/`
   config layer, and a `raider config migrate` from today's `.raider.yml` / `.raider.md`.
   *Today: per-project `.raider/config.yml` and `.raider/instructions.md` (or the
-  legacy `.raider.yml` and `.raider.md`) only.*
+  legacy `.raider.yml` and `.raider.md`) and the home `~/.raider/config.yml` under
+  them.*
 - **Inspectable context & diagnostics** (ADR 0004) — a per-call, itemized
   `ContextPlan` you can read with `raider context explain`, a `raider doctor`
   health check, per-directory instruction walking, and an explicit workspace-trust
