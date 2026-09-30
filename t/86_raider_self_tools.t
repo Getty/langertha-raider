@@ -581,6 +581,50 @@ subtest 'anthropic document and search_result blocks' => sub {
     qr/example\.org/, 'query filter reaches a search_result title');
 };
 
+# Native tool-result PDFs (langertha k361): OpenAI Responses carries an
+# input_file part (filename + file_data data: URL) in function_call_output,
+# Gemini a functionResponse.parts[].inlineData with mimeType application/pdf.
+# Both are named like the Anthropic document, never dumped as <input_file> /
+# <block> and never as base64.
+subtest 'native tool-result pdf parts' => sub {
+  my $raider = Langertha::Raider->new(
+    engine     => MockEngine->new,
+    raider_mcp => 1,
+  );
+  my $b64 = 'JVBERi0xLjQKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSPj4Kc3RyZWFtCg==';
+  push @{$raider->session_history},
+    { type => 'function_call_output', call_id => 'call_pdf1',
+      output => [
+        { type => 'input_text', text => 'Fetched the report' },
+        { type => 'input_file', filename => 'report.pdf',
+          file_data => 'data:application/pdf;base64,' . $b64 },
+      ] },
+    { type => 'function_call_output', call_id => 'call_pdf2',
+      output => [
+        { type => 'input_file', file_data => 'data:application/pdf;base64,' . $b64 },
+      ] },
+    { role => 'user', parts => [
+      { functionResponse => { name => 'fetch', response => { result => 'Fetched the report' },
+        parts => [ { inlineData => { mimeType => 'application/pdf', data => $b64 } } ] } },
+    ] };
+
+  my @warnings;
+  my $text;
+  {
+    local $SIG{__WARN__} = sub { push @warnings, $_[0] };
+    $text = $raider->_query_session_history_f({})->get;
+  }
+  is(scalar @warnings, 0, 'no warnings while rendering') or diag("warnings: @warnings");
+  like($text, qr/tool_result: Fetched the report\n\[document\] report\.pdf/,
+    'input_file renders its filename');
+  like($text, qr/tool_result: \[document\](?:\n|$)/m,
+    'input_file without filename renders [document]');
+  like($text, qr/tool_result: Fetched the report\n\[document\] application\/pdf/,
+    'gemini PDF inlineData renders its mime type');
+  unlike($text, qr/\Q$b64\E|<input_file>|<block>|ARRAY\(0x|HASH\(0x/,
+    'no base64 or raw block markers');
+};
+
 # Anthropic custom content documents (Citations) carry their text as a block
 # list in source.content -- a string is allowed too -- and any document may
 # carry an optional context field the model reads but never cites. Both are

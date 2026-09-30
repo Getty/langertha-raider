@@ -245,6 +245,10 @@ Revision history for Langertha-Raider
       A custom content document (source type content) shows its text
       chunks instead of a bare [document], and a document's context
       field is kept on its own [context] line.
+      A tool-result PDF (Responses input_file, Gemini functionResponse
+      inlineData) shows as [document] name.pdf or [document]
+      application/pdf instead of <input_file> or <block>; its base64
+      payload is never shown.
     - A raid paused by an interactive self-tool (raider_ask_user etc.) in
       the middle of a parallel-tool batch no longer re-runs the calls that
       completed before it or drops the self-tools queued after it:

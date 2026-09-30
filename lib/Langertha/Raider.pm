@@ -1218,6 +1218,11 @@ sub _render_history_block {
   return '[image]'
     if ref $block->{inlineData} eq 'HASH'
     && ( $block->{inlineData}{mimeType} // '' ) =~ m{^image/};
+  # Any other inlineData (a tool-result PDF, langertha k361) is named by its
+  # MIME type, never dumped.
+  return '[document] ' . $block->{inlineData}{mimeType}
+    if ref $block->{inlineData} eq 'HASH'
+    && defined $block->{inlineData}{mimeType} && length $block->{inlineData}{mimeType};
 
   my $type = $block->{type} // '';
 
@@ -1241,6 +1246,11 @@ sub _render_history_block {
   }
   # Responses input_image, Anthropic image (langertha k326).
   return '[image]' if $type eq 'input_image' || $type eq 'image';
+  # Responses input_file (a tool-result PDF, langertha k361): named by its
+  # filename, never the file_data / data: URL.
+  return defined $block->{filename} && !ref $block->{filename} && length $block->{filename}
+    ? '[document] ' . $block->{filename} : '[document]'
+    if $type eq 'input_file';
 
   # Anthropic document (langertha k326): a text source gives its text, a
   # content source (Citations custom content) its chunks, any other source
