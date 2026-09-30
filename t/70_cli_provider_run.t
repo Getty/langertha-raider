@@ -240,14 +240,19 @@ subtest 'every request of this file, embeddings included' => sub {
 
 subtest 'the synchronous user agent follows no redirect either (REPL /model list)' => sub {
   local $ENV{PERL_LWP_SSL_CA_FILE} = $CA;
-  # The Anthropic family sends its key as x-api-key, which LWP keeps on a
-  # redirect to another origin (it strips only Authorization).
+  # Control: Langertha's own agent follows a GET redirect to another origin
+  # and leaves the key behind (core k374; plain LWP would keep x-api-key).
+  # It still sends the request there -- to a host no address check has seen,
+  # which is why the provider engine follows no redirect at all.
   my $url = 'https://'.$host.'/redir';
   my $control = Langertha::Engine::Anthropic->new( url => $url, api_key => 'sk-control', model => 'm1' );
   eval { $control->list_models };
-  my ( $leaked ) = $other->requests;
-  is( $leaked && $leaked->{headers}{'x-api-key'}, 'sk-control',
-    'control: an engine built without the provider settings follows the GET redirect with its key' );
+  my @followed = $other->requests;
+  is( [ map { $_->{method}.' '.$_->{path} } @followed ], [ 'GET /v1/models' ],
+    'control: an engine built without the provider settings follows the GET redirect to the other origin' );
+  is( [ grep { exists $_->{headers}{'x-api-key'} || exists $_->{headers}{authorization} } @followed ], [],
+    'control: ... without its key' );
+  unlike( JSON::MaybeXS->new->canonical->encode( \@followed ), qr/sk-control/, 'control: the key is nowhere in it' );
 
   my $seen_other = () = $other->requests;
   my $engine = Langertha::Raider::EngineResolver->new(

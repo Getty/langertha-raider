@@ -83,8 +83,10 @@ not read its C<LANGERTHA_*_API_KEY> either. A key configured for another
 provider never reaches this one.
 
 =item * L</build_engine> turns off redirects on the engine's synchronous
-user agent, so a key does not follow a redirect to another origin (chat
-requests are POSTs, which neither HTTP backend redirects).
+user agent, so its requests stay on the endpoint's origin, whose address was
+checked. Langertha keeps the key on its origin across a redirect, but would
+still send the request on to the other host (chat requests are POSTs, which
+Langertha never redirects).
 
 =back
 
@@ -395,6 +397,8 @@ sub build_engine {
   Module::Runtime::require_module($class);
   my $engine = $class->new($self->engine_args(%extra));
   if ($self->has_provider && $engine->can('user_agent')) {
+    # Not for the key (Langertha's agent strips it on another origin), for
+    # the host: a redirect target passed no address check.
     $engine->user_agent->max_redirect(0);
     $engine->user_agent->requests_redirectable([]);
   }

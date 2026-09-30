@@ -279,16 +279,23 @@ subtest 'engine class, url, model and key per dialect' => sub {
       is( Langertha::Manifest::Builder->dialect_for_engine($engine), $dialect,
         $label.': core names the engine by the same dialect' );
       is( $engine->user_agent->max_redirect, 0, $label.': the synchronous user agent follows no redirect' );
-      # Gemini puts the key in the query and does not expect none: without
-      # one it warns and sends an empty key= (reported to core, k119).
+      # Gemini puts the key in the query. The explicit api_key => undef the
+      # resolver passes without -k makes it send none and read no
+      # environment variable (core k376; before it warned and sent key=).
       my @warnings;
       my $request = do {
         local $SIG{__WARN__} = sub { push @warnings, @_ };
         $engine->chat_request( [ { role => 'user', content => 'hi' } ] );
       };
-      is( \@warnings, $dialect eq 'gemini' && !defined $key ? [ match(qr/uninitialized value \$value .*Gemini\.pm/) ] : [],
-        $label.': no warning building the request (but the known Gemini one)' );
+      is( \@warnings, [], $label.': no warning building the request' );
       like( $request->uri->as_string, qr{^\Q$base\E/v1/}, $label.': requests go to the endpoint' );
+      if ( defined $key ) {
+        like( $request->uri->as_string, qr/[?&]key=\Q$key\E(?:&|\z)/, $label.': Gemini carries the -k key in the query' )
+          if $dialect eq 'gemini';
+      }
+      else {
+        unlike( $request->uri->as_string, qr/[?&]key=/, $label.': no key parameter in the URL' );
+      }
       unlike( $request->as_string, qr/secret/, $label.': no configured key in the request' );
     }
   }
