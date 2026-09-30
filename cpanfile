@@ -1,4 +1,5 @@
 requires 'Data::MessagePack';
+requires 'Digest::SHA';
 requires 'File::ShareDir';
 requires 'File::Which';
 requires 'Future';
