@@ -1218,6 +1218,25 @@ sub _render_history_block {
   # Responses input_image, Anthropic image (langertha k326).
   return '[image]' if $type eq 'input_image' || $type eq 'image';
 
+  # Anthropic document (langertha k326): a text source gives its text, any
+  # other source (base64 PDF, url, file) is named, never dumped.
+  if ( $type eq 'document' ) {
+    my $source = ref $block->{source} eq 'HASH' ? $block->{source} : {};
+    my $has_title = defined $block->{title} && length $block->{title};
+    my $marker    = $has_title ? '[document] ' . $block->{title} : '[document]';
+    return $marker
+      unless ( $source->{type} // '' ) eq 'text' && defined $source->{data};
+    return $has_title ? $marker . "\n" . $source->{data} : $source->{data};
+  }
+  # Anthropic search_result: title and source URL, then its text blocks.
+  if ( $type eq 'search_result' ) {
+    return join "\n", grep { length }
+      join( ' ', grep { defined && length } '[search_result]', $block->{title},
+        ( defined $block->{source} && !ref $block->{source}
+          ? '<' . $block->{source} . '>' : () ) ),
+      _render_history_payload_value( $block->{content} );
+  }
+
   # Unknown block: name it by its discriminator rather than dropping it.
   my $rest = _render_history_payload_value( $block->{content} );
   return length $rest

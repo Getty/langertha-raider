@@ -504,6 +504,83 @@ subtest 'gemini structured functionResponse and anthropic image block' => sub {
   like($filtered, qr/Wismar/, 'query filter reaches into structured response');
 };
 
+# Langertha::ToolResult to_anthropic (langertha k326) maps an MCP embedded text
+# resource (or a text/* blob) to an Anthropic {type => 'document', source =>
+# {type => 'text', data => ...}} block, and a PDF blob to a base64 document;
+# Anthropic-native search_result blocks (source, title, content text blocks)
+# pass through. The text the model saw has to stay readable -- a bare
+# "<document>" marker loses it -- while a base64 document is named, never
+# dumped. The /anthropic shims get a plain text block instead (langertha k364),
+# which already renders as its text.
+subtest 'anthropic document and search_result blocks' => sub {
+  my $raider = Langertha::Raider->new(
+    engine     => MockEngine->new,
+    raider_mcp => 1,
+  );
+  my $pdf = 'JVBERi0xLjQKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSPj4Kc3RyZWFtCg==';
+  push @{$raider->session_history},
+    { role => 'user', content => [
+      { type => 'tool_result', tool_use_id => 'toolu_10',
+        content => [
+          { type => 'document',
+            source => { type => 'text', media_type => 'text/plain',
+              data => 'Rostock ferry timetable: 08:15, 12:40' } },
+        ] },
+    ] },
+    { role => 'user', content => [
+      { type => 'tool_result', tool_use_id => 'toolu_11',
+        content => [
+          { type => 'text', text => 'Fetched the report' },
+          { type => 'document',
+            source => { type => 'base64', media_type => 'application/pdf', data => $pdf } },
+        ] },
+    ] },
+    { role => 'user', content => [
+      { type => 'document', title => 'Greifswald notes',
+        source => { type => 'text', media_type => 'text/plain', data => 'Dock 3 is closed' } },
+    ] },
+    { role => 'user', content => [
+      { type => 'tool_result', tool_use_id => 'toolu_12',
+        content => [
+          { type => 'search_result', source => 'https://example.org/usedom',
+            title => 'Usedom ferries',
+            content => [ { type => 'text', text => 'The Usedom ferry runs hourly' } ],
+            citations => { enabled => 1 } },
+        ] },
+    ] };
+
+  my @warnings;
+  my $text;
+  {
+    local $SIG{__WARN__} = sub { push @warnings, $_[0] };
+    $text = $raider->_query_session_history_f({})->get;
+  }
+  is(scalar @warnings, 0, 'no warnings while rendering') or diag("warnings: @warnings");
+
+  my @entries = split /\n\n/, $text;
+  is(scalar @entries, 4, 'four history elements rendered') or diag($text);
+
+  is($entries[0], '[user] tool_result: Rostock ferry timetable: 08:15, 12:40',
+    'text document renders as its text');
+  is($entries[1], "[user] tool_result: Fetched the report\n[document]",
+    'base64 document renders as [document]');
+  is($entries[2], "[user] [document] Greifswald notes\nDock 3 is closed",
+    'titled text document keeps its title and text');
+  is($entries[3],
+    "[user] tool_result: [search_result] Usedom ferries <https://example.org/usedom>\n"
+      . 'The Usedom ferry runs hourly',
+    'search_result renders title, source and text');
+
+  unlike($text, qr/\Q$pdf\E/, 'base64 payload never leaks into the rendering');
+  unlike($text, qr/<document>|<search_result>|ARRAY\(0x|HASH\(0x/,
+    'no raw block markers or refs');
+
+  like($raider->_query_session_history_f({ query => 'timetable' })->get,
+    qr/Rostock/, 'query filter reaches into document text');
+  like($raider->_query_session_history_f({ query => 'Usedom ferries' })->get,
+    qr/example\.org/, 'query filter reaches a search_result title');
+};
+
 subtest 'register_session_history_tool renders identically' => sub {
   my $raider = Langertha::Raider->new(
     engine     => MockEngine->new,

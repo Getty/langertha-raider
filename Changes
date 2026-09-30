@@ -215,7 +215,10 @@ Revision history for Langertha-Raider
       parts, and an Anthropic tool_result with image blocks keep their
       text and show each image as [image], never as base64. A Gemini
       functionResponse carrying the tool's structured content is shown
-      whole, as JSON, instead of as an empty "tool_result:".
+      whole, as JSON, instead of as an empty "tool_result:". An Anthropic
+      text document shows its text (and title) instead of a bare
+      <document>, a PDF document shows as [document], and a search_result
+      keeps its title and source URL next to its text.
     - A raid paused by an interactive self-tool (raider_ask_user etc.) in
       the middle of a parallel-tool batch no longer re-runs the calls that
       completed before it or drops the self-tools queued after it:
