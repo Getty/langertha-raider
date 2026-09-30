@@ -1,0 +1,34 @@
+---
+claimed_at: 2026-09-30T08:34:53Z
+claimed_by: raider-worker-k138
+class: standard
+completed: 2026-09-30T08:34:53Z
+created: 2026-09-30T08:21:16Z
+id: 138
+priority: medium
+started: 2026-09-30T08:29:59Z
+status: done
+tags:
+- provider-discovery
+- security
+- needs:langertha#374
+title: 'Redirect-Workarounds aus #119 gegen Core-Policy Langertha::HTTP::Redirect
+  (ADR 0036) pruefen'
+updated: 2026-09-30T08:34:58Z
+---
+
+langertha#374 ist auf langertha main (3796bfe, installiert): Redirect-Credential-Policy, ADR 0036 in langertha, Langertha::HTTP::Redirect. Achtung laut Hub: selbst injizierte LWP::UserAgent/Async-Clients behalten ihr eigenes Redirect-Verhalten; http->https auf demselben Host = anderer Origin.
+raider #119 hat eigene Workarounds (Redirects fuer den synchronen UA im Provider-Modus aus; Provider::Fetch hat eigene same-origin-Redirect-Schleife fuer den Manifest-Abruf). Pruefen: welche Workarounds durch die Core-Policy ersetzbar sind (weniger eigener Code) und welche bleiben muessen (Fetch pinnt IP und hat eigene Limits -> bleibt vermutlich). Kontrolltest in t/70 (Anthropic list_models + 307 auf fremden Origin) muss mit Core-Policy ohne Workaround gruen sein, bevor ein Workaround faellt. Floor-Hinweis: braucht die Langertha-Version mit #374.
+
+2026-09-30 08:33 Review of the #119 redirect workarounds against core k374 (Langertha::HTTP::Redirect, ADR 0036), installed langertha 3796bfe:
+(1) EngineResolver::build_engine max_redirect(0)+requests_redirectable([]) in provider mode: KEPT. The key side is covered by core now (default user_agent is Langertha::HTTP::UserAgent; raider never injects one; t/70 control proves an engine without raider's settings follows the 307 to the other origin WITHOUT x-api-key). But core still follows the GET to the other host, which passed none of raider's address checks (#119 point 4, --allow-internal) - core strips credentials, it does not confine requests to an origin or check addresses. So the reason changed (host confinement, not key), POD + code comment updated; the t/70 'and did not follow it' assertion is the regression guard (mutant: workaround removed -> t/69 16 fails, t/70 fails).
+(2) Provider::Fetch own same-origin hop loop (max_redirects 0 on N::A::HTTP, IP pin, limits): KEPT unchanged, does more than credential stripping and sends no credential anyway.
+(3) Async side: raider had no workaround (noted as gap in #119: async GETs not covered). Core now follows async hops through the policy (POST never redirected); nothing to remove.
+(4) WebTools on_redirect (https-only per hop) and Hall/Telegram clients are not #119 credential workarounds - out of scope, untouched.
+Tests: t/69 subtest 9 now asserts no warning and, without -k, no key= in the URL (k376); t/70 control asserts the redirect is followed but carries no key (k374).
+
+2026-09-30 08:34 Floor: the tests now require core k374 (t/70 control) and k376 (t/69 Gemini keyless: no warning, no key=); raider's runtime code relies on neither (the explicit api_key=>undef and max_redirect(0) are unchanged). cpanfile already says requires 'Langertha', '0.503' (= current unreleased langertha main, CPAN has 0.502); at the joint release make sure the Langertha release that carries k374+k376 is what the pin names - raise it if core's number moves past 0.503 first. Not changed now.
+
+2026-09-30 08:34 Done, commit-ready (uncommitted). Changed: t/69_provider_activation.t (subtest 9: no Gemini warning; no key= without -k; Gemini with -k carries key=cli-key), t/70_cli_provider_run.t (control: Langertha's agent follows the cross-origin 307 but without x-api-key/Authorization/key anywhere), lib/Langertha/Raider/EngineResolver.pm (POD + comment only: max_redirect(0) kept for host confinement, not for the key). No workaround removed. Verified against installed Langertha 3796bfe: t/00 t/59 t/67 t/68 t/69 t/70 t/71 x2 t/72 = 9 files, 171 tests PASS. Mutants killed: workaround removed (t/69 + t/70 fail), resolver drops api_key=>undef (t/69 fails), same for gemini only (t/69 'no key parameter in the URL' fails). Not run: full suite, binary (no dependency/binary change).
+
+Committed as 3f1e2ea
