@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-30T09:13:03Z
+claimed_by: raider-worker-k130
+class: standard
+completed: 2026-09-30T09:12:58Z
+created: 2026-09-30T06:01:20Z
+id: 130
+priority: low
+started: 2026-09-30T09:02:34Z
+status: done
+tags:
+- adr-0011
+- config
+- cli
+title: 'ADR 0011 A6: raider config migrate [--dry-run]'
+updated: 2026-09-30T09:13:03Z
+---
+
+Nach #126 und #127. .raider.yml/.raider.md -> .raider/config.yml + instructions.md: Diff zeigen, Backup, atomar schreiben, .gitignore anlegen; danach zeigt explain dieselbe effektive Config (F01). api_key wird NICHT in die teilbare Projekt-config.yml kopiert, sondern gemeldet (Handoff 5.2) - Default zur Bestaetigung.
+
+2026-09-30 09:09 Plan/decisions: new internal Langertha::Raider::Config::Migrate (plan/apply) + Config::remove_api_keys/migration_content + Output::migrate_report/migrate_done + Main::migrate_command. Steps per existing legacy file: new file via tempfile in .raider/ + rename (legacy file's mode), then legacy renamed to <file>.bak (= backup + removal in one); if that rename fails the new file is removed again (per-file consistent). .raider/ + .gitignore via SessionStore->prepare_base. PROVISIONAL: (1) refusal is all-or-nothing, decided before anything is written: target exists, backup exists, .raider not a dir, root == home dir (there .raider/config.yml would be the HOME config of every project); (2) api_key stripped from top/default:/engine sections; api_key lines are dropped textually (comments kept) only when the result parses to exactly the data minus the keys, else the YAML is rewritten from the parsed data (comments lost, report says so and shows the new content); (3) human output only, a machine flag is exit 2 (config explain has no machine form either); (4) only 'raider config migrate ...' with the words first is the subcommand (it writes files) - 'raider -r X config migrate' stays a prompt; (5) dry-run with a refusal exits 1 like the real run.
+
+2026-09-30 09:12 Done (uncommitted, tree commit-ready). raider config migrate [--dry-run] [-r DIR]: new internal Langertha::Raider::Config::Migrate (plan/apply; _move hook), Config::remove_api_keys + migration_content, Output::migrate_report/migrate_done, CLI::Main::migrate_command/migrate_usage (+ main usage, unknown-config usage names migrate). Per legacy file: new file via tempfile in .raider/ + rename with the legacy file's mode, then legacy -> <file>.bak (backup+removal in one rename); a failing backup rename removes the new file again, so each file is either fully legacy or fully migrated; apply stops at the first failing step (rest skipped). .raider/ + .gitignore via SessionStore->prepare_base (existing .gitignore untouched). Exit: 0 done/nothing/dry run, 1 refused (also with --dry-run) or step failed, 2 extra word / machine flag / bad option, 3 unparsable .raider.yml. Docs: bin/raider (SYNOPSIS, DESCRIPTION paragraph, EXIT STATUS), README (commands, config section, roadmap), Config/Main/Output POD. Tests: new t/28_config_migrate.t (13 subtests: nothing to migrate, dry run writes nothing (tree snapshot), yml only (byte-identical, mode, bak, .gitignore, F01 explain equality), md only, both (+ second run), api_key stripped + reported + never printed + comments kept, rewrite fallback (flow mapping, key-only section), refused target exists (also dry run, nothing written), refused backup / .raider file / home dir, broken yml exit 3, usage, failure mid-way (rollback, first-write failure, race via CLI), existing .gitignore kept); mutation check (rollback disabled) fails the test. Verified with installed Langertha: 10 files / 89 tests pass (t/28_config_* x6, t/28_instructions_native_file, t/25_config, t/34_cli_explain_config, t/39_cli_main). Not run: full suite, scripts/verify-binary.sh (new module is a plain use under lib/Langertha, no new dependency). Open: provisional decisions in the earlier note need maintainer confirmation; ADR 0017 internal list should name ::Config::Migrate (doc amend, maintainer).
+
+2026-09-30 09:13 Committed as 59c672f
