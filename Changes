@@ -229,6 +229,10 @@ Revision history for Langertha-Raider
       effects fire once and every tool_use gets exactly one tool_result
       (strict providers such as Anthropic rejected the duplicates with a
       400).
+    - Tool calls resumed after raider_ask_user or raider_pause go
+      through the same dispatch as any other call: they run
+      plugin_before_tool_call, so they get their tool.call event and
+      plugin gates apply to them.
     - A plugin_before_llm_call that returns a fresh conversation also
       updates what a paused raid resumes with, so respond_f keeps every
       assistant and tool_result message from before the pause.

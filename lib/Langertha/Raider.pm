@@ -2426,86 +2426,99 @@ sub _trace_tool_turn {
   return;
 }
 
-# Runs the iteration's tool calls in order and pushes one
+# Runs a batch of tool calls in order and pushes one
 # { tool_call => ..., result => ... } per call onto $results. Returns the
 # Result that ends the raid when a cancel, an interactive self-tool or an
-# abort stops the batch; nothing when the whole batch ran.
+# abort stops the batch; nothing when the whole batch ran. The iteration's
+# batch runs here, and so does the rest of a batch respond_f resumes (k120).
 async sub _execute_tool_calls_f {
   my ( $self, $state, $iter, $tool_calls, $echo_data, $results ) = @_;
-  my $engine = $state->{engine};
 
   for my $tc_idx (0 .. $#$tool_calls) {
     # Safe point: no further tool call once a cancel is requested.
     return $self->_cancelled_result($state) if $self->cancel_requested;
-    my $tc = $tool_calls->[$tc_idx];
-    my ( $name, $input ) = $self->_tool_call_name_input($engine, $tc);
-
-    # A call whose arguments the model did not send as valid JSON must not run
-    # the tool on {} -- answer it with an error result the model can retry, as
-    # core does (karr k345). Truncated calls were dropped upstream already.
-    if ( my $bad = $self->_undecodable_tool_result($tc) ) {
-      push @$results, { tool_call => $tc, result => $bad };
-      ${$state->{raid_tool_calls}}++;
-      next;
-    }
-
-    # Plugin hook: inspect/transform before tool execution
-    my @plugin_tc = await $self->plugin_pipeline_tool_call_f($name, $input);
-    unless (@plugin_tc) {
-      # Plugin returned empty list — skip this tool call
-      my $skip_result = {
-        content => [{ type => 'text', text => "Tool call '$name' was skipped by plugin." }],
-      };
-      push @$results, { tool_call => $tc, result => $skip_result };
-      ${$state->{raid_tool_calls}}++;
-      next;
-    }
-    ( $name, $input ) = @plugin_tc;
-
-    my $tool_t0 = $state->{langfuse} ? $engine->langfuse_timestamp : undef;
-    my $result;
-
-    # Virtual self-tools. A raider_-prefixed name routes here only when no tool
-    # source announced it: an MCP source may offer a raider_-prefixed name and
-    # win the first-wins dedup (karr k90), in which case it sits in
-    # tool_server_map and was sent to the model as that MCP tool. Dispatch has
-    # to follow the actual registration, not the prefix, or such a call dies as
-    # "Unknown self-tool" instead of reaching its MCP source (karr k93).
-    if ($name =~ /^raider_/ && $self->has_raider_mcp && !$state->{tool_server_map}{$name}) {
-      my $self_result = await $self->_execute_self_tool_f($name, $input);
-
-      # Handle interactive self-tool results
-      if ($self_result->{type} eq 'question' || $self_result->{type} eq 'pause') {
-        # Only the calls AFTER this pausing self-tool are still pending.
-        # The ones before it already ran and sit in $results; carrying them
-        # too (as a plain "everything but $tc" filter did) re-runs their side
-        # effects and emits a second tool_result for the same tool_use id on
-        # resume — a 400 on strict providers like Anthropic.
-        return $self->_pause_raid($state, $iter, $echo_data, $tc,
-          [ @$tool_calls[$tc_idx+1 .. $#$tool_calls] ], $results, $self_result);
-      }
-
-      return $self->_abort_raid($state, $self_result)
-        if $self_result->{type} eq 'abort';
-
-      if ($self_result->{type} eq 'wait') {
-        $result = await $self->_wait_self_tool_f(
-          $state, $iter, $name, $input, $tool_t0, $self_result->{seconds});
-        return $self->_cancelled_result($state) unless $result;
-      }
-      else {
-        # type eq 'result' — normal self-tool result
-        $result = await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0, $self_result);
-      }
-    }
-    else {
-      $result = await $self->_call_mcp_tool_f($state, $iter, $name, $input, $tool_t0);
-    }
-
-    push @$results, { tool_call => $tc, result => $result };
-    ${$state->{raid_tool_calls}}++;
+    # Only the calls AFTER a pausing self-tool are still pending. The ones
+    # before it already ran and sit in $results; carrying them too (as a plain
+    # "everything but $tc" filter did) re-runs their side effects and emits a
+    # second tool_result for the same tool_use id on resume — a 400 on strict
+    # providers like Anthropic.
+    my $stop = await $self->_dispatch_tool_call_f($state, $iter, $echo_data,
+      $tool_calls->[$tc_idx], [ @$tool_calls[$tc_idx+1 .. $#$tool_calls] ], $results);
+    return $stop if defined $stop;
   }
 
+  return;
+}
+
+# Dispatches one tool call: the single path every call of a raid takes, in
+# the first run of a batch and on resume alike (k120). Pushes its
+# { tool_call => ..., result => ... } onto $results, or returns the Result
+# that ends the raid (an interactive self-tool, which saves $remaining_tcs --
+# the calls queued after $tc -- for respond_f; an abort; a cancel during
+# raider_wait).
+async sub _dispatch_tool_call_f {
+  my ( $self, $state, $iter, $echo_data, $tc, $remaining_tcs, $results ) = @_;
+  my $engine = $state->{engine};
+  my ( $name, $input ) = $self->_tool_call_name_input($engine, $tc);
+
+  # A call whose arguments the model did not send as valid JSON must not run
+  # the tool on {} -- answer it with an error result the model can retry, as
+  # core does (karr k345). Truncated calls were dropped upstream already.
+  if ( my $bad = $self->_undecodable_tool_result($tc) ) {
+    push @$results, { tool_call => $tc, result => $bad };
+    ${$state->{raid_tool_calls}}++;
+    return;
+  }
+
+  # Plugin hook: inspect/transform before tool execution
+  my @plugin_tc = await $self->plugin_pipeline_tool_call_f($name, $input);
+  unless (@plugin_tc) {
+    # Plugin returned empty list — skip this tool call
+    my $skip_result = {
+      content => [{ type => 'text', text => "Tool call '$name' was skipped by plugin." }],
+    };
+    push @$results, { tool_call => $tc, result => $skip_result };
+    ${$state->{raid_tool_calls}}++;
+    return;
+  }
+  ( $name, $input ) = @plugin_tc;
+
+  my $tool_t0 = $state->{langfuse} ? $engine->langfuse_timestamp : undef;
+  my $result;
+
+  # Virtual self-tools. A raider_-prefixed name routes here only when no tool
+  # source announced it: an MCP source may offer a raider_-prefixed name and
+  # win the first-wins dedup (karr k90), in which case it sits in
+  # tool_server_map and was sent to the model as that MCP tool. Dispatch has
+  # to follow the actual registration, not the prefix, or such a call dies as
+  # "Unknown self-tool" instead of reaching its MCP source (karr k93).
+  if ($name =~ /^raider_/ && $self->has_raider_mcp && !$state->{tool_server_map}{$name}) {
+    my $self_result = await $self->_execute_self_tool_f($name, $input);
+
+    # Handle interactive self-tool results
+    return $self->_pause_raid($state, $iter, $echo_data, $tc,
+      $remaining_tcs, $results, $self_result)
+      if $self_result->{type} eq 'question' || $self_result->{type} eq 'pause';
+
+    return $self->_abort_raid($state, $self_result)
+      if $self_result->{type} eq 'abort';
+
+    if ($self_result->{type} eq 'wait') {
+      $result = await $self->_wait_self_tool_f(
+        $state, $iter, $name, $input, $tool_t0, $self_result->{seconds});
+      return $self->_cancelled_result($state) unless $result;
+    }
+    else {
+      # type eq 'result' — normal self-tool result
+      $result = await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0, $self_result);
+    }
+  }
+  else {
+    $result = await $self->_call_mcp_tool_f($state, $iter, $name, $input, $tool_t0);
+  }
+
+  push @$results, { tool_call => $tc, result => $result };
+  ${$state->{raid_tool_calls}}++;
   return;
 }
 
@@ -2684,112 +2697,16 @@ async sub _respond_f {
   push @results, { tool_call => $pending_tc, result => $answer_result };
   ${$state->{raid_tool_calls}}++;
 
-  # Execute remaining tool calls from the same batch. Every call handled here
-  # MUST leave a tool_result behind (or end the raid): a trailing tool_use with
-  # no matching tool_result is a 400 on strict providers. Index-based so a second
-  # interactive self-tool can re-pause and carry the calls still queued after it.
-  my $remaining = $cont->{remaining_tcs};
-  for my $rem_idx (0 .. $#$remaining) {
-    return $self->_cancelled_result($state) if $self->cancel_requested;
-    my $tc = $remaining->[$rem_idx];
-    my ( $name, $input ) = $self->_tool_call_name_input($engine, $tc);
-
-    # An undecodable call must not run the tool on {} either (karr k345).
-    if ( my $bad = $self->_undecodable_tool_result($tc) ) {
-      push @results, { tool_call => $tc, result => $bad };
-      ${$state->{raid_tool_calls}}++;
-      next;
-    }
-
-    # Same rule as the main loop: a raider_-prefixed name reaches the self-tool
-    # executor only when no MCP source registered it (karr k90/k93).
-    if ($name =~ /^raider_/ && $self->has_raider_mcp && !$state->{tool_server_map}{$name}) {
-      my $self_result = await $self->_execute_self_tool_f($name, $input);
-
-      # Another interactive self-tool in the batch: pause the raid again, saving
-      # the results gathered so far plus the calls still queued after this one.
-      if ($self_result->{type} eq 'question' || $self_result->{type} eq 'pause') {
-        $self->_continuation({
-          state          => $state,
-          iteration      => $cont->{iteration},
-          data           => $data,
-          pending_tc     => $tc,
-          remaining_tcs  => [ @$remaining[$rem_idx+1 .. $#$remaining] ],
-          results_so_far => \@results,
-          iter_span_id   => $cont->{iter_span_id},
-        });
-
-        if ($self_result->{type} eq 'question') {
-          return Langertha::Raider::Result->new(
-            type    => 'question',
-            content => $self_result->{question},
-            $self_result->{options} ? (options => $self_result->{options}) : (),
-          );
-        }
-        return Langertha::Raider::Result->new(
-          type    => 'pause',
-          content => $self_result->{reason},
-        );
-      }
-
-      if ($self_result->{type} eq 'abort') {
-        return Langertha::Raider::Result->new(
-          type    => 'abort',
-          content => $self_result->{reason},
-        );
-      }
-
-      if ($self_result->{type} eq 'wait') {
-        my $loop = $engine->async_loop // IO::Async::Loop->new;
-        await $self->_until_cancelled($loop->delay_future(after => $self_result->{seconds}));
-        return $self->_cancelled_result($state) if $self->cancel_requested;
-        push @results, {
-          tool_call => $tc,
-          result    => { content => [{ type => 'text',
-            text => "Waited $self_result->{seconds} seconds." }] },
-        };
-        ${$state->{raid_tool_calls}}++;
-        next;
-      }
-
-      # type eq 'result' — normal self-tool result
-      for my $plugin (@{$self->plugin_instances}) {
-        $self_result = await $plugin->plugin_after_tool_call($name, $input, $self_result);
-      }
-      push @results, { tool_call => $tc, result => $self_result };
-      ${$state->{raid_tool_calls}}++;
-      next;
-    }
-
-    # A name no server offers is answered with an error result so the model can
-    # correct itself, rather than dying and losing the whole raid (core k332).
-    my $mcp = $state->{tool_server_map}{$name};
-    unless ($mcp) {
-      push @results, { tool_call => $tc, result => {
-        content => [{ type => 'text', text => "unknown tool ".($name // '') }],
-        isError => JSON->true,
-      } };
-      ${$state->{raid_tool_calls}}++;
-      next;
-    }
-
-    my $call_f = $mcp->call_tool($name, $input)->else(sub {
-      my ( $error ) = @_;
-      Future->done({
-        content => [{ type => 'text', text => "Error calling tool '$name': $error" }],
-        isError => JSON->true,
-      });
-    });
-    my $result = await $self->_until_cancelled($call_f);
-    $result = $self->_cancelled_tool_result($name) if $self->_cut_off($call_f, $result);
-
-    for my $plugin (@{$self->plugin_instances}) {
-      $result = await $plugin->plugin_after_tool_call($name, $input, $result);
-    }
-
-    push @results, { tool_call => $tc, result => $result };
-    ${$state->{raid_tool_calls}}++;
-  }
+  # Execute remaining tool calls from the same batch, through the same
+  # per-call dispatch as the first run of the batch (k120): the
+  # plugin_before_tool_call hook runs for each of them, and a second
+  # interactive self-tool re-pauses carrying the calls still queued after it.
+  # Every call handled here MUST leave a tool_result behind (or end the raid):
+  # a trailing tool_use with no matching tool_result is a 400 on strict
+  # providers.
+  my $iter = { iteration => $cont->{iteration}, span_id => $cont->{iter_span_id} };
+  my $stop = await $self->_execute_tool_calls_f($state, $iter, $cont->{remaining_tcs}, $data, \@results);
+  return $stop if defined $stop;
 
   # Close iteration span if Langfuse
   if ($state->{langfuse} && $cont->{iter_span_id}) {
