@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-30T08:16:09Z
+claimed_by: raider-worker-k126
+class: standard
+completed: 2026-09-30T08:16:01Z
+created: 2026-09-30T06:00:49Z
+id: 126
+priority: medium
+started: 2026-09-30T08:09:15Z
+status: done
+tags:
+- adr-0011
+- config
+title: 'ADR 0011 A2: <root>/.raider/config.yml lesen (gleiche Keys wie .raider.yml)'
+updated: 2026-09-30T08:16:09Z
+---
+
+Nach #125. Config liest <root>/.raider/config.yml. Liegen alt (.raider.yml) und neu beide vor: neu wird geladen, Legacy ignoriert + Warnung (ADR 0011: berichtet, nicht still beides) - Default zur Bestaetigung durch Getty. config explain nennt die benutzte Datei und meldet den Konflikt (F02). Writer (/model, Skills) schreiben in die benutzte Datei. Dateien: Config.pm, Application.pm, CLI/Output.pm.
+
+2026-09-30 08:10 Plan: Config.pm picks the file in use (<root>/.raider/config.yml via Home->project_base when it is a file, else legacy .raider.yml); new label method replaces hard-coded '.raider.yml' source labels in Application; ignored_files (both present) -> startup warning on stderr in CLI::Main + explain field ignored_files + line in config_report. Writers unchanged: they write Config->file, i.e. the file in use; never create .raider/config.yml. Ignored legacy file is not parsed at all.
+
+2026-09-30 08:14 Done (uncommitted, tree commit-ready). Config.pm: file = <root>/.raider/config.yml (Home->project_base) when it is a file, else legacy .raider.yml; new native_file/legacy_file/is_native/label/ignored_files; explain gains label + ignored_files. Both present: only the new file is read (legacy not even parsed, so a broken legacy file does not stop raider), CLI::Main warns once on stderr ('warning: ignoring <abs>/.raider.yml: both ... exist; only .raider/config.yml is loaded'), config explain prints 'ignored file ...' under file:. Application source labels ('.raider.yml', '... default:', 'packs:', 'detect:', perl grant) now come from Config->label, so legacy-only output is byte-identical. Writers unchanged: they write Config->file, i.e. the file in use; with no file they create .raider.yml, never .raider/config.yml (#130). Docs: bin/raider DESCRIPTION paragraph + -r + exit 3, README config section/roadmap, Skill.pm, usage text, Commands /model help, REPL/Application/Output POD. Test t/28_config_native_file.t (6 subtests). Verified: 19 files/158 tests pass (00, 22, 23, 25x2, 26, 27, 28x2, 29, 34, 36-39, 49_mission_scope, 59_engine_resolver, 66, 69), installed Langertha. Open: (1) provisional both-present rule still needs maintainer confirmation; (2) ADR 0012 says detect: rules from the project's .raider/ only apply once trusted -- not gated (trust does not exist yet, same as legacy); (3) config explain has no machine form, so no --json fields added.
+
+2026-09-30 08:16 Committed as b0882a5
