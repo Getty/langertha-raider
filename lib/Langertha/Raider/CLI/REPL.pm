@@ -3,6 +3,9 @@ package Langertha::Raider::CLI::REPL;
 our $VERSION = '0.503';
 use Moose;
 use namespace::autoclean;
+use Config;
+use Encode qw( decode encode FB_QUIET );
+use POSIX ();
 use Path::Tiny;
 use Term::ANSIColor qw( color );
 use Term::ReadLine;                   # Core; upgrades to Gnu if installed
@@ -24,6 +27,11 @@ L<Langertha::Raider::CLI::Commands>, every other line a prompt via
 L<Langertha::Raider::CLI::Runner>, until C</quit>, C</exit>, C<:q>,
 C<quit>, C<exit> or the end of input.
 
+A line C<!CMD> runs C<CMD> in the shell and nothing else
+(L</run_shell>); a line C<?CMD> runs it and then sends the command, its
+exit status and its output to the model as the next prompt
+(L</run_shell_prompt>). A line that is only C<!> or C<?> is a prompt.
+
 On a terminal, lines come from L<Term::ReadLine::Gnu> (line editing,
 F<~/.raider_history>) or L<IO::Prompt::Tiny>.
 
@@ -34,7 +42,9 @@ cancelled> is printed, the session journal ends the run as C<cancelled>,
 and the REPL reads the next line. At the prompt the first Ctrl-C only
 warns. A second one within two seconds, or a C<SIGTERM>, leaves the REPL
 with exit status 0, after ending the tool commands still running
-(L<Langertha::Raider::CLI::Runner/terminate_children>). When L</in>
+(L<Langertha::Raider::CLI::Runner/terminate_children>). While a C<!CMD>
+or C<?CMD> runs, raider ignores C<SIGINT>, so Ctrl-C ends the command
+alone. When L</in>
 is not a terminal, lines are read from it as they are, without prompt, so
 piped input ends the REPL at its end.
 
@@ -299,6 +309,10 @@ sub run {
         if $self->has_session && $line =~ m{\A/clear(?:\s|\z)};
       next;
     }
+    if ($line =~ m{\A([!?])\s*(\S.*)\z}s) {
+      $1 eq '!' ? $self->run_shell($2) : $self->run_shell_prompt($2);
+      next;
+    }
     $self->run_prompt($line);
   }
 
@@ -318,6 +332,192 @@ prompt with a L</session_store> starts the session and names it.
 sub run_prompt {
   my ( $self, $text ) = @_;
   return $self->runner->run_prompt($text, session => scalar $self->_session_for_run);
+}
+
+=method run_shell
+
+    my $status = $repl->run_shell('git status');
+
+The REPL's C<!CMD>: runs the command with C<$SHELL -c> (C</bin/sh>
+without C<SHELL>) in the app's root, on the terminal raider runs on, so
+C<less> or C<vim> work. A non-zero exit status is printed, as C<exit
+status N>, a command ended by a signal as C<interrupted (SIGINT)> or
+C<killed by SIGTERM>. Nothing goes to the model or into the session
+journal. Returns the wait status, or undef when the command could not be
+started.
+
+=cut
+
+sub run_shell {
+  my ( $self, $command ) = @_;
+  # Ctrl-C reaches the command and raider alike; it is for the command.
+  local $SIG{INT}  = 'IGNORE';
+  local $SIG{QUIT} = 'IGNORE';
+  my $pid = $self->_spawn_shell($command) // return;
+  waitpid $pid, 0;
+  my $status = $?;
+  $self->output->say_meta($self->_shell_status_text($status)) if $status;
+  return $status;
+}
+
+=method run_shell_prompt
+
+    my $ok = $repl->run_shell_prompt('make test');
+
+The REPL's C<?CMD>: runs the command as L</run_shell> does, but with its
+standard output and standard error shown as they come and captured, and
+standard input from F</dev/null>. Then the command, its exit status and
+the captured output (L</shell_prompt>) go to the model through
+L</run_prompt>, as any prompt: the model answers, the session journal
+records the turn. A command ended by Ctrl-C (C<SIGINT>) sends nothing,
+since Ctrl-C in the REPL cancels the turn. Returns what L</run_prompt>
+returns, false when nothing was sent.
+
+=cut
+
+sub run_shell_prompt {
+  my ( $self, $command ) = @_;
+  my $out = $self->output;
+  my ( $text, $status ) = ( '' );
+  {
+    local $SIG{INT}  = 'IGNORE';
+    local $SIG{QUIT} = 'IGNORE';
+    my ( $r, $w );
+    unless (pipe $r, $w) {
+      $out->say_error('cannot run the command: '.$!);
+      return 0;
+    }
+    my $pid = $self->_spawn_shell($command, $w);
+    close $w;
+    unless (defined $pid) {
+      close $r;
+      return 0;
+    }
+    my $bytes = '';
+    while (1) {
+      my $n = sysread $r, $bytes, 65536, length $bytes;
+      next if !defined $n && $!{EINTR};
+      last unless $n;
+      my $chunk = $self->_decode_output(\$bytes);
+      $out->emit($chunk);
+      $out->out->flush;
+      $text .= $chunk;
+    }
+    close $r;
+    if (length $bytes) {
+      # What is left can be no character: replaced.
+      my $rest = decode('UTF-8', $bytes);
+      $out->emit($rest);
+      $text .= $rest;
+    }
+    $out->emit("\n") if length $text && $text !~ /\n\z/;
+    waitpid $pid, 0;
+    $status = $?;
+  }
+  if ($self->_signal_name($status & 127) eq 'INT') {
+    $out->say_meta('command interrupted (SIGINT), nothing sent to the model');
+    return 0;
+  }
+  $out->say_meta($self->_shell_status_text($status)) if $status;
+  return $self->run_prompt($self->shell_prompt($command, $status, $text));
+}
+
+=method shell_prompt
+
+    my $prompt = $repl->shell_prompt($command, $wait_status, $output);
+
+The prompt L</run_shell_prompt> sends: where the command ran, the command,
+its exit status and its output. An output longer than
+L</shell_output_limit> characters keeps its head and its tail, half the
+limit each, with a line C<[... N characters omitted ...]> between them.
+
+=method shell_output_limit
+
+How many characters of a C<?CMD> output reach the model: 20000.
+
+=cut
+
+sub shell_output_limit { 20_000 }
+
+sub shell_prompt {
+  my ( $self, $command, $status, $output ) = @_;
+  my $limit = $self->shell_output_limit;
+  if (length $output > $limit) {
+    my $half = int($limit / 2);
+    $output = substr($output, 0, $half)
+      ."\n[... ".(length($output) - 2 * $half)." characters omitted ...]\n"
+      .substr($output, -$half);
+  }
+  $output =~ s/\n\z//;
+  return join "\n",
+    'I ran a shell command in '.$self->app->root.':',
+    '',
+    '$ '.$command,
+    '',
+    'Result: '.$self->_shell_status_text($status),
+    '',
+    length $output ? ( 'Output (stdout and stderr):', $output ) : '(no output)';
+}
+
+# Forks the shell running $command in the app's root. With $capture, its
+# stdout and stderr go there and stdin comes from /dev/null; without, it
+# has raider's terminal. The pid, or undef after an error line.
+sub _spawn_shell {
+  my ( $self, $command, $capture ) = @_;
+  my $shell = $ENV{SHELL} || '/bin/sh';
+  my $root  = $self->app->root;
+  my $pid = fork;
+  unless (defined $pid) {
+    $self->output->say_error('cannot run the command: '.$!);
+    return;
+  }
+  return $pid if $pid;
+
+  # The child: never back into raider's code, whatever fails.
+  $SIG{INT} = $SIG{QUIT} = 'DEFAULT';
+  if ($capture) {
+    open STDIN,  '<',  '/dev/null';
+    open STDOUT, '>&', $capture;
+    open STDERR, '>&', $capture;
+  }
+  unless (chdir $root) {
+    print STDERR 'raider: cannot change to '.$root.': '.$!."\n";
+    POSIX::_exit(126);
+  }
+  { exec { $shell } $shell, '-c', encode('UTF-8', $command) }
+  print STDERR 'raider: cannot run '.$shell.': '.$!."\n";
+  POSIX::_exit(127);
+}
+
+# The complete UTF-8 characters at the start of $$bytes, which keeps a
+# character cut off at its end for the next read. A byte that starts no
+# character becomes U+FFFD.
+sub _decode_output {
+  my ( $self, $bytes ) = @_;
+  my $text = '';
+  while (length $$bytes) {
+    $text .= decode('UTF-8', $$bytes, FB_QUIET);
+    last if length $$bytes < 4;
+    substr($$bytes, 0, 1, '');
+    $text .= "\x{FFFD}";
+  }
+  return $text;
+}
+
+# A wait status for the user: "exit status N", "interrupted (SIGINT)",
+# "killed by SIGTERM".
+sub _shell_status_text {
+  my ( $self, $status ) = @_;
+  my $signal = $status & 127;
+  return 'exit status '.($status >> 8) unless $signal;
+  my $name = $self->_signal_name($signal);
+  return $name eq 'INT' ? 'interrupted (SIGINT)' : 'killed by SIG'.$name;
+}
+
+# The name of the signal number (INT), empty for 0.
+sub _signal_name {
+  my ( $self, $number ) = @_;
+  return $number ? ( split ' ', $Config{sig_name} )[$number] // $number : '';
 }
 
 sub _session_for_run {

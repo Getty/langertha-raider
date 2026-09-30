@@ -47,6 +47,18 @@ C</help>, C</clear>, C</metrics>, C</stats>, C</reload>, C</prompt>,
 C</skill>, C</skill-claude>, C</config>, C</model>, C</packs>, C</pack>,
 C</quit>.
 
+Two more line prefixes run shell commands, with C<$SHELL -c> (C</bin/sh>
+without C<SHELL>) in the root (C<--root>); Ctrl-C while one runs ends the
+command, not F<raider>. C<!CMD> runs C<CMD> on the terminal (C<less> and
+C<vim> work), prints a non-zero exit status, and sends nothing to the model
+and records nothing in the session. C<?CMD> runs C<CMD> with its output
+shown as it comes and captured (standard input is F</dev/null>), then sends
+the command, its exit status and its output -- standard output and
+standard error, cut to its first and last 10000 characters when longer
+than 20000 -- to the model as the next prompt, recorded in the session like
+any other. A C<?CMD> ended by Ctrl-C sends nothing. A line that is only
+C<!> or C<?> is a prompt.
+
 Subcommands are dispatched before normal raider startup: C<raider hall ...>
 manages a Raider Hall daemon, and C<raider acp ...> runs the bundled ACP
 client. C<raider config explain [options]> takes the normal options and

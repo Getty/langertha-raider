@@ -99,6 +99,8 @@ sub cmd_help {
     '  /pack on NAME         enable a pack (toggle on)',
     '  /pack off NAME        disable a pack',
     '  /pack NAME            toggle pack on/off',
+    '  !CMD                  run CMD in the shell (not sent to the model)',
+    '  ?CMD                  run CMD, then send it and its output to the model',
     '  /quit /exit :q        leave the REPL',
   );
   return;

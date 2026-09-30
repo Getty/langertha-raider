@@ -180,7 +180,16 @@ REPL slash commands:
 | `/model list [FILTER]` | List models reported by the active engine           |
 | `/packs`               | List available packs and whether they are active    |
 | `/pack on/off NAME`    | Enable or disable a pack (`/pack NAME` toggles)     |
+| `!CMD`                 | Run `CMD` in the shell only; nothing goes to the model |
+| `?CMD`                 | Run `CMD`, then send it, its exit status and output to the model |
 | `/quit` `/exit` `:q`   | Leave                                               |
+
+`!CMD` and `?CMD` run `CMD` with `$SHELL -c` (`/bin/sh` without `SHELL`) in the working
+root, and Ctrl-C ends the command, not raider. `!CMD` has the terminal, so `less` or
+`vim` work, and stays out of the conversation and the session. `?CMD` shows the output as
+it comes and then sends the command, its exit status and the output (stdout and stderr,
+head and tail of anything past 20000 characters) to the model as your next prompt; a
+command you end with Ctrl-C sends nothing. A line that is only `!` or `?` is a prompt.
 
 `/pack` and `/reload` rebuild the mission, and mount or unmount the Perl tools when
 a pack that requests them (the `perl` pack) comes or goes — the tools the model is

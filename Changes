@@ -105,6 +105,12 @@ Revision history for Langertha-Raider
       detection, packs: or default packs; --pack NAME and /pack NAME still
       switch packs on. -M TEXT --bare gives TEXT plus the tool description.
     - New --pack NAME for one-shot pack activation.
+    - REPL: a line !CMD runs CMD with $SHELL -c in the root on the terminal
+      and sends nothing to the model; ?CMD runs it with its output shown and
+      captured, then sends the command, its exit status and its output (head
+      and tail past 20000 characters) to the model as the next prompt,
+      recorded in the session. Ctrl-C ends the command, not raider; a ?CMD
+      ended by Ctrl-C sends nothing. A line that is only ! or ? is a prompt.
     - raider --help lists --trace next to --no-trace.
 
   [Packs]
