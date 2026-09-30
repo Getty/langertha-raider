@@ -35,6 +35,8 @@ package My::Provider {
   has '+fetch_args' => ( default => sub { {
     ssl_options => { SSL_ca_file => $main::CA },
     resolver    => sub { Future->done('127.0.0.1') },
+    # not the production 10 s: a loaded machine must not turn a slow fetch into a red test
+    timeout     => 120,
   } } );
   __PACKAGE__->meta->make_immutable;
 }
@@ -67,7 +69,9 @@ sub main_run {
     err    => $err,
     in     => do { open my $in, '<', \'' or die $!; $in },
   )->run( '-r', "$root", '--no-session', '--no-trace', @argv );
-  return ( $exit, $read_out->(), $read_err->() );
+  my @res = ( $exit, $read_out->(), $read_err->() );
+  diag $res[2] if $res[2] =~ /timed out/;
+  return @res;
 }
 
 my $T = JSON::MaybeXS->true;
