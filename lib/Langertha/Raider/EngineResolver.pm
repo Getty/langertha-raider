@@ -3,6 +3,7 @@ package Langertha::Raider::EngineResolver;
 our $VERSION = '0.503';
 use Moose;
 use namespace::autoclean;
+use Carp qw( croak );
 use Module::Runtime ();
 
 =head1 SYNOPSIS
@@ -76,6 +77,15 @@ table defaults and the C<*_API_KEY> autodetection do not apply.
 =item * L</engine_args> set C<url> to the endpoint's C<base_url>, whatever
 F<.raider.yml> says.
 
+=item * L</engine_args> set C<connect_address> to the activation's: the
+address raider checked for the endpoint host. The engine connects there
+instead of resolving the name again (Langertha ADR 0037), while C<Host>,
+TLS SNI and the certificate check stay on the host name; neither C<-o> nor
+F<.raider.yml> can change it. An activation without one croaks: an
+unpinned engine is never built in provider mode. The engine is built with
+its own HTTP clients (none is passed in), so no client is shared with
+another engine.
+
 =item * L</api_key> comes only from C<-k> or C<-o api_key=>: never from
 F<.raider.yml> and never from the environment, and C<api_key> is always
 passed to the engine (C<undef> without a key), so the engine class does
@@ -83,9 +93,11 @@ not read its C<LANGERTHA_*_API_KEY> either. A key configured for another
 provider never reaches this one.
 
 =item * L</build_engine> turns off redirects on the engine's synchronous
-user agent, so its requests stay on the endpoint's origin, whose address was
-checked. Langertha keeps the key on its origin across a redirect, but would
-still send the request on to the other host (chat requests are POSTs, which
+user agent, so its requests stay on the endpoint's origin. With the pin,
+Langertha itself refuses a redirect to another host on every backend, and
+it keeps the key on its origin; but it follows a redirect on the same host
+to another port (still pinned, without the key), and raider's rule is the
+endpoint's origin, not only its address (chat requests are POSTs, which
 Langertha never redirects).
 
 =back
@@ -376,8 +388,12 @@ sub engine_args {
   $args{api_key} = $self->api_key if length $self->api_key;
   $args{model}   = $self->model   if $self->has_model;
   if ($self->has_provider) {
-    $args{url}     = $self->provider->{url};
-    $args{api_key} = length $self->api_key ? $self->api_key : undef;
+    my $address = $self->provider->{connect_address};
+    croak __PACKAGE__.': the provider activation carries no connect_address; not building an unpinned engine'
+      unless defined $address && length $address;
+    $args{url}             = $self->provider->{url};
+    $args{connect_address} = $address;
+    $args{api_key}         = length $self->api_key ? $self->api_key : undef;
   }
   return %args;
 }
@@ -387,7 +403,8 @@ sub engine_args {
     my $engine = $resolver->build_engine(mcp_servers => \@clients);
 
 Loads L</engine_class> and builds it with L</engine_args>; with
-L</provider> the engine's synchronous user agent follows no redirect.
+L</provider> the engine connects to the checked address and its
+synchronous user agent follows no redirect.
 
 =cut
 
@@ -397,8 +414,9 @@ sub build_engine {
   Module::Runtime::require_module($class);
   my $engine = $class->new($self->engine_args(%extra));
   if ($self->has_provider && $engine->can('user_agent')) {
-    # Not for the key (Langertha's agent strips it on another origin), for
-    # the host: a redirect target passed no address check.
+    # Not for the key (Langertha's agent strips it on another origin), and
+    # no longer for another host (the pin refuses that hop, k141): for the
+    # origin. The pin follows a hop on the same host to another port.
     $engine->user_agent->max_redirect(0);
     $engine->user_agent->requests_redirectable([]);
   }

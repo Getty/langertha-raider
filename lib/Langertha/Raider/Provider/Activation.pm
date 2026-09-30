@@ -51,9 +51,18 @@ for; when that is more than one, raider does not choose.
 the same origin as the manifest, so a credential never goes to an origin
 the command line did not name. Its host is resolved and checked again,
 under the same address policy as the fetch (C<--allow-internal> releases
-both).
+both): every address it resolves to must pass, as for the manifest.
 
-=item 6. B<The credential> is the caller's: an endpoint with an
+=item 6. B<The connection.> The engine connects to the first of those
+checked addresses (C<connect_address>, Langertha ADR 0037), never to the
+name resolved once more, so an answer that changes after the check (DNS
+rebinding) cannot send the request and its credential elsewhere. An
+address literal stands for itself. TLS still verifies the certificate
+against the host name. Unlike the manifest fetch, the engine has no second
+address to fall back to; an address with a scope (C<fe80::1%eth0>) cannot
+be pinned and is an error.
+
+=item 7. B<The credential> is the caller's: an endpoint with an
 C<auth_ref> needs one (C<has_api_key>), of an auth type raider knows.
 
 =back
@@ -169,7 +178,8 @@ says why.
 A C<completed> activation carries C<provider_id>, C<manifest_url>,
 C<endpoint> (its id), C<dialect>, C<engine_name>, C<engine_class>, C<url>
 (the endpoint's C<base_url>), C<model>, C<auth> (the auth id, or C<undef>),
-C<addresses> (of the endpoint host) and C<warnings>. It never carries a
+C<addresses> (of the endpoint host, all checked), C<connect_address> (the
+one of them the engine connects to) and C<warnings>. It never carries a
 credential.
 
 =cut
@@ -228,6 +238,13 @@ async sub activate_f {
 
   my $checked = await $fetch->check_host_f($base->host);
   return { status => $checked->{status}, error => $what.': '.$checked->{error} } if $checked->{status};
+  # The engine connects to this address, not to the name (k141). Every
+  # address passed the policy above; the first is the one the system
+  # prefers, and the one the manifest fetch tries first.
+  my ( $connect_address ) = @{ $checked->{addresses} };
+  return { status => 'failed', error => $what.': '.$base->host.' resolves first to '.$connect_address
+    .', a scoped address the engine connection cannot be pinned to' }
+    if $connect_address =~ /%/;
 
   my @warnings;
   push @warnings, "model '".$model->id."' does not declare tools_native; raider works through tool calls"
@@ -244,8 +261,9 @@ async sub activate_f {
     url          => $endpoint->base_url,
     model        => $model->id,
     auth         => $auth ? $auth->id : undef,
-    addresses    => $checked->{addresses},
-    warnings     => \@warnings,
+    addresses       => $checked->{addresses},
+    connect_address => $connect_address,
+    warnings        => \@warnings,
   };
 }
 

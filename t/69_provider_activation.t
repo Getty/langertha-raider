@@ -149,8 +149,9 @@ subtest 'the default rule: one model, its endpoint, the dialect\'s engine' => su
     url          => $base.'/v1',
     model        => 'm1',
     auth         => 'api',
-    addresses    => ['127.0.0.1'],
-    warnings     => [],
+    addresses       => ['127.0.0.1'],
+    connect_address => '127.0.0.1',
+    warnings        => [],
   }, 'the activation, without a credential in it' );
   is( activate( '/one.json', model => 'm1' )->{model}, 'm1', '-m naming the one model' );
   is( activate( '/two.json', model => 'b' )->{model}, 'b', '-m picks one of several' );
@@ -227,6 +228,34 @@ subtest 'address policy: the endpoint host is checked at use time' => sub {
   like( $bad->{error}, qr/^only https is allowed for a provider manifest, not http:\/\/$/, 'without a file and line' );
 };
 
+subtest 'the address the engine is pinned to (k141)' => sub {
+  # The manifest comes from 127.0.0.1; the use-time check sees two
+  # addresses. Both passed, the first is the one the engine connects to.
+  my @answers = ( ['127.0.0.1'], [ '127.0.0.3', '127.0.0.1' ] );
+  my $got = activate( '/one.json', fetch => fetcher( resolver => sub { Future->done( @{ shift @answers } ) } ) );
+  is( [ @$got{qw( status addresses connect_address )} ], [ 'completed', [ '127.0.0.3', '127.0.0.1' ], '127.0.0.3' ],
+    'the first address of the use-time check' );
+
+  @answers = ( ['127.0.0.1'], [ '127.0.0.1', '169.254.169.254' ] );
+  $got = activate( '/one.json', fetch => fetcher( resolver => sub { Future->done( @{ shift @answers } ) } ) );
+  is( $got->{status}, 'refused', 'one refused address refuses the host, even when the first one passes' );
+  like( $got->{error}, qr/resolves to 169\.254\.169\.254 \(metadata address\)/, 'says which' );
+
+  @answers = ( ['127.0.0.1'], [ 'fe80::1%lo', '127.0.0.1' ] );
+  $got = activate( '/one.json', fetch => fetcher( resolver => sub { Future->done( @{ shift @answers } ) } ) );
+  is( [ @$got{qw( status error )} ],
+    [ 'failed', "endpoint 'chat': provider.example resolves first to fe80::1%lo, a scoped address the engine connection cannot be pinned to" ],
+    'a scoped first address cannot be pinned: an error, not an unpinned engine' );
+
+  my @asked;
+  my $fetch = fetcher( resolver => sub { push @asked, @_; Future->done('127.0.0.1') } );
+  $fetch->manifest_path('/one.json');
+  $got = $class->new( fetch => $fetch )->activate_f( '127.0.0.1:'.$srv->port, has_api_key => 1 )->get;
+  is( [ @$got{qw( status url addresses connect_address )} ],
+    [ 'completed', 'https://127.0.0.1:'.$srv->port.'/v1', ['127.0.0.1'], '127.0.0.1' ], 'an address literal stands for itself' );
+  is( \@asked, [], '... and is never resolved' );
+};
+
 subtest 'a model without tools_native: a warning' => sub {
   my $got = activate('/notools.json');
   is( $got->{status}, 'completed', 'still usable' );
@@ -237,7 +266,7 @@ subtest 'a model without tools_native: a warning' => sub {
 # and the environment carry keys, URLs and a model for other providers.
 my $root = Path::Tiny->tempdir;
 my $yml = { api_key => 'yml-secret', url => 'https://api.example', model => 'yml-model', temperature => 0.3 };
-$yml->{$_} = { api_key => 'yml-section-secret', url => 'https://section.example' }
+$yml->{$_} = { api_key => 'yml-section-secret', url => 'https://section.example', connect_address => '198.51.100.9' }
   for qw( openai anthropic gemini ollama aki responses );
 $root->child('.raider.yml')->spew_utf8( YAML::PP->new->dump_string($yml) );
 my $config = Langertha::Raider::Config->new( root => "$root" );
@@ -267,7 +296,7 @@ subtest 'engine class, url, model and key per dialect' => sub {
       my ( $key, $args ) = @$case;
       my $label = $dialect.( defined $key ? ' with -k' : ' without a key' );
       my $resolver = Langertha::Raider::EngineResolver->new(
-        config => $config, provider => $got, engine_options => { temperature => 0.7 }, %$args );
+        config => $config, provider => $got, engine_options => { temperature => 0.7, connect_address => '203.0.113.9' }, %$args );
       is( $resolver->engine_name, $expect{$dialect}[0], $label.': engine name' );
       is( $resolver->api_key_env, undef, $label.': no key variable' );
       my $engine = $resolver->build_engine;
@@ -279,6 +308,11 @@ subtest 'engine class, url, model and key per dialect' => sub {
       is( Langertha::Manifest::Builder->dialect_for_engine($engine), $dialect,
         $label.': core names the engine by the same dialect' );
       is( $engine->user_agent->max_redirect, 0, $label.': the synchronous user agent follows no redirect' );
+      is( $engine->connect_address, '127.0.0.1',
+        $label.': pinned to the checked address, not to -o\'s or .raider.yml\'s (k141)' );
+      isa_ok( $engine->user_agent, 'Langertha::HTTP::UserAgent' );
+      is( [ map { $engine->user_agent->$_ } qw( connect_host connect_address ) ], [ 'provider.example', '127.0.0.1' ],
+        $label.': the synchronous user agent carries the pin' );
       # Gemini puts the key in the query. The explicit api_key => undef the
       # resolver passes without -k makes it send none and read no
       # environment variable (core k376; before it warned and sent key=).
@@ -298,6 +332,16 @@ subtest 'engine class, url, model and key per dialect' => sub {
       }
       unlike( $request->as_string, qr/secret/, $label.': no configured key in the request' );
     }
+  }
+};
+
+subtest 'no unpinned engine in provider mode (k141)' => sub {
+  my %activation = %{ activate('/one.json') };
+  for my $address ( undef, '' ) {
+    my $resolver = Langertha::Raider::EngineResolver->new(
+      config => $config, provider => { %activation, connect_address => $address }, api_key => 'cli-key' );
+    like( dies { $resolver->build_engine }, qr/the provider activation carries no connect_address; not building an unpinned engine/,
+      'connect_address '.( defined $address ? "''" : 'undef' ).': croaks' );
   }
 };
 

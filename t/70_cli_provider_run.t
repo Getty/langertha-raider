@@ -14,7 +14,7 @@ use Test::Raider::FakeHTTPS;
 isolate_home();
 clear_engine_env();
 
-my $pki = Test::Raider::FakeHTTPS->pki( names => [ 'provider.example', 'localhost' ] );
+my $pki = Test::Raider::FakeHTTPS->pki( names => [ 'provider.example', 'localhost', 'provider.invalid' ] );
 our $CA = $pki->{ca};
 # The engine's own TLS client trusts the test CA through the default CA
 # store: IO::Socket::SSL reads SSL_CERT_FILE.
@@ -26,9 +26,10 @@ use Langertha::Raider::CLI::Output;
 use Langertha::Raider::Config;
 use Langertha::Raider::EngineResolver;
 
-# The manifest fetch trusts the test CA; every name resolves to the fake
-# server. The engine itself connects to the address literal the manifest
-# names, so nothing needs DNS.
+# The manifest fetch trusts the test CA; for raider's checks every name
+# resolves to the fake server. The engine connects to the address raider
+# checked (k141), so nothing needs DNS: provider.invalid (RFC 6761) never
+# resolves, and a run on it works only through the pin.
 package My::Provider {
   use Moose;
   extends 'Langertha::Raider::CLI::Provider';
@@ -177,6 +178,49 @@ subtest 'an endpoint without auth gets no key at all' => sub {
   ok( !exists $requests[1]{headers}{authorization}, 'no Authorization: the configured keys stay home' );
 };
 
+subtest 'the engine connects to the address raider checked, not to the name again (k141)' => sub {
+  # raider's check resolves provider.invalid to 127.0.0.1; the system never
+  # resolves it. Without the pin the engine would look the name up afresh
+  # (a DNS answer that may have changed since the check) and fail here.
+  my $pinned = 'provider.invalid:'.$srv->port;
+  my $seen = () = $srv->requests;
+  my ( $exit, $out, $err ) = main_run( '--provider', $pinned, '--allow-internal', '-k', 'sk-cli', '--json', 'say hello' );
+  is( $exit, 0, 'exit 0' ) or diag $err;
+  my $doc = eval { JSON::MaybeXS->new->decode($out) } // {};
+  is( [ @$doc{qw( status response )} ], [ 'completed', 'hello from the provider' ], 'the endpoint answered' );
+  my @requests = requests_since( $srv, $seen );
+  is( [ map { $_->{method}.' '.$_->{path} } @requests ],
+    [ 'GET /.well-known/langertha.json', 'POST /v1/chat/completions' ], 'manifest, then the chat, both at the checked address' );
+  is( $requests[1]{headers}{host}, $pinned, 'the chat still names the host' );
+  is( $requests[1]{headers}{authorization}, 'Bearer sk-cli', '... and carries the -k key' );
+};
+
+subtest 'the pinned engine still verifies TLS against the host name (k141)' => sub {
+  local $ENV{PERL_LWP_SSL_CA_FILE} = $CA;
+  my $engine_for = sub {
+    my ( $name ) = @_;
+    return Langertha::Raider::EngineResolver->new(
+      config   => Langertha::Raider::Config->new( root => "$root" ),
+      provider => { engine_name => 'openai', engine_class => 'Langertha::Engine::OpenAI',
+                    url => 'https://'.$name.':'.$srv->port.'/v1', model => 'm1', connect_address => '127.0.0.1' },
+      api_key  => 'sk-cli',
+    )->build_engine;
+  };
+  my $seen = () = $srv->requests;
+  is( $engine_for->('provider.invalid')->simple_chat_f('hi')->get->content, 'hello from the provider',
+    'control: the name the certificate carries, pinned, answers' );
+  is( scalar( () = requests_since( $srv, $seen ) ), 1, 'control: one request' );
+
+  # The same server and address under a name its certificate does not carry.
+  $seen = () = $srv->requests;
+  my $wrong = $engine_for->('wrong.invalid');
+  like( dies { $wrong->simple_chat_f('hi')->get }, qr/\A127\.0\.0\.1:\d+ - hostname verification failed/,
+    'a name the certificate does not carry: the async request, connected to the pinned address, fails the name check' );
+  like( dies { $wrong->simple_chat('hi') }, qr/500 Can't connect to wrong\.invalid:\d+ \(hostname verification failed\)/,
+    '... and so does the synchronous one' );
+  is( [ requests_since( $srv, $seen ) ], [], 'no request reached the server, the key never left' );
+};
+
 subtest 'a redirect does not carry the key to another origin' => sub {
   my $seen = () = $srv->requests;
   my ( $exit, $out, $err ) = provider_run( '/redir.json', '-k', 'sk-cli', '--json', 'say hello' );
@@ -254,10 +298,21 @@ subtest 'the synchronous user agent follows no redirect either (REPL /model list
     'control: ... without its key' );
   unlike( JSON::MaybeXS->new->canonical->encode( \@followed ), qr/sk-control/, 'control: the key is nowhere in it' );
 
+  # Why raider keeps its setting under the pin (k141): the pin refuses a hop
+  # to another host, but follows one to another port of the pinned host --
+  # another origin than the endpoint's. $other listens on 127.0.0.1 as well.
   my $seen_other = () = $other->requests;
+  my $pinned = Langertha::Engine::Anthropic->new( url => $url, api_key => 'sk-control', model => 'm1',
+    connect_address => '127.0.0.1' );
+  eval { $pinned->list_models };
+  is( [ map { $_->{method}.' '.$_->{path} } requests_since( $other, $seen_other ) ], [ 'GET /v1/models' ],
+    'control: pinned, without the provider settings, the hop to another port of the host is followed' );
+
+  $seen_other = () = $other->requests;
   my $engine = Langertha::Raider::EngineResolver->new(
     config   => Langertha::Raider::Config->new( root => "$root" ),
-    provider => { engine_name => 'anthropic', engine_class => 'Langertha::Engine::Anthropic', url => $url, model => 'm1' },
+    provider => { engine_name => 'anthropic', engine_class => 'Langertha::Engine::Anthropic', url => $url, model => 'm1',
+                  connect_address => '127.0.0.1' },
     api_key  => 'sk-cli',
   )->build_engine;
   my $seen = () = $srv->requests;

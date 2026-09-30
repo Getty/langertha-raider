@@ -645,8 +645,13 @@ the same origin (scheme, host, port) as the manifest; anything else is
 refused, so the key goes nowhere but the origin named on the command line.
 The endpoint's host is resolved and checked again before the run, under
 the rules of C<provider inspect> (C<--allow-internal> releases it the same
-way). The model requests are POSTs, which are not redirected, and the
-engine's synchronous requests (the REPL's C</model>) follow no redirect.
+way). The engine then connects to the first of the checked addresses,
+never to a new lookup of the name (TLS still verifies the certificate
+against the host name), so a DNS answer that changes after the check
+cannot send the key elsewhere. A redirect to another host is never
+followed; the model requests are POSTs, which are not redirected at all,
+and the engine's synchronous requests (the REPL's C</model>) follow no
+redirect.
 
 =item * A model that does not declare C<tools_native> is a warning on
 stderr, not an error: raider works through tool calls.

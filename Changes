@@ -155,7 +155,10 @@ Revision history for Langertha-Raider
       lists several). The key comes only from -k or -o api_key=, never from
       *_API_KEY in the environment or .raider.yml. The endpoint must be https
       on the manifest's origin; internal addresses need --allow-internal, as
-      for provider inspect. Not combinable with -e, -o engine= or -o url=.
+      for provider inspect. The engine connects to the endpoint address
+      raider checked (Langertha connect_address) instead of looking the name
+      up again; TLS still verifies the host name. Not combinable with -e,
+      -o engine= or -o url=.
       The REPL banner shows the -k key as set without printing it.
     - Saving skills (--skills, --claude, the /skill writers) no longer writes
       an empty skills: ~ into an existing default: section of the project

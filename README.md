@@ -389,8 +389,10 @@ The rules are provisional:
   with an auth reference needs one; an endpoint without auth gets none.
 - **Origin**: the endpoint must be `https` and of the manifest's own origin, and its
   host is checked again under the address rules above (`--allow-internal` releases
-  both). Model requests are POSTs and are not redirected; the engine's other
-  requests follow no redirect.
+  both). The engine connects to the first checked address, not to a new lookup of
+  the name (TLS still verifies the host name), so a DNS answer that changes after
+  the check cannot send the key elsewhere. Model requests are POSTs and are not
+  redirected; the engine's other requests follow no redirect.
 - A model that does not declare `tools_native` is a warning, not an error.
 
 `raider provider add` with a stored alias and credential is still planned (see
