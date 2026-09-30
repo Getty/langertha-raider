@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-30T06:50:10Z
+claimed_by: raider-worker-k124
+class: standard
+completed: 2026-09-30T06:49:56Z
+created: 2026-09-30T06:00:33Z
+id: 124
+priority: low
+started: 2026-09-30T06:45:11Z
+status: done
+tags:
+- adr-0005
+- policy
+title: 'ADR 0005 B5: Approval-Wertobjekt (Session/Run/Tool/Args-Hash/Policy-Revision)'
+updated: 2026-09-30T06:50:10Z
+---
+
+Reine Logik: Approval gebunden an session, run, tool, sha256 des kanonischen JSON der Argumente, policy revision; jede Aenderung invalidiert (Fixture F20). Keine Persistenz ueber den Run hinaus (Vorschlag, zur Bestaetigung).
+
+2026-09-30 06:47 Plan: new internal Moose value object lib/Langertha/Raider/Approval.pm (for_call / covers / digest_arguments), no dispatch wiring; test t/104_raider_approval.t. Canonical args: JSON::MaybeXS canonical+utf8 over a normalised copy, sha256 via Digest::SHA (core perl, first use in this dist).
+
+2026-09-30 06:49 PROVISIONAL for Getty: (1) scalars in arguments compare by their string form, so 5 and "5" are the SAME argument (reason: Cpanel::JSON::XS types a scalar by its SV flags -- a "5" string that was once used as a number encodes as 5 -- so a type-sensitive digest would depend on what Perl last did with the value, not on what the model sent; k122 inputSchema check already runs before and rejects wrong types where the schema says so). "1.0" vs "1" differ; true/1/"true", false/0/"", null are all distinct; {} vs null (absent arguments) distinct. (2) source is a bound field: same tool name from another source is another tool. (3) No persistence -- approval lives as long as whatever holds it in the run. (4) for_call croaks on any missing field; covers is false on any missing field (fail closed, never croaks except on a non-hash call). Also found: Digest::SHA (core perl) is new to this dist and not in cpanfile -- release-manager should add requires 'Digest::SHA'; (left out: brief limited me to module+test). Binary: build-binary.sh -M's every .pm under lib/Langertha (verified in the script), Digest::SHA is a static use so pp's scan should carry it; binary NOT built/verified here (memory pressure, verify-binary.sh being changed by k119).
+
+2026-09-30 06:49 Done: new internal value object lib/Langertha/Raider/Approval.pm (Moose, immutable, ADR 0017 internal marker): attrs session_id, run_id, tool, source, arguments_sha256, policy_revision (all ro Str required); for_call(session_id, run_id, policy_revision, call => {name, source, arguments}); covers(same args) -> true only if every bound field equals; digest_arguments($args) = sha256_hex of canonical UTF-8 JSON (JSON::MaybeXS canonical) over a normalised copy (plain scalars stringified, booleans kept, undef = null, code refs/objects croak). Not wired into dispatch. Test t/104_raider_approval.t (Test2::V0, offline, 10 subtests: binding, identical call covered, each field change invalidates incl. source, F20 changed/added/removed args and in-place mutation, key order, nested canonical + array order matters, 5 vs "5" and bool/null distinctions, unicode, read-only, fail-loud). prove -Ilib t/104 t/00_load.t: 2 files, 27 tests pass (installed Langertha). Mutation check: dropping source from the binding, canonical=>0, and not stringifying scalars each turn the test red. No Changes entry (internal, no behaviour change).
+
+2026-09-30 06:50 Committed as e7af6b6 (added requires Digest::SHA to cpanfile)
