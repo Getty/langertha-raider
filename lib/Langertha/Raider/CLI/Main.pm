@@ -529,10 +529,10 @@ sub run {
   # The one reader/writer of the project config (.raider/config.yml, else
   # .raider.yml) and of the home config under it (~/.raider/config.yml).
   # Both parsed up front so a broken file stops raider here, with its path
-  # in the message. A legacy file next to the new one is not loaded, and
-  # said so (ADR 0011).
+  # in the message, and so does an invalid project_tools of the home file.
+  # A legacy file next to the new one is not loaded, and said so (ADR 0011).
   my $config = $self->config_class->new(root => $opt->{root} // Path::Tiny->cwd->stringify);
-  unless (eval { $config->data; $config->home_data; 1 }) {
+  unless (eval { $config->data; $config->home_data; $config->project_tools; 1 }) {
     $self->_warn($self->output->error_text($@)."\n");
     return EXIT_CONFIG;
   }

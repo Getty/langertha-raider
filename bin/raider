@@ -58,6 +58,14 @@ per pack. F<raider> never writes the home file. Run in the home directory
 itself, F<~/.raider/config.yml> is the project file and is read once. A
 home file that does not parse stops F<raider> like a broken project file.
 
+C<project_tools> in F<~/.raider/config.yml> maps a workspace selector
+(C<*>, a path glob starting with C</> or C<~/>, or a workspace name) to
+the home tools a project gets. Only the home file grants: in a project file
+it is ignored, and C<config explain> says so. For now C<config explain>
+only shows which selectors match the project and which tools they grant;
+nothing is mounted from it yet, and workspace names never match. An
+invalid C<project_tools> stops F<raider> with exit status 3.
+
 The project instructions follow the same rule: F<.raider/instructions.md>
 in the working directory, or else the legacy F<.raider.md> there, is added
 to the default persona. Where this page names F<.raider.md>, the file in

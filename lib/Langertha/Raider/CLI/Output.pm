@@ -160,7 +160,10 @@ legacy F<.raider.md> beside F<.raider/instructions.md>); each pack with its stat
 kind of place it was found in (C<project>, C<home>, C<shipped>, C<env>)
 and why it is on or off; the pack directories that were skipped, and why; the perl tools grant; and
 each mounted tool with its source and effect classes (C<unknown> for a tool
-the built-in table does not know).
+the built-in table does not know); and, when F<~/.raider/config.yml> has a
+C<project_tools>, each of its selectors (matched or not, and why) and each
+tool name with the selectors granting it, the packs requesting it and
+whether raider knows it -- information only.
 
 =cut
 
@@ -214,6 +217,26 @@ sub config_report {
       my $fx = $t->{effects};
       $self->emit(sprintf("  %s %-10s  %s\n", $self->c(title => sprintf('%-22s', $t->{name})), $t->{source},
         $self->c(meta => !$fx ? 'unknown' : @$fx ? join(', ', @$fx) : 'none')));
+    }
+  }
+  if (my $pt = $report->{project_tools}) {
+    $self->emit($self->c(meta => 'project tools: '), $self->c(title => $pt->{label}),
+      '  ', $self->c(meta => '(granted by project_tools: information only, nothing is mounted by it)'), "\n");
+    $self->emit('  ', $self->c(meta => 'selectors:'), "\n") if @{ $pt->{selectors} };
+    for my $s (@{ $pt->{selectors} }) {
+      $self->emit(sprintf("    %s %-11s  %s\n", $self->c(title => sprintf('%-20s', $s->{selector})),
+        $s->{matched} ? 'matched' : 'not matched',
+        $self->c(meta => $s->{reason}.( @{ $s->{tools} } ? '; '.join(', ', @{ $s->{tools} }) : '' ))));
+    }
+    $self->emit('  ', $self->c(meta => 'tools:'), "\n") if @{ $pt->{tools} };
+    for my $t (@{ $pt->{tools} }) {
+      my @about = (
+        @{ $t->{requested_by} } ? 'requested by '.join(', ', @{ $t->{requested_by} }) : 'not requested',
+        $t->{known} // 'unknown',
+      );
+      $self->emit(sprintf("    %s %s  %s\n", $self->c(title => sprintf('%-20s', $t->{name})),
+        @{ $t->{granted_by} } ? 'granted by '.join(', ', @{ $t->{granted_by} }) : 'not granted',
+        $self->c(meta => '('.join('; ', @about).')')));
     }
   }
   return;

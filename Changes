@@ -99,6 +99,12 @@ Revision history for Langertha-Raider
       skills and no_detect add up, detect: rules are replaced per pack.
       raider config explain names home values "home" and prints the home
       file. A broken home file stops raider (exit 3); raider never writes it.
+    - ~/.raider/config.yml takes project_tools, a map from workspace selector
+      ("*", a path glob, a workspace name) to tool names. raider config
+      explain shows which selectors match the project, which tools they grant
+      and which packs request them; a project file cannot grant. Information
+      only: nothing is mounted from it yet, and workspace names never match
+      yet.
     - raider reads the project instructions from .raider/instructions.md, else
       .raider.md. When both exist only .raider/instructions.md is used, raider
       warns on start, and raider config explain names the ignored file under

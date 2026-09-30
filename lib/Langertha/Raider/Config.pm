@@ -41,7 +41,7 @@ winning:
 =over
 
 =item C<top> -- every top-level key whose value is not a hash (plus
-C<skills> and C<detect>, which may be one)
+C<skills>, C<detect> and C<project_tools>, which may be one)
 
 =item C<default> -- the C<default:> section
 
@@ -72,13 +72,16 @@ value replaces the home's
 
 =back
 
+C<project_tools> is not layered at all: only the top level of the home
+file grants tools to projects (L</project_tools>).
+
 The project writers never touch the home file (L</update_home> is the only
 one, with no caller yet). When the home file is the file in
 use -- raider runs in the home directory itself -- it is read once, as the
 project file, and there is no home layer.
 
 A file, project or home, that does not parse, whose top level is not a mapping, or that holds
-a mapping under one of raider's own keys other than C<skills> and C<detect>
+a mapping under one of raider's own keys other than C<skills>, C<detect> and C<project_tools>
 (see L</is_app_key>) -- at top level or in any section, active or not -- is
 an error: readers croak and the writer refuses to
 overwrite it.
@@ -86,7 +89,7 @@ overwrite it.
 =cut
 
 # Keys that configure raider itself and never reach the engine constructor.
-my %APP_KEY = map { $_ => 1 } qw( detect engine no_detect packs perl preferred_lib_target skills );
+my %APP_KEY = map { $_ => 1 } qw( detect engine no_detect packs perl preferred_lib_target project_tools skills );
 
 my %PROFILE_KEYWORD = (
   claude => 'claude',
@@ -167,8 +170,16 @@ sub _build_uses_home {
   my ( $self ) = @_;
   my $home = $self->home_file;
   return 0 unless defined $home && -f $home;
-  return 0 if -f $self->file && $home->realpath eq $self->file->realpath;
-  return 1;
+  return $self->_is_home_file ? 0 : 1;
+}
+
+# True when the file in use is the home file itself (raider runs in the
+# home directory), compared by real path.
+sub _is_home_file {
+  my ( $self ) = @_;
+  my $home = $self->home_file;
+  return 0 unless defined $home && -f $home && -f $self->file;
+  return $home->realpath eq $self->file->realpath ? 1 : 0;
 }
 
 =method home_label
@@ -231,8 +242,8 @@ sub ignored_files {
 
 The parsed file as a hash; empty when the file is missing or empty. Croaks
 when the file does not parse, its top level is not a mapping, or a raider
-key other than C<skills> and C<detect> holds a mapping, at top level or in
-a section.
+key other than C<skills>, C<detect> and C<project_tools> holds a mapping,
+at top level or in a section.
 
 =cut
 
@@ -316,7 +327,7 @@ sub file_exists { -f $_[0]->file ? 1 : 0 }
 # is an engine section.
 sub _may_be_mapping {
   my ( $self, $key ) = @_;
-  return $key eq 'skills' || $key eq 'detect';
+  return $key eq 'skills' || $key eq 'detect' || $key eq 'project_tools';
 }
 
 sub _is_section {
@@ -411,6 +422,14 @@ sub _resolve_file {
     for my $key (sort keys %$hash) {
       if ($key eq 'skills') {
         push @skills, { source => $name, value => $hash->{$key} };
+        next;
+      }
+      if ($key eq 'project_tools') {
+        # Read on its own (project_tools), never layered; anywhere else
+        # than the top level of the home file it is reported, not used.
+        my $top = $name eq $prefix.'top';
+        push @ignored, $self->_ignored_project_tools($name, $top)
+          unless $top && ( length $prefix || $self->_is_home_file );
         next;
       }
       if ($key eq 'engine' && $name ne $prefix.'top' && $name ne $prefix.'default') {
@@ -518,7 +537,7 @@ sub options {
     my $opts = $config->engine_options($engine_name);
 
 L</options> without raider's own keys (C<detect>, C<engine>, C<no_detect>,
-C<packs>, C<perl>, C<preferred_lib_target>, C<skills>): what goes to the
+C<packs>, C<perl>, C<preferred_lib_target>, C<project_tools>, C<skills>): what goes to the
 engine constructor.
 
 =cut
@@ -535,8 +554,8 @@ sub engine_options {
     $config->is_app_key('perl');   # 1
 
 True for the keys that configure raider itself (C<detect>, C<engine>,
-C<no_detect>, C<packs>, C<perl>, C<preferred_lib_target>, C<skills>) and
-never reach the engine constructor.
+C<no_detect>, C<packs>, C<perl>, C<preferred_lib_target>, C<project_tools>,
+C<skills>) and never reach the engine constructor.
 
 =cut
 
@@ -615,6 +634,183 @@ sub normalize_detect {
     }
   }
   return \%settings;
+}
+
+=attr project_tools
+
+    for my $entry (@{ $config->project_tools }) {
+      # { selector => '~/dev/*', kind => 'path', tools => ['telegram'] }
+    }
+
+C<project_tools> of the home file (ADR 0011): which home tools and
+services a project gets, as a map of workspace selector to a list of tool
+names (or one comma-separated string). Only the top level of
+F<~/.raider/config.yml> counts -- the home layer, or the file in use when
+raider runs in the home directory itself. A project file cannot grant:
+its C<project_tools>, like one inside a C<default:> or engine section of
+either file, is not read and is listed as ignored by L</explain>.
+
+The entries, sorted by selector, each with its C<kind>:
+
+=over
+
+=item C<all> -- the selector C<*>, every project
+
+=item C<path> -- a path glob: absolute, or starting with C<~/> (C<~> is
+the user's home). It is matched against the real path of L</root>, the
+whole path: C<**> matches any characters, C<*> and C<?> any characters or
+one character except C</>; everything else, C<[> and C<{> included, is
+literal. A trailing C</> is dropped, so C<~/dev/*> matches F<~/dev/foo>
+but not F<~/dev/foo/bar>, and C<~/dev/**> matches every directory below
+F<~/dev>, not F<~/dev> itself. The leading directories without a wildcard
+are resolved to their real path when they exist, so a symlink on the way
+does not keep a glob from matching.
+
+=item C<workspace> -- any other selector: a workspace name (ADR 0004).
+Accepted, but never matched yet: raider has no workspace registry.
+
+=back
+
+Empty when the home file has no C<project_tools>. Croaks with C<Invalid
+project_tools setting ...> naming the offending key when the value is not
+a map, a selector holds no list of names, or a selector is C<~user>, a
+relative path, or a name with a wildcard. Information only: nothing is
+mounted from it yet (L</explain>).
+
+=cut
+
+has project_tools => (
+  is         => 'ro',
+  isa        => 'ArrayRef',
+  lazy_build => 1,
+);
+
+sub _build_project_tools {
+  my ( $self ) = @_;
+  return $self->normalize_project_tools($self->_project_tools_data->{project_tools});
+}
+
+# The file whose top-level project_tools grants: the home layer, or the
+# file in use when it is the home file; empty otherwise.
+sub _project_tools_data {
+  my ( $self ) = @_;
+  return $self->uses_home ? $self->home_data : $self->_is_home_file ? $self->data : {};
+}
+
+=method normalize_project_tools
+
+    my $entries = $config->normalize_project_tools($value);
+
+Checks a C<project_tools> value and returns its entries as in
+L</project_tools>; croaks like it.
+
+=cut
+
+sub normalize_project_tools {
+  my ( $self, $value ) = @_;
+  return [] unless defined $value;
+  croak 'Invalid project_tools setting project_tools: must be a map of workspace selector to a list of tool names'
+    unless ref $value eq 'HASH';
+  my @entries;
+  for my $selector (sort keys %$value) {
+    my $label = 'project_tools.'.$selector;
+    my $names = $value->{$selector};
+    my @tools = !defined $names       ? ()
+              : ref $names eq 'ARRAY' ? @$names
+              : ref $names            ? croak 'Invalid project_tools setting '.$label.': must be a list of tool names'
+              :                         split /\s*,\s*/, $names;
+    for my $name (@tools) {
+      croak 'Invalid project_tools setting '.$label.': must be a list of tool names'
+        if ref $name || !length($name // '');
+    }
+    push @entries, { selector => $selector, kind => $self->_selector_kind($selector, $label), tools => \@tools };
+  }
+  return \@entries;
+}
+
+sub _selector_kind {
+  my ( $self, $selector, $label ) = @_;
+  my $fail = sub { croak 'Invalid project_tools setting '.$label.': '.$_[0] };
+  $fail->('empty workspace selector') unless length $selector;
+  return 'all' if $selector eq '*';
+  return 'path' if $selector =~ m{\A(?:/|~(?:/|\z))};
+  $fail->('~user is not supported; start a path glob with / or ~/') if $selector =~ /\A~/;
+  $fail->('a path glob must be absolute or start with ~/') if $selector =~ m{/};
+  $fail->('a workspace name cannot hold * or ?; a path glob must be absolute or start with ~/') if $selector =~ /[*?]/;
+  return 'workspace';
+}
+
+=method project_tools_matches
+
+    for my $m (@{ $config->project_tools_matches }) {
+      # { selector => '~/dev/*', kind => 'path', tools => ['telegram'],
+      #   matched => 1, reason => 'matches /home/me/dev/app' }
+    }
+
+The entries of L</project_tools>, each with whether it applies to
+L</root> (C<matched>) and why (C<reason>). A workspace name never matches:
+C<workspace names are not supported yet>.
+
+=cut
+
+sub project_tools_matches {
+  my ( $self ) = @_;
+  my $root = path($self->root)->absolute;
+  $root = $root->realpath if -e $root;
+  return [ map { { %$_, $self->_match_selector($_, "$root") } } @{ $self->project_tools } ];
+}
+
+sub _match_selector {
+  my ( $self, $entry, $root ) = @_;
+  return ( matched => 1, reason => '* matches every project' ) if $entry->{kind} eq 'all';
+  return ( matched => 0, reason => 'workspace names are not supported yet' ) if $entry->{kind} eq 'workspace';
+  my $glob = $self->_selector_glob($entry->{selector});
+  return ( matched => 0, reason => 'no home directory for ~' ) unless defined $glob;
+  return $root =~ $self->_glob_regex($glob)
+    ? ( matched => 1, reason => 'matches '.$root )
+    : ( matched => 0, reason => $glob.' does not match '.$root );
+}
+
+# A path selector as an absolute glob: ~ expanded, trailing slashes
+# dropped, the leading directories without a wildcard by their real path.
+sub _selector_glob {
+  my ( $self, $selector ) = @_;
+  my $glob = $selector;
+  if ($glob =~ /\A~/) {
+    my $home = $self->home_class->home_dir;
+    return unless defined $home;
+    $glob = $home.substr($glob, 1);
+  }
+  $glob =~ s{(?<=.)/+\z}{};
+  my @parts = split m{/}, $glob, -1;
+  my $n = 0;
+  $n++ while $n < @parts && $parts[$n] !~ /[*?]/;
+  my $literal = join '/', @parts[0 .. $n - 1];
+  if (length $literal && -e $literal) {
+    my $real = path($literal)->realpath->stringify;
+    $glob = $n < @parts ? join('/', $real eq '/' ? '' : $real, @parts[$n .. $#parts]) : $real;
+  }
+  return $glob;
+}
+
+# A glob as an anchored regex: ** any characters, * and ? without /,
+# everything else literal.
+sub _glob_regex {
+  my ( $self, $glob ) = @_;
+  my $re = join '', map {
+    $_ eq '**' ? '.*' : $_ eq '*' ? '[^/]*' : $_ eq '?' ? '[^/]' : quotemeta
+  } split /(\*\*|\*|\?)/, $glob;
+  return qr/\A$re\z/;
+}
+
+# How explain lists a project_tools that is not read: at the top of a
+# project file (only the home file grants), or inside a section of either
+# file.
+sub _ignored_project_tools {
+  my ( $self, $layer, $top ) = @_;
+  return { key => 'project_tools', reason => 'only ~/.raider/config.yml grants tools to projects; a project file cannot' }
+    if $top;
+  return { key => $layer.'.project_tools', reason => 'read only at the top level of ~/.raider/config.yml' };
 }
 
 =method normalize_skill_spec
@@ -725,6 +921,12 @@ C<file> is the file in use, C<label> its L</label> and C<ignored_files>
 the L</ignored_files>; C<home_file> is L</home_file>, present only when
 L</uses_home>.
 
+C<project_tools> is present when the home file has one: C<file> and
+C<label> of the file it was read from, and C<selectors>, the
+L</project_tools_matches> -- information only, it mounts nothing. A
+C<project_tools> that is not read (in a project file, or inside a section)
+is listed in C<ignored>.
+
 =cut
 
 sub explain {
@@ -753,6 +955,11 @@ sub explain {
     engine        => $engine,
     values        => \@values,
     ignored       => $r->{ignored},
+    ( defined $self->_project_tools_data->{project_tools} ? ( project_tools => {
+      file      => ( $self->uses_home ? $self->home_file : $self->file )->stringify,
+      label     => $self->uses_home ? $self->home_label : $self->label,
+      selectors => $self->project_tools_matches,
+    } ) : () ),
   };
 }
 
@@ -822,6 +1029,7 @@ sub update_home {
   $self->clear_data;
   $self->clear_home_data;
   $self->clear_uses_home;
+  $self->clear_project_tools;
   return 1;
 }
 

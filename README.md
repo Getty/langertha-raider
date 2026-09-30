@@ -228,6 +228,21 @@ raider never writes the home file; run in `~` itself, `~/.raider/config.yml` is 
 project file and is read once. `raider config explain` names home values `home`
 (`home default:`, `home openai:`) and prints the home file's path.
 
+`project_tools` in `~/.raider/config.yml` maps a workspace selector — `"*"`, a path
+glob starting with `/` or `~/` (`*` stays within one directory, `**` crosses them),
+or a workspace name — to the home tools a project gets; all matching entries add up.
+Only the home file grants: a `project_tools` in a project file is ignored and
+reported. For now `raider config explain` only shows which selectors match and
+which tools they grant (and which packs request them); nothing is mounted from it
+yet, and workspace names never match.
+
+```yaml
+# ~/.raider/config.yml
+project_tools:
+  "*": [telegram]
+  "~/dev/**": [perl]
+```
+
 Flat form, or per-engine with a shared `default:` layer:
 
 ```yaml
@@ -247,12 +262,13 @@ Two kinds of keys live in the file:
   the engine constructor. `-o key=value` on the command line overrides them (values
   are auto-coerced: `0.2` → Float, `4096` → Int, `true`/`false` → 1/0).
 - **Raider's own keys** — `engine`, `perl`, `packs`, `skills`, `detect`,
-  `no_detect`, `preferred_lib_target` — configure raider itself and never reach the
-  engine. `skills` is merged across layers instead of replaced.
+  `no_detect`, `preferred_lib_target`, `project_tools` (home file only) — configure
+  raider itself and never reach the engine. `skills` is merged across layers instead
+  of replaced.
 
 A file that does not parse, whose top level is not a mapping, or that puts a mapping
-under one of raider's own keys (other than `skills` and `detect`, whose `detect:`
-map holds per-pack detection rules) is a hard error naming the offending key —
+under one of raider's own keys (other than `skills`, `project_tools` and `detect`,
+whose `detect:` map holds per-pack detection rules) is a hard error naming the offending key —
 raider stops instead of loading half of it.
 
 `.raider/instructions.md` in the working root — or the legacy `.raider.md` there —

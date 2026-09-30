@@ -1559,6 +1559,19 @@ C<tools> lists the mounted tools, each with its C<name>, its C<source>
 steers the run), or undef when the table does not know the tool. Information
 only -- nothing is enforced by it.
 
+C<project_tools> is present when F<~/.raider/config.yml> has one (ADR 0011;
+L<Langertha::Raider::Config/project_tools>): the C<file> and C<label> it
+was read from, C<selectors> with whether each matches L</root> and why,
+and C<tools>, one entry per tool name that a selector names or an active
+pack requests (the C<tools:> of its F<pack.yml>; a project has no other
+way to request a tool yet): C<granted_by>, the matching selectors naming
+it (empty: not granted); C<requested_by>, the requesting packs
+(C<pack perl>); and C<known>, C<tool> for a built-in or mounted tool,
+C<tool group> for C<perl>, undef for a name raider does not know (not an
+error). Information only -- the mounted tools do not follow it yet. A
+C<project_tools> in the project file, inside a section, or given with
+C<-o> is not read and is listed in C<ignored>.
+
 =cut
 
 sub explain_config {
@@ -1618,7 +1631,10 @@ sub explain_config {
       ? ( detect => [ $self->source_label($self->detect ? 'detect' : 'no_detect'), $self->detect ? 1 : 0 ] ) : () ),
   );
   my %key = map { $_ => 1 } keys %$opts, keys %yml, keys %flag;
-  delete @key{qw( engine model api_key skills )};
+  delete @key{qw( engine model api_key skills project_tools )};
+  my @ignored = @{ $report->{ignored} };
+  push @ignored, { key => $opt_label.' project_tools', reason => 'only ~/.raider/config.yml grants tools to projects' }
+    if exists $opts->{project_tools};
   for my $key (sort keys %key) {
     my $applies_to = $self->config->is_app_key($key) ? 'raider' : 'engine';
     push @values, $self->_explain_entry($key, $applies_to, [
@@ -1649,6 +1665,10 @@ sub explain_config {
   return {
     %$report,
     values        => \@values,
+    ignored       => \@ignored,
+    ( $report->{project_tools}
+      ? ( project_tools => { %{ $report->{project_tools} }, tools => $self->_project_tools_report($report->{project_tools}) } )
+      : () ),
     detection     => $detecting ? 'on' : 'off ('.$why.')',
     instructions  => $self->mission_source,
     bare          => $self->bare ? 1 : 0,
@@ -1674,6 +1694,42 @@ sub _tool_effects_report {
 }
 
 sub _tool_effects_class { 'Langertha::Raider::ToolEffects' }
+
+# One entry per tool name that project_tools names or an active pack
+# requests: the matching selectors that grant it, the packs that request
+# it, and whether raider knows the name (a built-in or mounted tool, or a
+# tool group). Information only: the active tool set does not follow it.
+sub _project_tools_report {
+  my ($self, $project_tools) = @_;
+  my ( %granted, %requested );
+  for my $s (@{ $project_tools->{selectors} }) {
+    for my $name (@{ $s->{tools} }) {
+      $granted{$name} //= [];
+      push @{ $granted{$name} }, $s->{selector} if $s->{matched};
+    }
+  }
+  my $packs = $self->packs;
+  for my $pack (@{ $packs->enabled_pack_names }) {
+    push @{ $requested{$_} }, 'pack '.$pack for @{ $packs->packs_by_name->{$pack}->tools };
+  }
+  my %mounted = map { $_->name => 1 } $self->_mounted_tools;
+  my %group   = map { $_ => 1 } $self->_tool_group_names;
+  return [ map {
+    my $name = $_;
+    {
+      name         => $name,
+      granted_by   => $granted{$name} // [],
+      requested_by => $requested{$name} // [],
+      known        => $group{$name} ? 'tool group'
+                    : $mounted{$name} || $self->_tool_effects_class->effects_for($name) ? 'tool'
+                    : undef,
+    }
+  } sort keys %{ { %granted, %requested } } ];
+}
+
+# The tool groups raider grants by name today: what a pack's tools: may
+# request (perl, the Perl tools of perl_tools_grant).
+sub _tool_group_names { qw( perl ) }
 
 sub _yml_source { $_[0]->config->layer_label($_[1]) }
 
