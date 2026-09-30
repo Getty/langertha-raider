@@ -117,6 +117,19 @@ subtest 'add_skills keeps a hash skills entry' => sub {
     'hash entry kept, profile appended');
 };
 
+subtest 'add_skills does not write keys it did not change' => sub {
+  my $config = config_with("# keep me\ndefault:\n  model: x\nperl: 1\n");
+  is([ $config->add_skills('claude') ], ['claude'], 'added');
+  my $raw = YAML::PP->new->load_string($config->file->slurp_utf8);
+  is($raw, { default => { model => 'x' }, perl => 1, skills => ['claude'] },
+    'no empty default: skills, other keys kept');
+
+  my $same = config_with("default:\n  model: x\n  skills: [claude]\n");
+  my $before = $same->file->slurp_utf8;
+  is([ $same->add_skills('claude') ], [], 'nothing to add');
+  is($same->file->slurp_utf8, $before, 'file untouched');
+};
+
 subtest 'writers refuse a broken file' => sub {
   my $config = config_for('broken.yml');
   my $before = $config->file->slurp_utf8;

@@ -145,6 +145,9 @@ Revision history for Langertha-Raider
       on the manifest's origin; internal addresses need --allow-internal, as
       for provider inspect. Not combinable with -e, -o engine= or -o url=.
       The REPL banner shows the -k key as set without printing it.
+    - Saving skills (--skills, --claude, the /skill writers) no longer writes
+      an empty skills: ~ into an existing default: section of the project
+      config.
 
   [Packs]
     - Packs are also found in <project>/.raider/packs/<name>/ and

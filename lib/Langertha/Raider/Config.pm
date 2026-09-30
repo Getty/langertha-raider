@@ -782,7 +782,9 @@ sub add_skills {
   $self->_update(sub {
     my ( $data ) = @_;
     my @have;
-    for my $raw ($data->{skills}, (ref $data->{default} eq 'HASH' ? $data->{default}{skills} : ())) {
+    # copy the values: a foreach alias would autovivify default: { skills: ~ }
+    my @raw = ( $data->{skills}, ( ref $data->{default} eq 'HASH' ? $data->{default}{skills} : () ) );
+    for my $raw (@raw) {
       next unless defined $raw;
       push @have, ref $raw eq 'ARRAY' ? @$raw : ($raw);
     }
