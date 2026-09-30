@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-30T06:24:01Z
+claimed_by: raider-worker-k122
+class: standard
+completed: 2026-09-30T06:23:55Z
+created: 2026-09-30T06:00:19Z
+id: 122
+priority: medium
+started: 2026-09-30T06:16:17Z
+status: done
+tags:
+- adr-0005
+- tools
+title: 'ADR 0005 B3: Tool-Argumente vor Ausfuehrung gegen inputSchema pruefen'
+updated: 2026-09-30T06:24:26Z
+---
+
+Nach #120. Schritt validate der einen Ausfuehrungskette: required-Keys und Top-Level-Typen gegen das inputSchema des Tools, Fehler als Tool-Error-Result ans Modell. Keine neue Abhaengigkeit (Single-Binary), kleiner eigener Checker.
+
+2026-09-30 06:20 Implemented: new internal Langertha::Raider::ToolArgs (tool_args_problems, no new dep; packed automatically, build-binary.sh -M's every .pm under lib/Langertha). Raider.pm: $state->{tool_schemas} (name -> inputSchema // input_schema from the gathered, deduped tool set; refreshed in _refresh_tools_f); _dispatch_tool_call_f validates AFTER plugin_before_tool_call (checks the call that would actually run and that Events logged as tool.call), error result goes through _after_tool_call_f (flag_errors) -> exactly one tool.result, status failed; tool not run, raid continues. t/102_raider_tool_args_schema.t: 5/10 subtests red against HEAD Raider.pm, 10/10 green with fix. Found on the red run: raider_ask_user without 'question' used to die (Result content undef) -- now an error result.
+
+2026-09-30 06:21 Done. Files: lib/Langertha/Raider/ToolArgs.pm (new, internal marker, @EXPORT_OK tool_args_problems), lib/Langertha/Raider.pm (+48: use, state->{tool_schemas} built in raid_f and _refresh_tools_f via _tool_schemas, _invalid_args_tool_result, check in _dispatch_tool_call_f after plugin_before_tool_call, result via _after_tool_call_f with flag_errors; DESCRIPTION bullet), t/102_raider_tool_args_schema.t (new). Decisions: validate after the before-hook (checks the call that actually runs; Events keeps tool.call+failed tool.result exactly once); ADR order says validate before policy/approval -- when that step lands as its own step, a gate inside plugin_before_tool_call would still see invalid calls first. Lenient: numeric strings pass number/integer, numbers pass string, 0/1 pass boolean but 'true'/'false' strings do not ('false' is truthy in Perl), null for a non-required property = absent, no/unknown schema type, non-object schema, property w/o type, unknown type names, nested, enum, additionalProperties: not checked. Non-hash args rejected only for an explicit type=>object schema. Verified: t/102 5/10 subtests red on HEAD Raider.pm, 10/10 green; targeted (installed Langertha) 25 files 191 tests pass: 102,100,101,86,87,95,99,97,62,47,81,93,94,96,88,92,00,50,52_cli_cancel,52_cli_interrupt_tools,53_repl_interrupt_tools,55,64,65,49_cli_machine_output. Binary: new .pm is picked up by build-binary.sh (find lib/Langertha); binary not built. Note: uses JSON::MaybeXS::is_bool (since 1.004000); cpanfile JSON::MaybeXS is unpinned -- release-manager may want to pin 1.004.
+
+2026-09-30 06:24 Committed as 74f7268
+
+2026-09-30 Orchestrator: is_bool laut JSON::MaybeXS-POD 'Available since version 1.002004' (1.004000 in der Worker-Notiz war falsch); Pin 1.002004 korrekt.
