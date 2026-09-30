@@ -112,6 +112,14 @@ Revision history for Langertha-Raider
       recorded in the session. Ctrl-C ends the command, not raider; a ?CMD
       ended by Ctrl-C sends nothing. A line that is only ! or ? is a prompt.
     - raider --help lists --trace next to --no-trace.
+    - New raider provider inspect HOST[:PORT]|https://HOST fetches
+      /.well-known/langertha.json (https only, 1 MiB, 10 s, up to 3
+      same-origin redirects, no credentials sent; internal addresses are
+      refused unless --allow-internal, cloud metadata never), validates it
+      with Langertha::Manifest and shows provider, issuer, endpoints, auth and
+      models, with warnings for unknown dialects, auth types and capabilities.
+      --json, --msgpack and --yaml give one versioned document. Requires
+      Langertha::Manifest from Langertha core.
 
   [Packs]
     - Packs are also found in <project>/.raider/packs/<name>/ and

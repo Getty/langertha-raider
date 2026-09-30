@@ -113,6 +113,7 @@ from `~/.claude` are not read or reused as Anthropic API credentials.
 raider [options] [prompt...]        run a prompt (or open the REPL)
 raider config explain [options]     show each effective setting and its source
 raider session list | show | resume | fork | rm     see Sessions
+raider provider inspect HOST        show a provider's manifest, see Providers
 raider hall <subcommand>            the optional Raider Hall daemon
 raider acp <subcommand>             the bundled ACP client
 ```
@@ -283,6 +284,38 @@ Continuing a session replays the conversation — nothing recorded is executed a
 and reports what the crash rules found: damaged lines, runs that never ended
 (counted as `interrupted`), and tool calls without a result, whose outcome is
 `unknown` and which are **never** re-run.
+
+## Providers
+
+A provider can describe itself in a manifest at `/.well-known/langertha.json`
+(ADR 0007; schema and validator in Langertha core, `Langertha::Manifest`): its
+endpoints with their wire dialect, the auth mechanism each needs, and its models
+with the capabilities they claim. `raider provider inspect` fetches one, validates it
+and shows it:
+
+```bash
+raider provider inspect provider.example             # HOST, HOST:PORT or an https origin
+raider provider inspect provider.example --json      # one versioned document
+raider provider inspect knarr.lan:8443 --allow-internal
+```
+
+It prints the provider id, the issuer, every endpoint (id, dialect, base URL, auth
+reference), the auth entries (id, type) and the models (id, endpoint, claimed
+capabilities), then warns about what this raider cannot use — a dialect it has no
+adapter for, an auth type it cannot supply, a capability Langertha does not know
+(treated as absent) — and notes that `extensions` are inert. A manifest carrying a
+command, code, secret or prompt field is rejected as invalid.
+
+Inspecting stores nothing, binds no credential and sends none: the fetch is https
+only, at most 1 MiB, 10 seconds and 3 redirects within the origin; a redirect to
+another origin is not followed but reported. The host is resolved once and every
+address is checked, and the request goes to a checked address (TLS still verifies
+the host name). Loopback, private, link-local and reserved addresses are refused
+unless `--allow-internal` releases them for a knarr or skeid you run yourself; cloud
+metadata, multicast and unspecified addresses are refused always.
+
+Using a provider — `raider --provider HOST`, `raider provider add` with a stored,
+local credential binding — is still planned (see Roadmap).
 
 ## Tools
 
@@ -588,9 +621,11 @@ vocabulary live in [`CONTEXT.md`](CONTEXT.md); it lands in small vertical slices
   exact call, a "headless never allows all" rule, and a home-service `project_tools`
   mapping. *Today: filesystem tools confined to `--root`; `bash` starts there but is
   unrestricted.*
-- **Provider discovery** (ADR 0007) — `raider --provider host.tld`,
-  `raider provider add/inspect`, and a declarative `.well-known/langertha.json`
-  manifest. *Today: any Langertha provider via API key and `-e`.*
+- **Provider discovery** (ADR 0007) — `raider --provider host.tld` and
+  `raider provider add` on top of the declarative `.well-known/langertha.json`
+  manifest, with a local credential binding and alias. *Today: `raider provider
+  inspect` fetches, validates and shows a manifest; running a provider still goes
+  through its API key and `-e`.*
 - **Delegates: Codex & Claude Code** (ADR 0006) — `--use-codex` / `--use-claude`
   adding `ask_codex` / `ask_claude` tools driven through a narrow task contract, and
   `raider delegate inspect`; the official binaries own their own login.

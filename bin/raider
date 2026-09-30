@@ -25,6 +25,7 @@ exit Langertha::Raider::CLI::Main->new->run(@ARGV);
     raider config explain -m gpt-4o
     raider session list
     raider --continue "Now fix the first one"
+    raider provider inspect provider.example --json
     raider hall start --acp-port 38421
     raider acp prompt 127.0.0.1:38421 --raider bjorn "Summarize status"
 
@@ -68,7 +69,8 @@ without writing F<.raider.yml> or contacting a model; C</config> prints the
 same inside the REPL. The options may also come first
 (C<raider -e openai config explain>); there only the exact words
 C<config explain> are the subcommand, any other prompt starting with
-C<config> is sent as a prompt.
+C<config> is sent as a prompt. C<raider provider inspect HOST> fetches,
+validates and shows a provider's manifest; see L</PROVIDERS>.
 
 With C<--json>, C<--msgpack> or C<--yaml>, F<raider> prints one document
 describing the run instead of the human-oriented output, which is useful
@@ -483,21 +485,105 @@ outcome is C<unknown>. The context (F<.raider.md>, packs, configuration) is
 built fresh, not replayed. A session another raider has open ends F<raider>
 with exit status C<4>.
 
+=head1 PROVIDERS
+
+    raider provider inspect HOST[:PORT] | https://HOST[:PORT] [--json] [--allow-internal]
+
+fetches C<https://HOST[:PORT]/.well-known/langertha.json>, the provider
+manifest of ADR 0007, validates it with L<Langertha::Manifest> and shows
+what it declares: the provider id, the issuer, every endpoint (id,
+dialect, base URL, auth reference), every auth entry (id, type) and every
+model (id, endpoint, the capabilities it claims). Warnings follow for what
+this raider cannot use -- an endpoint dialect it has no adapter for, an
+auth type it cannot supply, a capability name Langertha does not know
+(treated as absent) -- and for an issuer that is not the origin the
+manifest came from or an endpoint on plain C<http> or an internal address.
+C<extensions> are shown as inert: kept as published, never interpreted,
+loaded or run. A manifest with a command-, code-, secret- or prompt-shaped
+field (C<command>, C<exec>, C<api_key>, C<system_prompt>, ...), an unknown
+field or another schema version is not valid.
+
+Inspecting stores nothing, binds no credential and trusts nothing: the
+manifest states what the provider claims. The fetch sends no API key, no
+C<Authorization> header and no cookie, and is bounded:
+
+=over
+
+=item * C<https> only; a target with userinfo, a query, a fragment or
+another path than the well-known one is a usage error.
+
+=item * at most 1 MiB of body, 10 seconds from resolving the host to the
+last byte, and 3 redirects, each within the origin (scheme, host and
+port). A redirect to another origin is not followed; it is reported with
+its target and the manifest counts as C<refused>.
+
+=item * the host is resolved once and every address it resolves to is
+checked; the request goes to a checked address, never to a second lookup
+of the name, while TLS still verifies the certificate against the name.
+Loopback, private (RFC 1918, shared address space, IPv6 unique local),
+link-local and reserved addresses are refused, unless C<--allow-internal>
+releases them. Cloud metadata addresses (C<169.254.169.254>,
+C<fd00:ec2::254>, ...), the unspecified address, multicast and
+C<240.0.0.0/4> are refused always. A host with one refused address among
+its addresses is refused.
+
+=back
+
+Using a provider (C<raider --provider HOST>, C<raider provider add>) is not
+there yet.
+
+=opt --allow-internal
+
+Releases loopback, private, link-local and reserved target addresses for
+this one inspection -- for a knarr or skeid you deliberately run on an
+internal address. Nothing remembers it.
+
+=head2 The provider document
+
+C<--json>, C<--msgpack> and C<--yaml> write one document (no stream):
+
+    {
+       "address" : "93.184.216.34",
+       "elapsed" : 0.214,
+       "final_url" : "https://provider.example/.well-known/langertha.json",
+       "manifest" : { "schema_version" : 1, "kind" : "langertha-provider", ... },
+       "notes" : [],
+       "redirects" : [],
+       "status" : "completed",
+       "url" : "https://provider.example/.well-known/langertha.json",
+       "version" : 1,
+       "warnings" : []
+    }
+
+C<status> is C<completed> for a valid manifest, C<refused> for a target
+address or redirect the rules above do not allow, and C<failed> for
+anything else: the network, TLS, an HTTP status, a limit, invalid JSON or
+an invalid manifest. C<manifest> is the validated manifest as
+L<Langertha::Manifest/to_hash> writes it; C<warnings> and C<notes> are
+one sentence each; C<url> is the manifest URL, C<final_url> the one the
+body came from after C<redirects>, C<address> the address connected to.
+C<refused> and C<failed> carry C<error> instead of C<manifest>, and a
+redirect that was not followed its target in C<location>. The version
+and compatibility rules are those of L</Versions>.
+
 =head1 EXIT STATUS
 
 =over
 
 =item C<0> -- success, including C<--help>, C<--version>, the exports, C<config explain>,
-C<session list>, C<session show>, C<session fork>, C<session rm> and
-leaving the REPL.
+C<session list>, C<session show>, C<session fork>, C<session rm>,
+C<provider inspect> of a valid manifest and leaving the REPL.
 
 =item C<1> -- the run failed: the engine, a tool or the network raised an
-error. With a machine output flag, the document says C<failed>.
+error. With a machine output flag, the document says C<failed>. For
+C<provider inspect>: the manifest was refused, could not be fetched or is
+not valid (the document says C<refused> or C<failed>).
 
 =item C<2> -- usage error: unknown option, a C<-o> that is not
 C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
 machine output flag, a machine output flag with C<-i>, or an unknown format
-version.
+version; for C<provider inspect> also no target or more than one, a
+target that is no host or C<https> origin, or a C<--stream-*> flag.
 
 =item C<3> -- configuration error: F<.raider.yml> cannot be read, the
 engine is unknown, or a pack detection rule is invalid.

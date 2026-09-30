@@ -14,6 +14,7 @@ use Langertha::Raider::ACP::CLI;
 use Langertha::Raider::CLI;
 use Langertha::Raider::CLI::Machine;
 use Langertha::Raider::CLI::Output;
+use Langertha::Raider::CLI::Provider;
 use Langertha::Raider::CLI::REPL;
 use Langertha::Raider::CLI::Runner;
 use Langertha::Raider::CLI::Sessions;
@@ -32,7 +33,7 @@ use Langertha::Raider::Skill;
 B<Internal module.> Its interface may change without notice.
 
 Everything F<raider> does with its command line: the C<hall>, C<acp>,
-C<config explain> and C<session> subcommands, option parsing, the skill exports, and
+C<config explain>, C<session> and C<provider inspect> subcommands, option parsing, the skill exports, and
 then either the REPL (L<Langertha::Raider::CLI::REPL>) or one prompt
 (L<Langertha::Raider::CLI::Runner>). L</run> returns the exit status.
 
@@ -41,18 +42,22 @@ then either the REPL (L<Langertha::Raider::CLI::REPL>) or one prompt
 =over
 
 =item C<0> -- success, including C<--help>, C<--version>, the exports, C<config explain>,
-C<session list>, C<session show>, C<session fork>, C<session rm> and
-leaving the REPL.
+C<session list>, C<session show>, C<session fork>, C<session rm>,
+C<provider inspect> of a valid manifest and leaving the REPL.
 
 =item C<1> -- the run failed: the engine, a tool or the network raised an
-error (with a machine format, the output is the C<failed> document).
+error (with a machine format, the output is the C<failed> document); for
+C<provider inspect>: the manifest was refused (address, redirect), could
+not be fetched or is not valid.
 
 =item C<2> -- usage error: unknown option, a C<-o> that is not
 C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
 machine format, a machine format with C<-i>, or an unknown machine format
 version; for sessions: a C<--session> value that is no session id,
 more than one of C<--session>, C<--continue> and C<--no-session>, an unknown
-or ambiguous session, or C<--continue> without any session.
+or ambiguous session, or C<--continue> without any session; for
+C<provider inspect>: no target or more than one, a target that is no
+host or https origin, or a C<--stream-*> flag.
 
 =item C<3> -- configuration error: F<.raider.yml> cannot be read, the
 engine is unknown, or a pack detection rule is invalid.
@@ -128,6 +133,7 @@ has in => (
 sub app_class     { 'Langertha::Raider::CLI' }
 sub config_class  { 'Langertha::Raider::Config' }
 sub machine_class { 'Langertha::Raider::CLI::Machine' }
+sub provider_class { 'Langertha::Raider::CLI::Provider' }
 sub repl_class    { 'Langertha::Raider::CLI::REPL' }
 sub runner_class  { 'Langertha::Raider::CLI::Runner' }
 sub session_store_class { 'Langertha::Raider::SessionStore' }
@@ -154,6 +160,9 @@ Usage: raider [options] [prompt...]
        raider session resume ID [options]  continue a session in the REPL
        raider session fork ID [--json]     a new session with its history
        raider session rm ID [--json]       delete a session
+       raider provider inspect HOST [--json] [--allow-internal]
+                                           fetch, validate and show a
+                                           provider's manifest
 
 Options:
   -e, --engine NAME        anthropic, openai, deepseek, groq, mistral, gemini,
@@ -398,6 +407,13 @@ sub run {
     shift @argv;
     Langertha::Raider::ACP::CLI->main(@argv);
     return EXIT_OK;
+  }
+
+  # raider provider inspect TARGET [options]. Only these two words make the
+  # subcommand; "raider provider is down?" stays a prompt.
+  if (@argv >= 2 && $argv[0] eq 'provider' && $argv[1] eq 'inspect') {
+    splice @argv, 0, 2;
+    return $self->provider_command(inspect => @argv);
   }
 
   # raider config explain [options]: prints where each setting comes from
@@ -693,6 +709,81 @@ sub session_command {
   my $in_use = $error =~ / is in use\z/;
   $self->_warn($error.($in_use ? ' by another raider' : '')."\n");
   return $in_use ? EXIT_SESSION_IN_USE : EXIT_RUN_ERROR;
+}
+
+=method provider_usage
+
+The C<raider provider inspect --help> text.
+
+=cut
+
+sub provider_usage { <<'USAGE' }
+Usage: raider provider inspect HOST[:PORT] | https://HOST[:PORT] [options]
+
+Fetches https://HOST[:PORT]/.well-known/langertha.json, validates it as a
+provider manifest and shows provider id, issuer, endpoints, auth and
+models. Nothing is stored and no credential is sent or bound.
+
+Options:
+      --allow-internal     Allow a loopback, private, link-local or reserved
+                           target address, for a deliberately released
+                           internal knarr or skeid (cloud metadata,
+                           multicast and unspecified addresses stay refused)
+      --json[=N]           Print one JSON document (also --msgpack, --yaml)
+      --no-color           Disable ANSI colors
+  -h, --help               Show this help
+
+Limits: https only, 1 MiB, 10 seconds, 3 redirects within the origin; a
+redirect to another origin is not followed.
+
+Exit status: 0 a valid manifest, 1 refused, not fetched or not valid,
+2 usage error.
+USAGE
+
+=method provider_command
+
+    my $exit = $main->provider_command(inspect => @argv);
+
+C<raider provider inspect TARGET [options]> through
+L<Langertha::Raider::CLI::Provider>. Takes C<--allow-internal>, a document
+format (C<--json>, C<--msgpack>, C<--yaml>; no stream), C<--no-color> and
+C<--help>; the other options of F<raider> are accepted and have no effect,
+as for the session commands. Exactly one target is a must.
+
+=cut
+
+sub provider_command {
+  my ( $self, $cmd, @argv ) = @_;
+  # --allow-internal belongs to this subcommand only, so it is taken out
+  # before the common options are parsed.
+  my $allow_internal = 0;
+  my @rest;
+  while (@argv) {
+    my $arg = shift @argv;
+    if ($arg eq '--') { push @rest, $arg, @argv; last }
+    if ($arg eq '--allow-internal') { $allow_internal = 1; next }
+    push @rest, $arg;
+  }
+  my ( $opt, @words ) = $self->parse_options(@rest) or return EXIT_USAGE;
+  if ($opt->{help}) {
+    $self->output->emit($self->provider_usage);
+    return EXIT_OK;
+  }
+  if (@words != 1) {
+    $self->_warn("Usage: raider provider inspect HOST[:PORT] | https://HOST[:PORT] [--json] [--allow-internal]\n");
+    return EXIT_USAGE;
+  }
+  $ENV{ANSI_COLORS_DISABLED} = 1 if $opt->{no_color} || $opt->{machine};
+  my $machine;
+  if (my $m = $opt->{machine}) {
+    if ($m->{stream}) {
+      $self->_warn('raider provider '.$cmd.": no --stream-* output, only a document\n");
+      return EXIT_USAGE;
+    }
+    $machine = $self->machine_class->new(%$m, out => $self->output->out);
+  }
+  return $self->provider_class->new(output => $self->output, err => $self->err)
+    ->inspect($words[0], allow_internal => $allow_internal, machine => $machine);
 }
 
 =method resolve_session

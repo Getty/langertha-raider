@@ -79,7 +79,17 @@ expect "config explain" '^engine: +openai' "$BIN" config explain -e openai -k no
 expect "session list" 'no sessions' "$BIN" session list
 run --export-skill "$work/RAIDER-SKILL.md" >/dev/null 2>&1 && [ -s "$work/RAIDER-SKILL.md" ] \
   || fail "--export-skill"
-echo "subcommands (hall: 11, acp: 3, config explain, session list, --export-skill): OK"
+# provider inspect loads Langertha::Manifest and resolves the host through
+# IO::Async's resolver (IO::Async::Resolver, loaded by name, runs lookups
+# in a forked worker). localhost resolves offline, and to loopback, so the
+# fetch is refused before any connection: exit 1 and a refused document.
+expect "provider inspect --help" '^Usage: raider provider inspect' "$BIN" provider inspect --help
+rc=0
+prov=$(run provider inspect localhost --json 2>&1) || rc=$?
+[ "$rc" -eq 1 ] || fail "provider inspect localhost: exit $rc, not 1 (124 is the ${tmo}s timeout): $prov"
+grep -q '"status" : "refused"' <<< "$prov" && grep -q 'loopback address' <<< "$prov" \
+  || fail "provider inspect localhost: no refused loopback document: $prov"
+echo "subcommands (hall: 11, acp: 3, config explain, session list, --export-skill, provider inspect): OK"
 
 # --- 3. the packed module set ---------------------------------------------------
 # Much of raider and Langertha loads by name at runtime (engines, plugins,

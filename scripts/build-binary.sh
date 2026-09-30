@@ -136,6 +136,8 @@ mods+=(-M Langertha)
 #   IO::Async::**         IO::Async::Internals::Connector (every outgoing
 #                         connect) and IO::Async::OS::linux load by name; a
 #                         binary without them hangs on its first HTTP request.
+#                         IO::Async::Resolver (the host lookup of `raider
+#                         provider inspect`) loads by name on first use too.
 #   Moose / Class::MOP    their meta classes and traits load by name.
 #   MooseX::NonMoose::**  its meta roles, by name (Langertha's engine bases).
 #   JSON::Schema::Modern::**, MooX::TypeTiny::**  OpenAPI::Modern (Role::OpenAPI)
