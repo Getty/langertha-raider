@@ -1,0 +1,306 @@
+package Langertha::Raider::Provider::Activation;
+# ABSTRACT: Internal activation of a provider manifest's endpoint as the engine of one raider run
+our $VERSION = '0.503';
+use Moose;
+use namespace::autoclean;
+use Future::AsyncAwait;
+use URI;
+use Langertha::Manifest;
+use Langertha::Raider::Provider::Fetch;
+
+=head1 SYNOPSIS
+
+    # Internal to Langertha-Raider -- no API promise.
+    my $activation = Langertha::Raider::Provider::Activation->new(
+      fetch => Langertha::Raider::Provider::Fetch->new( allow_internal => 0 ),
+    );
+    my $got = $activation->activate_f('provider.example',
+      model => 'example-model', has_api_key => 1)->get;
+    # { status => 'completed', engine_name => 'openai',
+    #   engine_class => 'Langertha::Engine::OpenAI',
+    #   url => 'https://provider.example/v1', model => 'example-model', ... }
+    # { status => 'usage' | 'refused' | 'failed', error => ... }
+
+=head1 DESCRIPTION
+
+B<Internal module.> Its interface may change without notice.
+
+C<raider --provider>: turns what a provider manifest (ADR 0007) claims
+into the engine of one run. Nothing is stored and nothing is trusted
+beyond this run: the release is the target named on the command line,
+as with C<-o url=>.
+
+=over
+
+=item 1. The manifest is fetched with L<Langertha::Raider::Provider::Fetch>
+and validated with L<Langertha::Manifest>.
+
+=item 2. B<The model.> The requested model must be a model id of the
+manifest. Without one, the manifest must list exactly one model id.
+
+=item 3. B<The endpoint> is the one the model is listed on. A model listed
+on several endpoints takes the one whose dialect raider has an adapter
+for; when that is more than one, raider does not choose.
+
+=item 4. B<The dialect> maps to a L<Langertha> engine class
+(L</engine_for_dialect>). An unknown dialect, or one raider cannot use
+(L</unsupported_dialect>), is an error -- never a guess.
+
+=item 5. B<The origin.> The endpoint's C<base_url> must be C<https> and of
+the same origin as the manifest, so a credential never goes to an origin
+the command line did not name. Its host is resolved and checked again,
+under the same address policy as the fetch (C<--allow-internal> releases
+both).
+
+=item 6. B<The credential> is the caller's: an endpoint with an
+C<auth_ref> needs one (C<has_api_key>), of an auth type raider knows.
+
+=back
+
+A model that does not declare C<tools_native> is a warning, not an error.
+
+=cut
+
+=attr fetch
+
+The L<Langertha::Raider::Provider::Fetch> the manifest comes through; its
+C<allow_internal> also releases the endpoint's host. Required.
+
+=cut
+
+has fetch => (
+  is       => 'ro',
+  isa      => 'Langertha::Raider::Provider::Fetch',
+  required => 1,
+);
+
+sub manifest_class { 'Langertha::Manifest' }
+
+# The adapter: manifest dialect => [ raider engine name, Langertha engine
+# class ]. It mirrors Langertha::Manifest::Builder's class => dialect table
+# the other way round. Each class takes the endpoint's base_url as its url.
+# anthropic-compat is the bare Anthropic-compatible base: no native
+# structured output, so response_format goes through the synthetic tool and
+# a forced tool_choice (ADR 0007, update of 2026-09-25).
+my %ENGINE_FOR_DIALECT = (
+  'openai-chat'      => [ openai             => 'Langertha::Engine::OpenAI' ],
+  'responses'        => [ responses          => 'Langertha::Engine::OpenAIResponses' ],
+  'perplexity-agent' => [ 'perplexity-agent' => 'Langertha::Engine::Perplexity' ],
+  'anthropic'        => [ anthropic          => 'Langertha::Engine::Anthropic' ],
+  'anthropic-compat' => [ 'anthropic-compat' => 'Langertha::Engine::AnthropicBase' ],
+  'gemini'           => [ gemini             => 'Langertha::Engine::Gemini' ],
+  'ollama'           => [ ollama             => 'Langertha::Engine::Ollama' ],
+  'aki'              => [ aki                => 'Langertha::Engine::AKI' ],
+);
+
+# Dialects Langertha knows but raider cannot run on, and why.
+my %UNSUPPORTED_DIALECT = (
+  'lmstudio' => "Langertha's native LM Studio engine has no tool calling, which raider needs",
+);
+
+=method engine_for_dialect
+
+    my ( $name, $class ) = $activation->engine_for_dialect('openai-chat');
+    # ( 'openai', 'Langertha::Engine::OpenAI' )
+
+The raider engine name and the L<Langertha> engine class of a manifest
+dialect; the empty list for a dialect raider has no adapter for. Also
+callable on the class.
+
+=method mapped_dialects
+
+The dialects L</engine_for_dialect> maps, sorted. Also callable on the
+class.
+
+=method unsupported_dialect
+
+    my $why = $activation->unsupported_dialect('lmstudio');
+
+Why raider cannot use a dialect Langertha knows, or C<undef>. Also callable
+on the class.
+
+=method unsupported_dialects
+
+The dialects L</unsupported_dialect> names, sorted. Also callable on the
+class.
+
+=cut
+
+sub engine_for_dialect {
+  my ( $self, $dialect ) = @_;
+  my $row = $ENGINE_FOR_DIALECT{$dialect} or return;
+  return @$row;
+}
+
+sub mapped_dialects {
+  my ( $self ) = @_;
+  return sort keys %ENGINE_FOR_DIALECT;
+}
+
+sub unsupported_dialect {
+  my ( $self, $dialect ) = @_;
+  return $UNSUPPORTED_DIALECT{$dialect};
+}
+
+sub unsupported_dialects {
+  my ( $self ) = @_;
+  return sort keys %UNSUPPORTED_DIALECT;
+}
+
+=method activate_f
+
+    my $got = await $activation->activate_f($target,
+      model => $model_or_undef, has_api_key => $bool);
+
+Resolves to a hash. C<status> is C<completed>, C<usage> (the command line
+names a target that is none, a model the manifest does not list, no model
+where it lists several, or no key where the endpoint needs one),
+C<refused> (the fetch policy, an endpoint that is not C<https> or not of
+the manifest's origin, or an endpoint address the policy refuses) or
+C<failed> (the fetch, an invalid manifest, a dialect or auth type raider
+cannot use, a manifest without models). Apart from C<completed>, C<error>
+says why.
+
+A C<completed> activation carries C<provider_id>, C<manifest_url>,
+C<endpoint> (its id), C<dialect>, C<engine_name>, C<engine_class>, C<url>
+(the endpoint's C<base_url>), C<model>, C<auth> (the auth id, or C<undef>),
+C<addresses> (of the endpoint host) and C<warnings>. It never carries a
+credential.
+
+=cut
+
+async sub activate_f {
+  my ( $self, $target, %opt ) = @_;
+  my $fetch = $self->fetch;
+  my $url = eval { $fetch->target_url($target) };
+  unless (defined $url) {
+    ( my $error = $@ ) =~ s/ at \S+ line \d+\.?\n?\z//s;
+    return { status => 'usage', error => $error };
+  }
+  my $report = await $fetch->fetch_f($url);
+  return { status => $report->{status}, error => $report->{error} }
+    unless $report->{status} eq 'completed';
+  my $manifest = eval { $self->manifest_class->from_json($report->{body}) };
+  unless ($manifest) {
+    ( my $error = $@ ) =~ s/ at \S+ line \d+\.?\n?\z//s;
+    return { status => 'failed', error => 'not a valid provider manifest: '.$error };
+  }
+  my $origin = $fetch->origin($report->{final_url} // $url);
+
+  my ( $model, $refusal ) = $self->choose_model($manifest, $opt{model});
+  return $refusal if $refusal;
+  my $endpoint = $manifest->endpoint($model->endpoint_ref);
+  my $what = "endpoint '".$endpoint->id."'";
+  my $dialect = $endpoint->dialect;
+
+  return { status => 'failed', error => $what.": dialect '".$dialect."' is unknown to this raider (no adapter for it)" }
+    unless $endpoint->is_known_dialect;
+  if ( my $why = $self->unsupported_dialect($dialect) ) {
+    return { status => 'failed', error => $what.": dialect '".$dialect."' is not supported: ".$why };
+  }
+  my ( $engine_name, $engine_class ) = $self->engine_for_dialect($dialect);
+  return { status => 'failed', error => $what.": dialect '".$dialect."' has no engine in this raider" }
+    unless $engine_class;
+
+  my $base = URI->new($endpoint->base_url);
+  return { status => 'refused', error => $what.': base_url '.$endpoint->base_url.' is not https' }
+    unless lc( $base->scheme // '' ) eq 'https';
+  my $endpoint_origin = $fetch->origin($base) // '';
+  return { status => 'refused', error => $what.': base_url '.$endpoint->base_url
+    .' is not of the origin the manifest came from ('.$origin.'); no credential goes to another origin' }
+    unless $endpoint_origin eq $origin;
+
+  my $auth;
+  if ( defined $endpoint->auth_ref ) {
+    $auth = $manifest->auth_entry($endpoint->auth_ref);
+    return { status => 'failed', error => $what.": auth '".$auth->id."' has type '".$auth->type
+      ."', which this raider cannot supply" }
+      unless $auth->is_known_type;
+    return { status => 'usage', error => $what." needs an API key (auth '".$auth->id."', type "
+      .$auth->type.'); pass it with -k KEY' }
+      unless $opt{has_api_key};
+  }
+
+  my $checked = await $fetch->check_host_f($base->host);
+  return { status => $checked->{status}, error => $what.': '.$checked->{error} } if $checked->{status};
+
+  my @warnings;
+  push @warnings, "model '".$model->id."' does not declare tools_native; raider works through tool calls"
+    unless $model->supports('tools_native');
+
+  return {
+    status       => 'completed',
+    provider_id  => $manifest->provider_id,
+    manifest_url => $report->{final_url} // $url,
+    endpoint     => $endpoint->id,
+    dialect      => $dialect,
+    engine_name  => $engine_name,
+    engine_class => $engine_class,
+    url          => $endpoint->base_url,
+    model        => $model->id,
+    auth         => $auth ? $auth->id : undef,
+    addresses    => $checked->{addresses},
+    warnings     => \@warnings,
+  };
+}
+
+=method choose_model
+
+    my ( $model, $refusal ) = $activation->choose_model($manifest, $requested);
+
+The L<Langertha::Manifest::Model> entry the run uses (see L</DESCRIPTION>),
+or C<undef> and the C<usage> or C<failed> result that says why not.
+
+=cut
+
+sub choose_model {
+  my ( $self, $manifest, $requested ) = @_;
+  my @models = @{ $manifest->models };
+  my %seen;
+  my @ids = grep { !$seen{$_}++ } map { $_->id } @models;
+  my $listed = @ids ? ' (models: '.join(', ', @ids).')' : ' (it lists none)';
+  my $id;
+  if ( defined $requested && length $requested ) {
+    return ( undef, { status => 'usage', error => "model '".$requested."' is not in the manifest of "
+      .$manifest->provider_id.$listed } )
+      unless $seen{$requested};
+    $id = $requested;
+  }
+  else {
+    return ( undef, { status => 'failed', error => 'the manifest of '.$manifest->provider_id.' lists no models' } )
+      unless @ids;
+    return ( undef, { status => 'usage', error => 'the manifest of '.$manifest->provider_id
+      .' lists several models; choose one with -m MODEL'.$listed } )
+      if @ids > 1;
+    ( $id ) = @ids;
+  }
+  my @candidates = grep { $_->id eq $id } @models;
+  return ( $candidates[0] ) if @candidates == 1;
+  my @usable = grep {
+    my $endpoint = $manifest->endpoint($_->endpoint_ref);
+    $endpoint->is_known_dialect && $self->engine_for_dialect($endpoint->dialect);
+  } @candidates;
+  return ( $usable[0] ) if @usable == 1;
+  return ( $candidates[0] ) unless @usable;
+  return ( undef, { status => 'failed', error => "model '".$id."' is offered on several endpoints ("
+    .join(', ', map { $_->endpoint_ref.': '.$manifest->endpoint($_->endpoint_ref)->dialect } @usable)
+    .'); raider does not choose between them' } );
+}
+
+__PACKAGE__->meta->make_immutable;
+
+1;
+
+=seealso
+
+=over
+
+=item * L<Langertha::Raider::Provider::Fetch>
+
+=item * L<Langertha::Raider::EngineResolver> -- builds the engine from the activation
+
+=item * L<Langertha::Manifest::Builder> -- core's engine => dialect table this one mirrors
+
+=back
+
+=cut

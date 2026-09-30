@@ -26,6 +26,7 @@ exit Langertha::Raider::CLI::Main->new->run(@ARGV);
     raider session list
     raider --continue "Now fix the first one"
     raider provider inspect provider.example --json
+    raider --provider provider.example -m example-model -k "$KEY" "Summarize README.md"
     raider hall start --acp-port 38421
     raider acp prompt 127.0.0.1:38421 --raider bjorn "Summarize status"
 
@@ -70,7 +71,8 @@ same inside the REPL. The options may also come first
 (C<raider -e openai config explain>); there only the exact words
 C<config explain> are the subcommand, any other prompt starting with
 C<config> is sent as a prompt. C<raider provider inspect HOST> fetches,
-validates and shows a provider's manifest; see L</PROVIDERS>.
+validates and shows a provider's manifest, and C<raider --provider HOST>
+runs on the endpoint it declares; see L</PROVIDERS>.
 
 With C<--json>, C<--msgpack> or C<--yaml>, F<raider> prints one document
 describing the run instead of the human-oriented output, which is useful
@@ -131,7 +133,19 @@ the engine's own default. C<openrouter> needs one.
 =opt -k, --api-key KEY
 
 The API key, over C<api_key:> in F<.raider.yml> and the engine's
-environment variable.
+environment variable. With C<--provider> the only source of the key,
+together with C<-o api_key=>.
+
+=opt --provider HOST[:PORT] | https://HOST[:PORT]
+
+Runs on the model endpoint a provider's manifest declares, for this one
+run; see L</Using a provider>. Not with C<-e>, C<-o engine=>, C<-o url=>
+or C<config explain>.
+
+=opt --allow-internal
+
+With C<--provider> (and C<provider inspect>): releases loopback, private,
+link-local and reserved provider addresses; see L</PROVIDERS>.
 
 =opt -o, --option KEY=VALUE
 
@@ -529,14 +543,64 @@ its addresses is refused.
 
 =back
 
-Using a provider (C<raider --provider HOST>, C<raider provider add>) is not
-there yet.
+C<--allow-internal> releases loopback, private, link-local and reserved
+target addresses for this one inspection -- for a knarr or skeid you
+deliberately run on an internal address. Nothing remembers it.
 
-=opt --allow-internal
+=head2 Using a provider
 
-Releases loopback, private, link-local and reserved target addresses for
-this one inspection -- for a knarr or skeid you deliberately run on an
-internal address. Nothing remembers it.
+    raider --provider HOST[:PORT] | https://HOST[:PORT] [-m MODEL] [-k KEY] [--allow-internal] [options] [prompt...]
+
+fetches and validates the manifest as C<provider inspect> does (same
+limits and address rules) and runs on the endpoint of one of its models:
+one-shot, machine output and the REPL work as with C<-e>. Nothing is
+stored and nothing is remembered: naming the host on the command line is
+the whole release, as with C<-o url=>. C<raider provider add> with a
+stored alias and credential is not there yet. The rules are provisional:
+
+=over
+
+=item * B<The model.> C<-m> (or C<-o model=>) must be a model id of the
+manifest. Without it the manifest must list exactly one model id;
+several are a usage error that lists them. C<model:> in F<.raider.yml>
+does not apply. A model listed on several endpoints runs on the one whose
+dialect raider has an adapter for; with more than one such endpoint raider
+does not choose and the run is refused.
+
+=item * B<The engine> follows from the endpoint's dialect:
+C<openai-chat> runs as C<openai>, C<anthropic> as C<anthropic>, C<gemini>
+as C<gemini>, C<ollama> as C<ollama> (native API), C<responses>,
+C<perplexity-agent>, C<anthropic-compat> and C<aki> on their own
+Langertha engines -- C<anthropic-compat> without native structured output,
+through a synthetic tool and a forced tool choice instead (ADR 0007). The
+engine's C<url> is the endpoint's C<base_url>, whatever F<.raider.yml>
+says; the other engine options of F<.raider.yml> and C<-o> apply as with
+C<-e>. A dialect this raider has no adapter for is an error, and so is
+C<lmstudio>: Langertha's native LM Studio engine has no tool calling.
+
+=item * B<The key> comes only from C<-k> or C<-o api_key=>. Neither
+C<api_key:> in F<.raider.yml> nor any environment variable is used: a key
+for another provider never reaches this one. An endpoint with an auth
+reference needs a key (a usage error without one); an auth type other than
+C<api_key> is an error. An endpoint without auth gets no key.
+
+=item * B<The origin.> The endpoint's C<base_url> must be C<https> and of
+the same origin (scheme, host, port) as the manifest; anything else is
+refused, so the key goes nowhere but the origin named on the command line.
+The endpoint's host is resolved and checked again before the run, under
+the rules of C<provider inspect> (C<--allow-internal> releases it the same
+way). The model requests are POSTs, which are not redirected, and the
+engine's synchronous requests (the REPL's C</model>) follow no redirect.
+
+=item * A model that does not declare C<tools_native> is a warning on
+stderr, not an error: raider works through tool calls.
+
+=back
+
+Failures are reported on stderr before anything runs, without a machine
+document: a usage error exits with C<2>, a provider that cannot be used as
+it is (refused, not fetched, not valid, an unknown dialect or auth type)
+with C<1>.
 
 =head2 The provider document
 
@@ -577,13 +641,20 @@ C<provider inspect> of a valid manifest and leaving the REPL.
 =item C<1> -- the run failed: the engine, a tool or the network raised an
 error. With a machine output flag, the document says C<failed>. For
 C<provider inspect>: the manifest was refused, could not be fetched or is
-not valid (the document says C<refused> or C<failed>).
+not valid (the document says C<refused> or C<failed>). For C<--provider>
+also: its endpoint cannot be used (another origin, not C<https>, a refused
+address, a dialect or auth type this raider has no adapter for, no
+models, a model on several endpoints); see L</Using a provider>.
 
 =item C<2> -- usage error: unknown option, a C<-o> that is not
 C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
 machine output flag, a machine output flag with C<-i>, or an unknown format
 version; for C<provider inspect> also no target or more than one, a
-target that is no host or C<https> origin, or a C<--stream-*> flag.
+target that is no host or C<https> origin, or a C<--stream-*> flag; for
+C<--provider> a target that is none, C<-e>, C<-o engine=>, C<-o url=> or
+C<config explain> with it, a model the manifest does not list, no C<-m>
+where it lists several, or no C<-k> where the endpoint needs a key; and
+C<--allow-internal> without C<--provider>.
 
 =item C<3> -- configuration error: F<.raider.yml> cannot be read, the
 engine is unknown, or a pack detection rule is invalid.

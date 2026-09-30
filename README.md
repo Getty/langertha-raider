@@ -114,6 +114,7 @@ raider [options] [prompt...]        run a prompt (or open the REPL)
 raider config explain [options]     show each effective setting and its source
 raider session list | show | resume | fork | rm     see Sessions
 raider provider inspect HOST        show a provider's manifest, see Providers
+raider --provider HOST [options]    run on a provider's manifest endpoint, see Providers
 raider hall <subcommand>            the optional Raider Hall daemon
 raider acp <subcommand>             the bundled ACP client
 ```
@@ -314,8 +315,37 @@ the host name). Loopback, private, link-local and reserved addresses are refused
 unless `--allow-internal` releases them for a knarr or skeid you run yourself; cloud
 metadata, multicast and unspecified addresses are refused always.
 
-Using a provider — `raider --provider HOST`, `raider provider add` with a stored,
-local credential binding — is still planned (see Roadmap).
+`raider --provider HOST` runs on the endpoint a manifest declares, for one run and
+with nothing stored — naming the host on the command line is the whole release, as
+with `-o url=`:
+
+```bash
+raider --provider provider.example -m example-model -k "$KEY" "Summarize README.md"
+raider --provider knarr.lan:8443 --allow-internal -k "$KEY"      # the REPL
+```
+
+The rules are provisional:
+
+- **Model**: `-m` must be a model id of the manifest; without it the manifest must
+  list exactly one. `model:` in `.raider.yml` does not apply.
+- **Engine**: from the endpoint's dialect — `openai-chat` runs as `openai`,
+  `anthropic`, `gemini` and `ollama` as themselves, `responses`, `perplexity-agent`,
+  `anthropic-compat` (without native structured output) and `aki` on their own
+  Langertha engines, with the endpoint's `base_url` as URL. An unknown dialect is an
+  error, never a guess; so is `lmstudio` (Langertha's native LM Studio engine has no
+  tool calling). Other `.raider.yml` and `-o` engine options apply as with `-e`;
+  `-e`, `-o engine=` and `-o url=` are refused next to `--provider`.
+- **Key**: only `-k` (or `-o api_key=`), never `.raider.yml` or an environment
+  variable, so a key meant for another provider never reaches this one. An endpoint
+  with an auth reference needs one; an endpoint without auth gets none.
+- **Origin**: the endpoint must be `https` and of the manifest's own origin, and its
+  host is checked again under the address rules above (`--allow-internal` releases
+  both). Model requests are POSTs and are not redirected; the engine's other
+  requests follow no redirect.
+- A model that does not declare `tools_native` is a warning, not an error.
+
+`raider provider add` with a stored alias and credential is still planned (see
+Roadmap).
 
 ## Tools
 
@@ -624,8 +654,8 @@ vocabulary live in [`CONTEXT.md`](CONTEXT.md); it lands in small vertical slices
 - **Provider discovery** (ADR 0007) — `raider --provider host.tld` and
   `raider provider add` on top of the declarative `.well-known/langertha.json`
   manifest, with a local credential binding and alias. *Today: `raider provider
-  inspect` fetches, validates and shows a manifest; running a provider still goes
-  through its API key and `-e`.*
+  inspect` fetches, validates and shows a manifest, and `raider --provider HOST -k KEY`
+  runs on its endpoint for one run, storing nothing.*
 - **Delegates: Codex & Claude Code** (ADR 0006) — `--use-codex` / `--use-claude`
   adding `ask_codex` / `ask_claude` tools driven through a narrow task contract, and
   `raider delegate inspect`; the official binaries own their own login.

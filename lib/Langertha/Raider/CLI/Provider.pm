@@ -1,11 +1,12 @@
 package Langertha::Raider::CLI::Provider;
-# ABSTRACT: Internal provider subcommand of the raider CLI: inspect a provider manifest
+# ABSTRACT: Internal provider commands of the raider CLI: inspect a manifest, activate it for --provider
 our $VERSION = '0.503';
 use Moose;
 use namespace::autoclean;
 use Langertha::Manifest;
 use Langertha::Manifest::Builder;
 use URI;
+use Langertha::Raider::Provider::Activation;
 use Langertha::Raider::Provider::Fetch;
 
 =head1 SYNOPSIS
@@ -27,6 +28,10 @@ endpoints, auth mechanisms and models -- together with what this raider
 cannot use (an unknown dialect, auth type or capability) and the inert
 C<extensions>. Nothing is stored, no credential is bound and nothing is
 trusted: a manifest states what a provider claims (ADR 0007).
+
+C<raider --provider>: L</activate> picks the endpoint of the manifest a
+run uses (L<Langertha::Raider::Provider::Activation>) and reports why it
+cannot, for L<Langertha::Raider::CLI::Main>.
 
 =attr output
 
@@ -60,8 +65,9 @@ has fetch_args => (
   default => sub { {} },
 );
 
-sub fetch_class    { 'Langertha::Raider::Provider::Fetch' }
-sub manifest_class { 'Langertha::Manifest' }
+sub fetch_class      { 'Langertha::Raider::Provider::Fetch' }
+sub activation_class { 'Langertha::Raider::Provider::Activation' }
+sub manifest_class   { 'Langertha::Manifest' }
 
 has _known_capability => (
   is      => 'ro',
@@ -127,6 +133,40 @@ sub inspect {
     $self->_err('raider provider inspect: '.$doc->{status}.': '.$doc->{error}."\n");
   }
   return $manifest ? 0 : 1;
+}
+
+=method activate
+
+    my ( $exit, $activation ) = $provider->activate($target,
+      allow_internal => $bool, model => $model, has_api_key => $bool);
+
+C<raider --provider TARGET>: the endpoint of the provider's manifest the
+run uses, through L<Langertha::Raider::Provider::Activation>. Returns
+C<undef> and the completed activation, with its warnings written to
+L</err>; or, after writing why to L</err>, just the exit status: C<2> when
+the command line has to change (a target that is none, a model the
+manifest does not list, no model where it lists several, no key where
+the endpoint needs one), C<1> when the provider cannot be used as it is
+(refused, not fetched, not valid, not usable by this raider).
+
+=cut
+
+sub activate {
+  my ( $self, $target, %opt ) = @_;
+  my $activation = $self->activation_class->new(
+    fetch => $self->fetcher(allow_internal => $opt{allow_internal} ? 1 : 0),
+  );
+  my $got = $activation->activate_f($target,
+    model       => $opt{model},
+    has_api_key => $opt{has_api_key} ? 1 : 0,
+  )->get;
+  unless ($got->{status} eq 'completed') {
+    my $status = $got->{status} eq 'usage' ? '' : $got->{status}.': ';
+    $self->_err('raider --provider: '.$status.$self->output->error_text($got->{error})."\n");
+    return $got->{status} eq 'usage' ? 2 : 1;
+  }
+  $self->_err('raider --provider: warning: '.$_."\n") for @{ $got->{warnings} };
+  return ( undef, $got );
 }
 
 =method document

@@ -48,7 +48,10 @@ C<provider inspect> of a valid manifest and leaving the REPL.
 =item C<1> -- the run failed: the engine, a tool or the network raised an
 error (with a machine format, the output is the C<failed> document); for
 C<provider inspect>: the manifest was refused (address, redirect), could
-not be fetched or is not valid.
+not be fetched or is not valid; for C<--provider> also: its endpoint is
+not usable (another origin, not https, a refused address, a dialect or
+auth type this raider has no adapter for, no models, a model on several
+endpoints).
 
 =item C<2> -- usage error: unknown option, a C<-o> that is not
 C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
@@ -57,7 +60,11 @@ version; for sessions: a C<--session> value that is no session id,
 more than one of C<--session>, C<--continue> and C<--no-session>, an unknown
 or ambiguous session, or C<--continue> without any session; for
 C<provider inspect>: no target or more than one, a target that is no
-host or https origin, or a C<--stream-*> flag.
+host or https origin, or a C<--stream-*> flag; for C<--provider>: a
+target that is none, C<-e>, C<-o engine=>, C<-o url=> or C<config explain>
+with it, a model the manifest does not list, no C<-m> where it lists
+several models, or no C<-k> where the endpoint needs a key;
+C<--allow-internal> without C<--provider>.
 
 =item C<3> -- configuration error: F<.raider.yml> cannot be read, the
 engine is unknown, or a pack detection rule is invalid.
@@ -171,6 +178,15 @@ Options:
                            env var — anthropic > openai > deepseek > ...)
   -m, --model NAME         Model identifier (engine-specific cheap default)
   -k, --api-key KEY        API key (overrides *_API_KEY env var)
+      --provider HOST[:PORT] | https://HOST[:PORT]
+                           Run on the model endpoint the provider's
+                           manifest (/.well-known/langertha.json) declares;
+                           nothing is stored. -m picks one of its models
+                           (a must when it lists several); the key comes
+                           only from -k, never from .raider.yml or the
+                           environment. Not with -e, -o engine= or -o url=
+      --allow-internal     With --provider: allow a loopback, private,
+                           link-local or reserved provider address
   -o, --option KEY=VALUE   Engine attribute (repeatable), e.g.
                            -o temperature=0.2 -o response_size=4096
                            Merged over .raider.yml; CLI wins. raider's own
@@ -280,6 +296,8 @@ sub parse_options {
     local $SIG{__WARN__} = sub { $self->_warn(@_) };
     $parser->getoptionsfromarray(\@argv,
       'e|engine=s'            => \$opt{engine},
+      'provider=s'            => \$opt{provider},
+      'allow-internal'        => \$opt{allow_internal},
       'm|model=s'             => \$opt{model},
       'r|root=s'              => \$opt{root},
       'M|mission=s'           => \$opt{mission},
@@ -474,6 +492,10 @@ sub run {
   if ($session_cmd && $session_cmd ne 'resume') {
     return $self->session_command($session_cmd, $session_id, $opt);
   }
+  if (my $problem = $self->provider_usage_error($opt, $config_cmd)) {
+    $self->_warn($problem."\n");
+    return EXIT_USAGE;
+  }
   if ($session_cmd) {
     # resume ID is the REPL on that session.
     for my $flag (grep { $opt->{$_->[0]} } [ machine => 'a machine output format' ],
@@ -509,6 +531,20 @@ sub run {
     return EXIT_CONFIG;
   }
   $args{config} = $config;
+
+  # --provider: the manifest decides engine, model and URL before anything
+  # is built or saved.
+  if (defined $opt->{provider}) {
+    my $cli_opts = $opt->{engine_options};
+    my ( $exit, $activation ) = $self->provider_class->new(output => $self->output, err => $self->err)->activate(
+      $opt->{provider},
+      allow_internal => $opt->{allow_internal},
+      model          => $opt->{model} // $cli_opts->{model},
+      has_api_key    => length($opt->{api_key} // $cli_opts->{api_key} // '') ? 1 : 0,
+    );
+    return $exit if defined $exit;
+    $args{provider} = $activation;
+  }
 
   my ( @skill_specs, @cli_profiles );
   if ($opt->{profile_claude}) {
@@ -784,6 +820,34 @@ sub provider_command {
   }
   return $self->provider_class->new(output => $self->output, err => $self->err)
     ->inspect($words[0], allow_internal => $allow_internal, machine => $machine);
+}
+
+=method provider_usage_error
+
+    my $problem = $main->provider_usage_error($opt, $config_cmd);
+
+Why C<--provider> or C<--allow-internal> cannot go with the rest of the
+command line, or C<undef>. C<--provider> decides the engine and its URL,
+so it excludes C<-e>, C<-o engine=> and C<-o url=>, and it does not go with
+C<config explain>; C<--allow-internal> only goes with C<--provider>.
+
+=cut
+
+sub provider_usage_error {
+  my ( $self, $opt, $config_cmd ) = @_;
+  unless (defined $opt->{provider}) {
+    return $opt->{allow_internal} ? '--allow-internal: only with --provider' : undef;
+  }
+  my $cli_opts = $opt->{engine_options} // {};
+  my @conflicts = (
+    ( defined $opt->{engine}     ? '-e/--engine' : () ),
+    ( exists $cli_opts->{engine} ? '-o engine='  : () ),
+    ( exists $cli_opts->{url}    ? '-o url='     : () ),
+  );
+  return '--provider: not with '.join(', ', @conflicts).'; the provider manifest decides the engine and its URL'
+    if @conflicts;
+  return '--provider: not with config explain' if $config_cmd;
+  return;
 }
 
 =method resolve_session

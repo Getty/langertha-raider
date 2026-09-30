@@ -408,6 +408,26 @@ async sub _fetch_f {
     return $failed->($error);
   }
 
+  my $checked = await $self->check_host_f($host);
+  return { %report, %$checked } if $checked->{status};
+
+  return await $self->_hops_f($http, $uri, $checked->{addresses}, \%report, $failed, $refused);
+}
+
+=method check_host_f
+
+    my $checked = await $fetch->check_host_f('provider.example');
+    # { addresses => [ '93.184.216.34' ] }
+    # { status => 'refused' | 'failed', error => ... }
+
+Resolves C<$host> (an address literal stands for itself) and checks every
+address with L</check_addresses>. Resolves to the addresses, or to the
+C<refused> or C<failed> status and why.
+
+=cut
+
+async sub check_host_f {
+  my ( $self, $host ) = @_;
   my @addresses;
   if ( $self->_is_literal($host) ) {
     @addresses = ( $host );
@@ -417,15 +437,14 @@ async sub _fetch_f {
     if ( $resolved->is_failed ) {
       my ( $error ) = $resolved->failure;
       $error =~ s/\s+\z//;
-      return $failed->('cannot resolve '.$host.': '.$error);
+      return { status => 'failed', error => 'cannot resolve '.$host.': '.$error };
     }
     @addresses = $resolved->get;
   }
   if ( my $refusal = $self->check_addresses($host, @addresses) ) {
-    return $refused->($refusal);
+    return { status => 'refused', error => $refusal };
   }
-
-  return await $self->_hops_f($http, $uri, \@addresses, \%report, $failed, $refused);
+  return { addresses => \@addresses };
 }
 
 async sub _hops_f {

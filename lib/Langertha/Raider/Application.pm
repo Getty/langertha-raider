@@ -103,8 +103,24 @@ sub _build_engine_resolver {
     ( $explicit->{engine}  ? ( engine  => $self->engine_name ) : () ),
     ( $explicit->{model}   ? ( model   => $self->model )       : () ),
     ( $explicit->{api_key} ? ( api_key => $self->api_key )     : () ),
+    ( $self->has_provider  ? ( provider => $self->provider )   : () ),
   );
 }
+
+=attr provider
+
+The completed provider activation of C<raider --provider>
+(L<Langertha::Raider::Provider::Activation/activate_f>), or none. It
+decides engine, model and URL; see
+L<Langertha::Raider::EngineResolver/provider>.
+
+=cut
+
+has provider => (
+  is        => 'ro',
+  isa       => 'HashRef',
+  predicate => 'has_provider',
+);
 
 =attr model
 

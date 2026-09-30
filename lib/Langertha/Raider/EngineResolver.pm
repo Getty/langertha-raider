@@ -30,6 +30,10 @@ with, and the constructor arguments of the L<Langertha> engine class --
 the F<.raider.yml> engine options, the C<-o> engine options on top, and
 the model and key. Builds nothing but the engine itself.
 
+With L</provider> (C<raider --provider>) the provider activation decides
+engine, engine class, model and URL instead, and the API key comes only
+from the command line -- see L</provider>.
+
 =cut
 
 =attr config
@@ -58,6 +62,40 @@ has engine_options => (
   default => sub { {} },
 );
 
+=attr provider
+
+The completed activation of C<raider --provider>
+(L<Langertha::Raider::Provider::Activation/activate_f>), or none. With it:
+
+=over
+
+=item * L</engine_name>, L</engine_class> and L</model> are the
+activation's; C<-o engine=>, C<engine:>, C<model:> in F<.raider.yml>, the
+table defaults and the C<*_API_KEY> autodetection do not apply.
+
+=item * L</engine_args> set C<url> to the endpoint's C<base_url>, whatever
+F<.raider.yml> says.
+
+=item * L</api_key> comes only from C<-k> or C<-o api_key=>: never from
+F<.raider.yml> and never from the environment, and C<api_key> is always
+passed to the engine (C<undef> without a key), so the engine class does
+not read its C<LANGERTHA_*_API_KEY> either. A key configured for another
+provider never reaches this one.
+
+=item * L</build_engine> turns off redirects on the engine's synchronous
+user agent, so a key does not follow a redirect to another origin (chat
+requests are POSTs, which neither HTTP backend redirects).
+
+=back
+
+=cut
+
+has provider => (
+  is        => 'ro',
+  isa       => 'HashRef',
+  predicate => 'has_provider',
+);
+
 =attr engine_name
 
 Langertha engine class shortcut, passed as C<engine>. Defaults to
@@ -76,6 +114,7 @@ has engine_name => (
 
 sub _build_engine_name {
   my ($self) = @_;
+  return $self->provider->{engine_name} if $self->has_provider;
   my $opt = $self->engine_options->{engine};
   return $opt if defined $opt && length $opt;
   my $yml = $self->config->engine;
@@ -215,6 +254,7 @@ has model => (
 
 sub _build_model {
   my ($self) = @_;
+  return $self->provider->{model} if $self->has_provider;
   return $self->engine_options->{model}
     // $self->engine_yml_options->{model}
     // $DEFAULT_MODEL{$self->engine_name}
@@ -251,7 +291,8 @@ has api_key => (
 
 sub _build_api_key {
   my ($self) = @_;
-  my $configured = $self->engine_options->{api_key} // $self->engine_yml_options->{api_key};
+  return $self->engine_options->{api_key} // '' if $self->has_provider;
+  my $configured =$self->engine_options->{api_key} // $self->engine_yml_options->{api_key};
   return $configured if defined $configured;
   my $var = $self->env_var_for_engine($self->engine_name);
   return '' unless $var;
@@ -261,12 +302,13 @@ sub _build_api_key {
 =method api_key_env
 
 Name of the environment variable of the current engine's API key, for
-display; C<undef> for engines without one.
+display; C<undef> for engines without one and with L</provider>.
 
 =cut
 
 sub api_key_env {
   my ($self) = @_;
+  return undef if $self->has_provider;
   return $self->env_var_for_engine($self->engine_name);
 }
 
@@ -279,6 +321,7 @@ engine: NAME> for a name it does not know.
 
 sub engine_class {
   my ($self) = @_;
+  return $self->provider->{engine_class} if $self->has_provider;
   my $class = $ENGINE_CLASS{$self->engine_name}
     or die "Unknown engine: ".$self->engine_name."\n";   # die: the message is shown as is
   return $class;
@@ -330,6 +373,10 @@ sub engine_args {
   delete @args{qw( model api_key )};
   $args{api_key} = $self->api_key if length $self->api_key;
   $args{model}   = $self->model   if $self->has_model;
+  if ($self->has_provider) {
+    $args{url}     = $self->provider->{url};
+    $args{api_key} = length $self->api_key ? $self->api_key : undef;
+  }
   return %args;
 }
 
@@ -337,7 +384,8 @@ sub engine_args {
 
     my $engine = $resolver->build_engine(mcp_servers => \@clients);
 
-Loads L</engine_class> and builds it with L</engine_args>.
+Loads L</engine_class> and builds it with L</engine_args>; with
+L</provider> the engine's synchronous user agent follows no redirect.
 
 =cut
 
@@ -345,7 +393,12 @@ sub build_engine {
   my ( $self, %extra ) = @_;
   my $class = $self->engine_class;
   Module::Runtime::require_module($class);
-  return $class->new($self->engine_args(%extra));
+  my $engine = $class->new($self->engine_args(%extra));
+  if ($self->has_provider && $engine->can('user_agent')) {
+    $engine->user_agent->max_redirect(0);
+    $engine->user_agent->requests_redirectable([]);
+  }
+  return $engine;
 }
 
 __PACKAGE__->meta->make_immutable;

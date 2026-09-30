@@ -120,6 +120,13 @@ Revision history for Langertha-Raider
       models, with warnings for unknown dialects, auth types and capabilities.
       --json, --msgpack and --yaml give one versioned document. Requires
       Langertha::Manifest from Langertha core.
+    - New raider --provider HOST[:PORT] runs one invocation on the endpoint
+      a provider manifest declares, mapped to the matching Langertha engine;
+      nothing is stored. -m picks the model (required when the manifest
+      lists several). The key comes only from -k or -o api_key=, never from
+      *_API_KEY in the environment or .raider.yml. The endpoint must be https
+      on the manifest's origin; internal addresses need --allow-internal, as
+      for provider inspect. Not combinable with -e, -o engine= or -o url=.
 
   [Packs]
     - Packs are also found in <project>/.raider/packs/<name>/ and
