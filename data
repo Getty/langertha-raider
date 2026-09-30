@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-30T08:26:04Z
+claimed_by: raider-worker-k127
+class: standard
+completed: 2026-09-30T08:26:04Z
+created: 2026-09-30T06:00:55Z
+id: 127
+priority: medium
+started: 2026-09-30T08:16:33Z
+status: done
+tags:
+- adr-0011
+- config
+title: 'ADR 0011 A3: <root>/.raider/instructions.md als Projekt-Instruktionsquelle'
+updated: 2026-09-30T08:26:04Z
+---
+
+Nach #125. .raider/instructions.md neben Legacy .raider.md; beide vorhanden -> neu gilt, Konflikt gemeldet (wie A2). mission_source, _instructions_text, Skill.pm und /prompt-Ziel anpassen.
+
+2026-09-30 08:18 Plan: new internal Langertha::Raider::Instructions (root; native_file = Home->project_base/instructions.md, legacy_file = <root>/.raider.md; file = native when -f else legacy, evaluated live (not cached) so /reload and /prompt see files created mid-session; is_native, label, ignored_files same shape as Config; text). Application gets instructions attr + instructions_class; _instructions_text/mission_source/persona pointer use it; legacy-only strings stay byte-identical (label '.raider.md', path(root)->child('.raider.md')). explain_config gains ignored_instructions (printed under the instructions: line); CLI::Main warns once on stderr after the app is built. PromptBuilder writes instructions->file (fallback .raider.md, never creates .raider/instructions.md). REPL banner, /reload, Skill.pm use the label. Home instructions.md out of scope.
+
+2026-09-30 08:24 Done (uncommitted, tree commit-ready). New internal Langertha::Raider::Instructions (root; native_file = Home->project_base/instructions.md, legacy_file = <root>/.raider.md; file/is_native/label/file_exists/text/ignored_files, same shape as Config; file is decided per call, not cached, so /reload and /prompt see a file created mid-session). Application: instructions attr + instructions_class; _instructions_text, mission_source (returns the label) and the default persona pointer ('via C<LABEL> in working dir') use it; explain_config gains ignored_instructions_files. CLI::Main warns once on stderr after the app is built ('warning: ignoring <abs>/.raider.md: both .raider.md and .raider/instructions.md exist; only .raider/instructions.md is used'), also under -M/--bare (file-level conflict, like config.yml). config explain prints '  ignored file ...' under the instructions: line. PromptBuilder writes instructions->file (both/new -> .raider/instructions.md, legacy/none -> .raider.md; never creates .raider/). REPL banner, /reload, Skill.pm persona use the label; help/usage/POD/bin/raider/README updated. Legacy byte-identity verified: HEAD lib vs new lib, mission + mission_source + config_report + banner + skill persona, 6 cases (.raider.md / none x default/-M/--bare) -> zero diff. Tests: new t/28_instructions_native_file.t (8 subtests); 19 files / 132 tests pass (00, 25_raider_home, 26, 28x2, 29, 30_cli_reload, 34, 36, 37, 38, 39, 49_mission_scope, 53_repl_shell, 63, 64, 65, 66, 71), installed Langertha. Not run: full suite, verify-binary.sh (heavy; new module is a plain use, so pp packs it). Open: (1) ADR 0014 lists instructions sources as -M/.raider.md/default -- now also .raider/instructions.md (doc amend); (2) ADR 0017 internal list should name ::Instructions; (3) ADR 0004 trust gating not applied (same as legacy); (4) Changes not edited -- proposed line in report.
+
+Committed as 6dbf26d
