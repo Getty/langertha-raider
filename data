@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-30T04:42:37Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-09-30T04:42:32Z
+created: 2026-09-30T03:54:59Z
+id: 115
+priority: low
+started: 2026-09-30T04:21:40Z
+status: done
+tags:
+- history
+- render
+- cosmetic
+title: 'History-Renderer: Anthropic tool_result-Bildblock als [image] statt <image>'
+updated: 2026-09-30T04:42:37Z
+---
+
+Aus k112-Review. Ein Anthropic-tool_result-Bildblock (Core k326, {type=>"image", source=>...}) rendert als "<image>", die Responses/Gemini-Bilder seit k112 als "[image]". Vereinheitlichen; Test in t/86.
+
+2026-09-30 04:30 Done: Anthropic tool_result image block {type=>'image', source=>...} (core to_anthropic, k326) renders as [image] like Responses input_image / Gemini inlineData; one-line change next to the input_image rule. Covered in the same new subtest in t/86 (also asserts base64 never leaks, no <image>/ref strings). Full suite PASS as on k114. Drift (not fixed, out of scope): an Anthropic document block {type=>'document', source=>{type=>'text', data=>...}} (core k326 maps MCP embedded text resources to it) still renders as bare '<document>' -- its text is lost; search_result blocks likewise render only as a marker. Candidate follow-up card on the raider board.
+
+Committed in d0f9812 (with k114).
