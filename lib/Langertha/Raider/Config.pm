@@ -72,7 +72,8 @@ value replaces the home's
 
 =back
 
-The writers never touch the home file. When the home file is the file in
+The project writers never touch the home file (L</update_home> is the only
+one, with no caller yet). When the home file is the file in
 use -- raider runs in the home directory itself -- it is read once, as the
 project file, and there is no home layer.
 
@@ -761,8 +762,66 @@ sub _update {
   my ( $self, $code ) = @_;
   my $data = $self->data;
   return unless $code->($data);
-  $self->file->spew_utf8(YAML::PP->new->dump_string($data));
+  $self->file->spew_utf8($self->_dump($data));
   $self->clear_data;
+  return 1;
+}
+
+# The one YAML dump, for the project writers and update_home alike.
+sub _dump { YAML::PP->new->dump_string($_[1]) }
+
+=method update_home
+
+    $config->update_home(sub {
+      my ( $data ) = @_;
+      $data->{default}{model} = 'gpt-4o';
+      return 1;             # true: write it
+    });
+
+Internal, no caller yet besides tests. The one writer of the home file
+L</home_file>, shaped like the project writers: the callback gets the
+parsed data of that file (empty when the file is absent), changes it in
+place and returns true to have it written; false leaves the disk alone.
+Returns true when it wrote.
+
+Nothing but this method writes the home file. It creates F<~/.raider>
+(mode 0700) and the file (mode 0600, the home file may hold an C<api_key>)
+when absent. The new content is dumped first, written to a temporary file
+next to the target and renamed over it, so a failure never leaves a partial
+file; the previous file is kept as F<config.yml.bak>, one generation,
+replaced by every write. A home file that does not parse (or whose
+top level is no mapping) croaks like L</data> does and stays untouched.
+
+When raider runs in the home directory itself, L</home_file> is the project
+file: the same file is written, and the caches are dropped. Croaks when
+there is no home at all.
+
+=cut
+
+sub update_home {
+  my ( $self, $code ) = @_;
+  my $file = $self->home_file;
+  croak __PACKAGE__.'->update_home: there is no home directory' unless defined $file;
+  my $data = $self->_load($file);
+  return unless $code->($data);
+  my $yaml = $self->_dump($data);
+  my $dir  = $file->parent;
+  unless ( -d $dir ) {
+    $dir->mkpath( { mode => 0700 } );
+    chmod 0700, $dir;
+  }
+  my $tmp = $dir->tempfile('.config.yml.XXXXXX');
+  $tmp->spew_utf8($yaml);
+  chmod 0600, $tmp;
+  if ( -f $file ) {
+    my $bak = $dir->child('config.yml.bak');
+    $file->copy($bak);
+    chmod 0600, $bak;
+  }
+  $tmp->move($file);
+  $self->clear_data;
+  $self->clear_home_data;
+  $self->clear_uses_home;
   return 1;
 }
 
