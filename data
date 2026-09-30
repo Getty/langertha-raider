@@ -1,0 +1,41 @@
+---
+claimed_at: 2026-09-30T06:47:53Z
+claimed_by: raider-worker-k119
+class: standard
+completed: 2026-09-30T06:47:47Z
+created: 2026-09-30T05:54:50Z
+id: 119
+priority: medium
+started: 2026-09-30T06:13:15Z
+status: done
+tags:
+- provider-discovery
+- m5
+- cli
+title: 'raider --provider HOST: Manifest-Endpunkt ephemer als Engine nutzen (Slice
+  2 von #23)'
+updated: 2026-09-30T06:47:53Z
+---
+
+Aus #23 abgespalten, baut auf #118 (Provider::Fetch) auf. Ephemer: nichts speichern, kein ~/.raider (ADR 0011), keine gespeicherte Zustimmung (ADR 0005) - die Freigabe ist der explizit genannte Host auf der Kommandozeile, wie heute bei -o url=.
+
+- raider --provider HOST[:PORT]|https-URL [-m MODEL] [-k KEY] [--allow-internal]: Manifest per Provider::Fetch holen + validieren, Modell waehlen, Endpunkt des Modells per Dialect auf eine Langertha-Engine abbilden (Raider-Adapter, ADR 0007 Update: anthropic-compat konservativ), Engine mit base_url als url bauen, normaler Lauf/REPL.
+- Konservative Defaults (vorlaeufig, von Getty zu bestaetigen):
+  1. Modellwahl: -m muss eine Manifest-Modell-id sein; ohne -m nur wenn das Manifest genau ein Modell hat, sonst Fehler mit Liste der ids.
+  2. Credentials: nur explizit per -k/--api-key (bzw. -o api_key=); keine *_API_KEY-Autowahl fuer Provider-Endpunkte. Endpunkt mit auth_ref ohne Key -> Fehler; unbekannter auth type -> Fehler.
+  3. Origin: Endpunkt-base_url muss https und selber Origin wie das Manifest sein, sonst verweigert (kein Key an fremde Origins, ADR 0007). Kein Override-Flag in diesem Slice.
+  4. Adresspolitik: Endpunkt-Host unterliegt derselben Adresspruefung wie der Manifest-Abruf (--allow-internal gilt fuer beide).
+  5. Unbekannter Dialect -> Fehler (kein Raten). --provider zusammen mit -e/--engine oder -o engine=/url= -> Fehler.
+  6. Modell ohne tools_native -> Warnung (raider braucht Tools), kein Abbruch.
+- Tests mit lokalem Fake-HTTPS-Server (t/lib/Test/Raider/FakeHTTPS.pm), keine Live-Calls; Engine-Mapping pro bekanntem Dialect.
+- Doku: bin/raider POD, README Providers.
+
+Rest von #23 (provider add, Alias, Credential-Bindung, erneute Zustimmung bei Origin/Auth-Aenderung) bleibt blockiert (ADR 0005/0011).
+
+2026-09-30 06:19 Plan: new internal Langertha::Raider::Provider::Activation (fetch via Provider::Fetch, validate, pick model/endpoint, origin/https/address/auth/dialect checks, dialect->engine table). Main: --provider/--allow-internal, conflict checks, activation before app build (exit 1 provider-side, 2 command-line-side). EngineResolver gains 'provider' (engine name/class/url/model from the activation; key only from -k/-o api_key, never .raider.yml or env; url forced; api_key always passed so engines never read LANGERTHA_*_API_KEY; sync LWP redirects off). Dialect table: openai-chat->openai/OpenAI, responses->OpenAIResponses, perplexity-agent->Perplexity, anthropic->Anthropic, anthropic-compat->AnthropicBase (no native structured output = conservative per ADR 0007 update), gemini->Gemini, ollama->Ollama (native), aki->AKI; lmstudio unsupported (native LMStudio engine composes no Role::Tools).
+
+2026-09-30 06:45 Implemented: Provider/Activation.pm (new, internal), Fetch check_host_f (fetch uses it too), EngineResolver/Application 'provider', CLI::Provider->activate, Main --provider/--allow-internal + conflict checks + usage/exit docs, bin/raider 'Using a provider', README Providers+Roadmap, verify-binary step 2 (--provider localhost refused). Found: Langertha engines resolve their host themselves, so the use-time address check cannot pin the connection (DNS-rebinding window) -> core need. Found: Net::Async::HTTP follows GET redirects with all headers and LWP keeps x-api-key across origins; chat is POST (not redirected), sync UA gets max_redirect 0; async GETs not covered (raider sends none with a key). Found: Gemini engine with api_key undef warns and sends key= (no-auth gemini endpoint). New tests t/69, t/70 pass; 3 mutants (redirect off, use-time host check, explicit undef key) all killed.
+
+2026-09-30 06:46 Done, commit-ready (uncommitted). New: lib/Langertha/Raider/Provider/Activation.pm (internal: fetch+validate, model/endpoint choice, dialect->engine table, https+same-origin, use-time address check, auth/key presence, tools_native warning), t/69_provider_activation.t, t/70_cli_provider_run.t. Changed: Provider/Fetch.pm (check_host_f, used by the fetch too), EngineResolver.pm + Application.pm ('provider': engine/class/model/url from the activation, key only from -k/-o api_key and always passed explicitly, sync UA max_redirect 0), CLI/Provider.pm (activate), CLI/Main.pm (--provider, --allow-internal, conflicts, usage + exit docs), bin/raider (OPTIONS + 'Using a provider' + exit status), README (Providers, commands, Roadmap), scripts/verify-binary.sh (step 2: --provider localhost refused). Verified against installed Langertha (0.503 = langertha main): t/67 t/68 t/69 t/70 t/59 t/39 t/49_cli_machine_output t/26 = 8 files, 71 tests PASS; 3 mutants killed. Not run: full suite, binary build/verify (all core engine classes are already packed from the packlist; verify-binary step 2 needs a run). Open for Getty: provisional defaults (model choice, credentials, origin, lmstudio unsupported, same model on several usable endpoints -> refuse, provider failures give no machine document).
+
+2026-09-30 06:47 Committed as f379bd2
