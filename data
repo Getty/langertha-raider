@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-30T07:54:24Z
+claimed_by: raider-worker-k135
+class: standard
+completed: 2026-09-30T07:54:24Z
+created: 2026-09-30T06:47:39Z
+id: 135
+priority: low
+started: 2026-09-30T07:52:30Z
+status: done
+tags:
+- bug
+- cli
+- provider-discovery
+title: REPL-Banner zeigt im --provider-Modus 'no API key required' trotz -k
+updated: 2026-09-30T07:54:30Z
+---
+
+Aus #119: Mit raider --provider HOST -k KEY zeigt das REPL-Banner "api key: (no API key required)". Soll anzeigen, dass ein Key gesetzt ist (maskiert, wie bei -e), bzw. "none" nur, wenn der Endpunkt keinen braucht. Test in t/70 oder REPL-Banner-Test.
+
+2026-09-30 07:53 Banner (REPL.pm) ignored the provider: api_key_env is undef under --provider, so it printed '(no API key required)'. Now asks the resolver: provider with auth -> 'auth ID (set|missing)' (key never printed), no auth -> '(no API key required)'. Test t/71_repl_banner_provider_key.t (fails without fix); t/70,39,53,56 pass.
+
+2026-09-30 07:54 Committed as 44b339a
