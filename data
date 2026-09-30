@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-09-30T06:44:49Z
+claimed_by: raider-worker-k121
+class: standard
+completed: 2026-09-30T06:44:49Z
+created: 2026-09-30T06:00:10Z
+id: 121
+priority: medium
+started: 2026-09-30T06:24:33Z
+status: done
+tags:
+- adr-0005
+- tools
+- policy
+title: 'ADR 0005 B2: interner Gate-Schritt im Per-Call-Dispatch (allow/deny/ask, Default
+  allow)'
+updated: 2026-09-30T06:44:49Z
+---
+
+Nach dem Dispatch-Fix (B1, #120). Interner Gate-Schritt in der Per-Call-Dispatch-Funktion: liefert allow | deny(reason) | ask. Default: alles erlauben (Verhalten unveraendert). deny -> Fehler-Result ans Modell mit Begruendung. Lebt in raider, kein Core-Hook noetig. Kein Policy-Format in diesem Slice (offen). ask ohne Approval-UX: vorerst wie deny mit erklaertem Fehler (one-shot/headless) - zur Bestaetigung durch Getty markiert.
+
+2026-09-30 aus #122: Argument-Validierung sitzt in _dispatch_tool_call_f NACH plugin_before_tool_call (prüft die tatsächlich laufenden, ggf. vom Plugin umgeschriebenen Argumente). Der Gate-Schritt dieser Karte gehört danach (ADR 0005: validate -> policy -> approval), nicht in einen Plugin-Hook davor.
+
+2026-09-30 06:29 Plan: internal ro attribute _tool_gate (CodeRef, ctor arg only) + _gate_tool_call in _dispatch_tool_call_f after the k122 inputSchema check; canonical call {name, source, arguments}; source from _gather_tools_f (engine:N / inline / catalog:NAME / raider). deny/ask -> error result via _after_tool_call_f (one tool.call + one failed tool.result). Test t/103_raider_tool_gate.t.
+
+2026-09-30 06:34 PROVISIONAL, for Getty to confirm: (1) ask without approval UX is refused like deny, text: "Tool call 'X' was not run: it needs approval (REASON), and this raid has no way to ask for it." (isError, raid goes on). (2) A gate returning anything but {verdict=>allow|deny|ask} croaks (fail loud, tool not run, raid future fails) rather than silently denying. (3) Source names the gate sees are internal and provisional: 'raider' (self-tools), 'inline', 'engine:N' (1-based engine MCP server), 'catalog:NAME'; undef for a tool no source offers. (4) Gate is sync (pure policy); approval (B5/k124) would be its own async step. (5) Self-tools (raider_ask_user etc.) pass the gate too -- one path for all calls.
+
+2026-09-30 06:34 Done: lib/Langertha/Raider.pm -- internal ro attribute _tool_gate (CodeRef, constructor-only, predicate _has_tool_gate; no public POD, no config/CLI switch); _gate_tool_call (default allow without a gate; croaks on a malformed verdict) and _gate_refused_tool_result; _gather_tools_f returns a third value name->source ('engine:N','inline','catalog:NAME','raider'), kept in state->{tool_sources} (raid_f + _refresh_tools_f). _dispatch_tool_call_f consults the gate AFTER plugin_before_tool_call and the k122 inputSchema check with the canonical call {name, source, arguments} -- the exact args that then run. deny/ask -> error result via _after_tool_call_f (flag_errors): one tool.call + one failed tool.result, counted in metrics, tool not run, raid continues. Resumed calls (k120 path) pass the same gate. Test t/103_raider_tool_gate.t (Test2::V0, offline, 13 subtests): 11/13 red against HEAD Raider.pm (the two green ones: no-gate baseline, and validate-before-gate ordering which is vacuous without a gate), 13/13 green. Targeted run (installed Langertha): 15 files, 143 tests pass (00,100,101,102,103,86,87,95,99,97,62,47,81,93,94). No user-visible change with no gate -> no Changes entry needed. Nothing needed in langertha core; binary unaffected (no new module/dep).
+
+Committed as 3ac6c8b
