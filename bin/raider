@@ -50,6 +50,14 @@ the file in use and the ignored one. What F<raider> saves (C</model>,
 C<--claude>, C<--openai>, C<--skills>) goes to the file in use, and to
 F<.raider.yml> when there is none.
 
+The project instructions follow the same rule: F<.raider/instructions.md>
+in the working directory, or else the legacy F<.raider.md> there, is added
+to the default persona. Where this page names F<.raider.md>, the file in
+use is meant. When both exist, only F<.raider/instructions.md> is read,
+F<raider> warns that it ignores F<.raider.md>, and C<config explain> names
+the ignored file under C<instructions:>. The prompt-builder (C</prompt>)
+writes the file in use, and F<.raider.md> when there is none.
+
 Interactive mode (C<-i>) opens a REPL with conversation history retained
 across turns. With L<Term::ReadLine::Gnu> installed, line editing and
 persistent input history (F<~/.raider_history>) are enabled automatically —
@@ -169,7 +177,8 @@ instead and never reach the engine.
 
 The working directory, default the current one. The file tools are
 confined to it, C<bash> starts in it, and F<.raider/config.yml> (or
-F<.raider.yml>), F<.raider.md> and F<.raider/> are read from it.
+F<.raider.yml>), F<.raider/instructions.md> (or F<.raider.md>) and
+F<.raider/> are read from it.
 
 =opt -M, --mission TEXT
 

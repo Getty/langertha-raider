@@ -48,3 +48,10 @@ model's description of its tools as a side effect.
 ## Source
 
 karr #34 (from #19); follows ADR 0004 and ADR 0012.
+
+## Update (2026-09-30, karr #127)
+
+With ADR 0011 the project instructions file is `.raider/instructions.md`; legacy
+`.raider.md` is read when the new file is absent. Wherever this ADR says `.raider.md`,
+read "the project instructions file". The reported instructions source is `-M`,
+`.raider/instructions.md`, `.raider.md` or `default`.

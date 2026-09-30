@@ -131,11 +131,12 @@ Options:
                            configure raider instead
   -r, --root DIR           Working directory (default: cwd). File tools are
                            confined to this directory.
-  -M, --mission TEXT       Replace the persona / .raider.md instructions
-                           (skills, packs and the tool descriptions still apply)
-      --bare               Isolated context: no .raider.md, skills, packs:,
-                           default packs or detection (--pack NAME and /pack
-                           NAME still work)
+  -M, --mission TEXT       Replace the persona and the instructions file
+                           (.raider/instructions.md, else .raider.md; skills,
+                           packs and the tool descriptions still apply)
+      --bare               Isolated context: no instructions file, skills,
+                           packs:, default packs or detection (--pack NAME and
+                           /pack NAME still work)
   -i, --interactive        REPL mode (default on a TTY with no prompt / pipe)
       --json[=N]           Print one JSON document for the run and exit
       --msgpack[=N]        The same document as MessagePack
@@ -173,8 +174,8 @@ REPL slash commands:
 | `/clear`               | Reset conversation history and token counters       |
 | `/metrics`             | Cumulative raid metrics                             |
 | `/stats`               | Tokens in / out / total (when trace is on)          |
-| `/reload`              | Re-read `.raider.md`, re-detect packs               |
-| `/prompt`              | Launch the prompt-builder (edits `.raider.md`)      |
+| `/reload`              | Re-read the instructions file, re-detect packs      |
+| `/prompt`              | Launch the prompt-builder (edits the instructions)  |
 | `/skill [PATH]`        | Export the plain-markdown how-to-use doc            |
 | `/skill-claude [PATH]` | Export a Claude Code `SKILL.md` with frontmatter    |
 | `/config`              | Show each setting and where it came from            |
@@ -246,9 +247,12 @@ under one of raider's own keys (other than `skills` and `detect`, whose `detect:
 map holds per-pack detection rules) is a hard error naming the offending key —
 raider stops instead of loading half of it.
 
-`.raider.md` in the working root is the **persona / mission** file: drop one in to
-rename Langertha, reshape her, or replace her entirely; `/prompt` builds one
-interactively and `/reload` hot-swaps it. `-M TEXT` replaces the instructions for
+`.raider/instructions.md` in the working root — or the legacy `.raider.md` there —
+is the **persona / mission** file: drop one in to rename Langertha, reshape her, or
+replace her entirely; `/prompt` builds one interactively (in the file in use, else
+`.raider.md`) and `/reload` hot-swaps it. With both present only
+`.raider/instructions.md` is read; raider warns about `.raider.md` and
+`raider config explain` lists it as ignored. `-M TEXT` replaces the instructions for
 one run without touching the file.
 
 To see where every effective value came from — a flag, a `.raider.yml` layer, an
@@ -409,7 +413,8 @@ eval, and reports what it installed. It never loops. (Note that `perl -c` runs
 ## Personas, packs and skills
 
 - A **persona** is tone and style; the default is Langertha in a terse "caveman"
-  register. Replace it with a `.raider.md` file or `-M`.
+  register. Replace it with a `.raider/instructions.md` (or `.raider.md`) file or
+  `-M`.
 - A **pack** is a small, toggleable bundle (a `SKILL.md` plus an optional `pack.yml`)
   stacked on top of the mission. Bundled packs: **caveman**, **polite**, **teacher**
   (persona group, one active at a time) and **git-guru**, **testing-fu**,
@@ -646,8 +651,8 @@ vocabulary live in [`CONTEXT.md`](CONTEXT.md); it lands in small vertical slices
   `~/.raider/` home (`config.yml`, `instructions.md`, `skills/`, `raiders/<name>.yml`,
   `sessions/`, `memory/`) that never bleeds into projects, a `<project>/.raider/`
   config layer, and a `raider config migrate` from today's `.raider.yml` / `.raider.md`.
-  *Today: per-project `.raider/config.yml` (or the legacy `.raider.yml`) and
-  `.raider.md` only.*
+  *Today: per-project `.raider/config.yml` and `.raider/instructions.md` (or the
+  legacy `.raider.yml` and `.raider.md`) only.*
 - **Inspectable context & diagnostics** (ADR 0004) — a per-call, itemized
   `ContextPlan` you can read with `raider context explain`, a `raider doctor`
   health check, per-directory instruction walking, and an explicit workspace-trust

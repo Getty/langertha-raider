@@ -4,7 +4,6 @@ our $VERSION = '0.503';
 use Moose;
 use namespace::autoclean;
 use utf8;
-use Path::Tiny;
 use Langertha::Raider;
 
 =head1 SYNOPSIS
@@ -17,13 +16,15 @@ use Langertha::Raider;
 B<Internal module.> Its interface may change without notice.
 
 The C</prompt> REPL command and C<--customize-prompt>: a second raider on the
-same engine whose only job is to write F<.raider.md> with the user. It reads
-lines from L</in> until C</done> (reload the mission and return) or
-C</cancel>.
+same engine whose only job is to write the project instructions file with
+the user: the one in use (L<Langertha::Raider::Instructions/file>), so
+F<.raider/instructions.md> when it exists, else F<.raider.md>; it never
+creates F<.raider/instructions.md>. It reads lines from L</in> until
+C</done> (reload the mission and return) or C</cancel>.
 
 =attr app
 
-The L<Langertha::Raider::CLI> whose F<.raider.md> is edited. Required.
+The L<Langertha::Raider::CLI> whose instructions file is edited. Required.
 
 =attr output
 
@@ -53,15 +54,15 @@ has in => (
 );
 
 sub _mission {
-  my ( $self, $file ) = @_;
-  my $current = -f $file ? $file->slurp_utf8 : '(no .raider.md yet — Langertha default persona is active)';
+  my ( $self, $file, $label ) = @_;
+  my $current = -f $file ? $file->slurp_utf8 : '(no '.$label.' yet — Langertha default persona is active)';
   return <<"EOM";
 You are the raider prompt-builder. Your only job right now is to help the user
-craft a .raider.md file that customizes the persona and instructions of
+craft a $label file that customizes the persona and instructions of
 "raider" (the CLI agent; the default persona is Langertha, a viking
 shield-maiden).
 
-Current .raider.md content:
+Current $label content:
 ---
 $current
 ---
@@ -91,11 +92,12 @@ sub run {
   my ($self) = @_;
   my $app  = $self->app;
   my $out  = $self->output;
-  my $file = path($app->root)->child('.raider.md');
+  my $instructions = $app->instructions;
+  my $file = $instructions->file;
 
   my $builder_raider = Langertha::Raider->new(
     engine         => $app->_engine,
-    mission        => $self->_mission($file),
+    mission        => $self->_mission($file, $instructions->label),
     max_iterations => 20,
   );
 

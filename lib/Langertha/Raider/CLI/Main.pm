@@ -198,11 +198,12 @@ Options:
   -r, --root DIR           Working directory (default: cwd). File tools are
                            confined to this directory.
   -M, --mission TEXT       Instructions: replaces the default persona and
-                           .raider.md; skills, packs and the tool
+                           the instructions file (.raider/instructions.md,
+                           else .raider.md); skills, packs and the tool
                            description still apply
-      --bare               Isolated context: no .raider.md, skills, packs:,
-                           default packs or detection (--pack NAME and
-                           /pack NAME still work)
+      --bare               Isolated context: no instructions file, skills,
+                           packs:, default packs or detection (--pack NAME
+                           and /pack NAME still work)
   -i, --interactive        REPL mode (default when stdin is a TTY with no
                            prompt argv and no pipe; forces it otherwise)
       --json[=N]           Print one JSON document for the run and exit
@@ -582,6 +583,9 @@ sub run {
     $self->_warn($self->output->error_text($@)."\n");
     return EXIT_CONFIG;
   }
+  # A legacy .raider.md next to .raider/instructions.md is not used, and
+  # said so (ADR 0011), like the config file above.
+  $self->_warn('warning: ignoring '.$_->{file}.': '.$_->{reason}."\n") for $app->instructions->ignored_files;
 
   if ($config_cmd) {
     $self->output->config_report($app->explain_config);

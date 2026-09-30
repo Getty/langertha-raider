@@ -206,10 +206,11 @@ sub banner {
       : '(no API key required)';
   my $model = $app->has_model ? $app->model : '(engine default)';
   my $source = $app->mission_source;
-  my $persona = $source eq '-M'         ? 'from -M (.raider.md not used)'
-              : $source eq '.raider.md' ? 'custom (.raider.md loaded)'
-              :                           'Langertha (default)';
-  $persona .= ', bare (no .raider.md or skills, only explicit packs)' if $app->bare;
+  my $file   = $app->instructions->label;
+  my $persona = $source eq '-M'   ? 'from -M ('.$file.' not used)'
+              : $source eq $file  ? 'custom ('.$file.' loaded)'
+              :                     'Langertha (default)';
+  $persona .= ', bare (no '.$file.' or skills, only explicit packs)' if $app->bare;
 
   $out->emit($out->c(brand => $LOGO));
   $out->emit($out->c(accent => ' perl agent - powered by Langertha'), "\n\n");

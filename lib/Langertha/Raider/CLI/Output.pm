@@ -152,8 +152,10 @@ Prints a report of L<Langertha::Raider::Application/explain_config>: the
 config file in use and any config file ignored next to it (a legacy
 F<.raider.yml> beside F<.raider/config.yml>); one line per
 setting with its value, source, what it overrides and whether it applies to
-the engine or to raider; the instructions source (C<-M>, C<.raider.md>,
-C<default>) with C<(bare)> under C<--bare>; each pack with its state, the
+the engine or to raider; the instructions source (C<-M>,
+C<.raider/instructions.md>, C<.raider.md>, C<default>) with C<(bare)> under
+C<--bare>, and any instructions file ignored next to the one in use (a
+legacy F<.raider.md> beside F<.raider/instructions.md>); each pack with its state, the
 kind of place it was found in (C<project>, C<home>, C<shipped>, C<env>)
 and why it is on or off; the pack directories that were skipped, and why; the perl tools grant; and
 each mounted tool with its source and effect classes (C<unknown> for a tool
@@ -172,6 +174,9 @@ sub config_report {
   $self->emit($self->c(meta => 'engine: '), $self->c(title => $report->{engine}), "\n");
   $self->emit($self->c(meta => 'instructions: '), $self->c(title => $report->{instructions}),
     $self->c(meta => $report->{bare} ? ' (bare)' : ''), "\n") if defined $report->{instructions};
+  for my $ign (@{ $report->{ignored_instructions_files} // [] }) {
+    $self->emit('  ', $self->c(warn => 'ignored file '.$ign->{file}.': '.$ign->{reason}), "\n");
+  }
   for my $v (@{ $report->{values} }) {
     my $value = ref $v->{value} ? $json->encode($v->{value}) : $v->{value} // '';
     my $from  = 'from '.$v->{source};

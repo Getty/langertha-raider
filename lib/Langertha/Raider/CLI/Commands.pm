@@ -88,8 +88,8 @@ sub cmd_help {
     '  /clear                reset conversation history',
     '  /metrics              show cumulative raid metrics',
     '  /stats                show token usage (when trace is on)',
-    '  /reload               reload .raider.md, re-detect packs',
-    '  /prompt               launch the prompt-builder (edits .raider.md)',
+    '  /reload               reload the instructions file, re-detect packs',
+    '  /prompt               launch the prompt-builder (edits the instructions file)',
     '  /skill [PATH]         export plain-markdown skill doc',
     '  /skill-claude [PATH]  export Claude Code SKILL.md with frontmatter',
     '  /config               show each setting and where it came from',
@@ -144,9 +144,10 @@ sub cmd_reload {
   my @detected = $app->redetect_packs;
   my $new = $app->reload_mission;
   my $source = $app->mission_source;
-  my $status = $source eq '-M'         ? '-M mission kept, .raider.md not used'
-             : $source eq '.raider.md' ? 'custom (.raider.md loaded)'
-             :                           'Langertha (default, no .raider.md)';
+  my $file   = $app->instructions->label;
+  my $status = $source eq '-M'  ? '-M mission kept, '.$file.' not used'
+             : $source eq $file ? 'custom ('.$file.' loaded)'
+             :                    'Langertha (default, no '.$file.')';
   $self->output->say_meta('mission reloaded: '.$status.' ('.length($new).' chars)');
   $self->output->say_meta('detected packs: '.join(', ', @detected)) if @detected;
   return;

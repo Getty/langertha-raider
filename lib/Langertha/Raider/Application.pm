@@ -17,6 +17,7 @@ use Langertha::Raider::WebTools  qw( build_web_tools_server );
 use Langertha::Raider::PerlTools qw( build_perl_tools_server );
 use Langertha::Raider::Packs     qw( build_packs );
 use Langertha::Raider::Config;
+use Langertha::Raider::Instructions;
 use Langertha::Raider::Detect;
 use Langertha::Raider::EngineResolver;
 use Langertha::Raider::ToolEffects;
@@ -178,14 +179,14 @@ has api_key => (
 =attr mission
 
 System prompt of the Raider, compiled from separate items (ADR 0004,
-ADR 0014): the instructions (a generic assistant persona plus
-F<.raider.md>), the tool description, the loaded skills and the active
-packs. The tool description lists the tools of the mounted tool servers
+ADR 0014): the instructions (a generic assistant persona plus the project
+instructions file, L</instructions>), the tool description, the loaded
+skills and the active packs. The tool description lists the tools of the mounted tool servers
 -- the same servers the engine gets -- each as C<name(required, [optional])>
 from its input schema (ADR 0005); a tool that is not mounted is not
 described. A C<mission> passed to the constructor (C<-M>) replaces the
 instructions item only, also across L</reload_mission>; the other items
-still apply. With L</bare> the skills, F<.raider.md> and all packs not
+still apply. With L</bare> the skills, the instructions file and all packs not
 switched on by C<--pack> or C</pack> are left out.
 
 =cut
@@ -207,7 +208,8 @@ has _explicit_mission => (
 
 =attr bare
 
-C<--bare>: an isolated context. No F<.raider.md>, no skills, no pack
+C<--bare>: an isolated context. No instructions file (F<.raider.md>,
+F<.raider/instructions.md>), no skills, no pack
 detection, and no packs from C<packs:> or C<enabled_by_default>;
 C<--pack NAME> and C</pack NAME> still switch a pack on explicitly. What
 remains is the instructions (the default persona, or the C<-M> text) and
@@ -235,20 +237,17 @@ sub _build_mission {
   return join "\n\n---\n", @items;
 }
 
-# The instructions item: the -M text, or the default persona with
-# .raider.md.
+# The instructions item: the -M text, or the default persona with the
+# project instructions file (.raider/instructions.md, else .raider.md).
 sub _instructions_text {
   my ($self) = @_;
   return $self->_explicit_mission if $self->_has_explicit_mission;
   my $base = $self->_persona_text;
   return $base if $self->bare;
-  my $custom_file = path($self->root)->child('.raider.md');
-  if (-f $custom_file) {
-    my $custom = eval { $custom_file->slurp_utf8 };
-    if (defined $custom && length $custom) {
-      $base .= "\n\n---\nUser's custom instructions (from $custom_file):\n\n$custom\n";
-    }
-  }
+  my $instructions = $self->instructions;
+  my $custom = $instructions->text;
+  $base .= "\n\n---\nUser's custom instructions (from ".$instructions->file."):\n\n$custom\n"
+    if defined $custom;
   return $base;
 }
 
@@ -309,9 +308,13 @@ You have no yield / ask / abort tool. Task done: plain text reply. User
 answers in the next turn.
 EOM
 
-sub _persona_body { <<'EOM' }
+# Points at the instructions file in use (.raider.md in a legacy project).
+sub _persona_body {
+  my ($self) = @_;
+  my $label = $self->instructions->label;
+  return <<"EOM";
 Name, persona, tone are defaults. User can rename you, rewrite your
-background, or change persona entirely via C<.raider.md> in working dir.
+background, or change persona entirely via C<$label> in working dir.
 If present, its content appended below as user's custom instructions.
 User's custom instructions override this default where they conflict.
 
@@ -326,6 +329,7 @@ How you work:
     user explicit ask.
 
 EOM
+}
 
 =attr root
 
@@ -776,6 +780,26 @@ has config => (
 sub _build_config {
   my ($self) = @_;
   return Langertha::Raider::Config->new(root => $self->root);
+}
+
+=attr instructions
+
+The L<Langertha::Raider::Instructions> of L</root>: the project
+instructions file, F<.raider/instructions.md>, else F<.raider.md>.
+
+=cut
+
+has instructions => (
+  is         => 'ro',
+  isa        => 'Langertha::Raider::Instructions',
+  lazy_build => 1,
+);
+
+sub instructions_class { 'Langertha::Raider::Instructions' }
+
+sub _build_instructions {
+  my ($self) = @_;
+  return $self->instructions_class->new(root => $self->root);
 }
 
 # Which settings were passed to the constructor (the command-line flags), for
@@ -1425,7 +1449,7 @@ sub remove_session {
 
 =method reload_mission
 
-Rebuilds the mission (e.g. after C<.raider.md> has been edited) and swaps it
+Rebuilds the mission (e.g. after the instructions file has been edited) and swaps it
 into the underlying L<Langertha::Raider>. An explicit L</mission> is kept.
 When L</perl_tools_grant> changed since the tool servers were mounted
 (C</pack>, C</reload>), the PerlTools server is mounted or unmounted first,
@@ -1450,15 +1474,18 @@ sub reload_mission {
 
 Where the instructions item of L</mission> comes from: the
 L</source_label> of C<mission> (C<-M> on the command line) for a mission
-passed to the constructor, C<.raider.md> when that file customizes the
-default persona (never with L</bare>), C<default> otherwise.
+passed to the constructor; the L<Langertha::Raider::Instructions/label> of
+the instructions file (C<.raider/instructions.md> or C<.raider.md>) when
+it customizes the default persona (never with L</bare>); C<default>
+otherwise.
 
 =cut
 
 sub mission_source {
   my ($self) = @_;
   return $self->source_label('mission') if $self->_has_explicit_mission;
-  return !$self->bare && -f Path::Tiny::path($self->root)->child('.raider.md') ? '.raider.md' : 'default';
+  my $instructions = $self->instructions;
+  return !$self->bare && $instructions->file_exists ? $instructions->label : 'default';
 }
 
 =method source_label
@@ -1513,6 +1540,9 @@ L<Langertha::Raider::Packs::Collection/skipped_packs>. C<perl_tools> is
 L</perl_tools_grant>: whether the Perl tools are mounted, and why.
 
 C<instructions> is L</mission_source> and C<bare> is L</bare>.
+C<ignored_instructions_files> are the instructions files that are present
+but not used (L<Langertha::Raider::Instructions/ignored_files>): a legacy
+F<.raider.md> next to F<.raider/instructions.md>.
 
 C<tools> lists the mounted tools, each with its C<name>, its C<source>
 (C<engine:N>) and C<effects>: what it can do, from a static built-in table
@@ -1615,6 +1645,7 @@ sub explain_config {
     skipped_packs => $self->packs->skipped_packs,
     perl_tools    => $self->perl_tools_grant,
     tools         => $self->_tool_effects_report,
+    ignored_instructions_files => [ $self->instructions->ignored_files ],
   };
 }
 

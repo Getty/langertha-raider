@@ -22,7 +22,8 @@ Builds a self-describing how-to-use-raider document from a running
 L<Langertha::Raider::CLI> instance. The generated text reflects the actual live
 configuration: selected engine and model, which web-search providers are
 currently enabled based on environment variables, which persona layer is
-active (default Langertha, a custom C<.raider.md>, or a C<-M> mission),
+active (default Langertha, a custom F<.raider/instructions.md> or
+F<.raider.md>, or a C<-M> mission),
 and so on. Its tool table lists the tools the app mounts -- the same set
 its prompt describes and its engine offers (ADR 0005) -- each with its
 signature and the first sentence of its description, so the Perl tools
@@ -118,10 +119,12 @@ sub markdown {
   my ($self) = @_;
   my $app = $self->app;
   my $source  = $app->mission_source;
-  my $persona = $source eq '-M'         ? 'from -M (.raider.md not used)'
-              : $source eq '.raider.md' ? 'custom (loaded from '.path($app->root)->child('.raider.md').')'
-              :                           'Langertha (default viking persona)';
-  $persona .= ', bare (no .raider.md or skills, only explicit packs)' if $app->bare;
+  my $instructions = $app->instructions;
+  my $file    = $instructions->label;
+  my $persona = $source eq '-M'  ? 'from -M ('.$file.' not used)'
+              : $source eq $file ? 'custom (loaded from '.$instructions->file.')'
+              :                    'Langertha (default viking persona)';
+  $persona .= ', bare (no '.$file.' or skills, only explicit packs)' if $app->bare;
   my $config  = $app->config;
   my $yml_loaded = $config->file_exists && $config->data ? 'yes ('.$config->file.')' : 'no';
   my $model   = $app->has_model ? $app->model : '(engine default)';
@@ -177,9 +180,11 @@ reports when done.
 The default persona speaks in terse caveman style (no articles, no filler,
 technical terms exact). Say "normal mode" to switch to prose.
 
-Customize the persona and the rules by dropping a `.raider.md` file in the
-working directory, or by running `/prompt` in the REPL (launches a sub-agent
-that edits `.raider.md` for you).
+Customize the persona and the rules with an instructions file in the
+working directory, `.raider/instructions.md` or the legacy `.raider.md`, or
+by running `/prompt` in the REPL (launches a sub-agent that edits the file
+in use for you). With both present only `.raider/instructions.md` is read,
+and raider warns about the other.
 
 ## Slash commands inside the REPL
 
@@ -189,8 +194,8 @@ that edits `.raider.md` for you).
 | `/clear`                 | Reset conversation history and token counters        |
 | `/metrics`               | Cumulative raid metrics                              |
 | `/stats`                 | Tokens in / out / total this session                 |
-| `/reload`                | Re-read `.raider.md`, hot-swap the mission           |
-| `/prompt`                | Launch the prompt-builder (edits `.raider.md`)       |
+| `/reload`                | Re-read the instructions file, hot-swap the mission  |
+| `/prompt`                | Launch the prompt-builder (edits the instructions)   |
 | `/skill [PATH]`          | Export plain-markdown how-to-use doc                 |
 | `/skill-claude [PATH]`   | Export Claude Code SKILL.md with YAML frontmatter    |
 | `/config`                | Show each setting and where it came from             |
@@ -277,7 +282,8 @@ name: $name
 description: |
   $desc
   Use this skill whenever the user invokes `raider`, asks about the
-  `Langertha::Raider::CLI` CLI, wants to customize its persona via `.raider.md`,
+  `Langertha::Raider::CLI` CLI, wants to customize its persona via
+  `.raider/instructions.md` or `.raider.md`,
   or is reading a transcript that contains `raider>` prompts and
   `bash`/`read_file`/`web_search` tool calls.
 ---

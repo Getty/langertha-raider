@@ -94,6 +94,11 @@ Revision history for Langertha-Raider
       .raider.yml). When both files exist only .raider/config.yml is loaded,
       raider warns on start, and raider config explain names the file in use
       and the ignored one. /model and saved skills write to the file in use.
+    - raider reads the project instructions from .raider/instructions.md, else
+      .raider.md. When both exist only .raider/instructions.md is used, raider
+      warns on start, and raider config explain names the ignored file under
+      instructions:. /prompt writes the file in use (.raider.md when there is
+      none).
     - .raider.yml has one reader and writer, Langertha::Raider::Config
       (internal). Top-level keys apply next to default: and engine sections,
       so /model or a skills: hash no longer drops packs, perl or engine
