@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-30T08:22:55Z
+claimed_by: raider-worker-k139
+class: standard
+completed: 2026-09-30T08:22:55Z
+created: 2026-09-30T08:21:22Z
+id: 139
+priority: low
+started: 2026-09-30T08:21:31Z
+status: done
+tags:
+- rendering
+- history
+title: Tool-Result-PDFs (input_file / functionResponse.parts) lesbar rendern statt
+  <input_file>/<block>
+updated: 2026-09-30T08:22:55Z
+---
+
+Aus langertha k361 (native Tool-Result-PDFs, langertha main 3796bfe): Langertha::Raider.pm (~Z. 1195/1219, Tool-Result-/History-Renderer) zeigt die neuen PDF-Parts nur als <input_file> bzw. <block>. Gewuenscht (Vorschlag Hub): "[file] name.pdf" bzw. "[document] application/pdf", analog zu den Bild-Renderern (k112/k114/k115) und Anthropic document/search_result (k116/k117). Offline-Tests mit den Wire-Formen aus langertha k361.
+
+2026-09-30 08:22 Implemented in Raider.pm _render_history_block: input_file -> '[document] <filename>' (else '[document]'); non-image inlineData -> '[document] <mime>' (follows existing [document] convention, not [file]). Test: subtest 'native tool-result pdf parts' in t/86_raider_self_tools.t; 37 tests pass.
+
+2026-09-30 08:22 Done: PDF parts render readably; t/86 passes (37).
+
+2026-09-30 08:22 Committed as e6562f0
