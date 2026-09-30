@@ -125,7 +125,10 @@ my @resolved;
 sub fetcher {
   my ( %arg ) = @_;
   my $answer = delete $arg{resolve} // ['127.0.0.1'];
+  # Far above the 10s default, so a loaded machine does not time a fetch
+  # out; the timeout subtest passes its own (k136).
   return $CLASS->new(
+    timeout        => 120,
     allow_internal => 1,
     ssl_options    => { SSL_ca_file => $pki->{ca} },
     resolver       => sub { push @resolved, $_[0]; Future->done(@$answer) },

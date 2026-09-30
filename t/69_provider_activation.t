@@ -102,9 +102,13 @@ my $srv  = Test::Raider::FakeHTTPS->new( pki => $pki, routes => \%routes );
 my $host = 'provider.example:'.$srv->port;
 my $base = 'https://'.$host;
 
+# What these fetches check is never the clock: a budget far above the 10s
+# default, so a loaded machine (a swapped-out server child) does not turn
+# an activation into "timed out" (k136).
 sub fetcher {
   my ( %args ) = @_;
   return My::Fetch->new(
+    timeout        => 120,
     allow_internal => 1,
     ssl_options    => { SSL_ca_file => $pki->{ca} },
     resolver       => sub { Future->done('127.0.0.1') },
@@ -258,7 +262,7 @@ subtest 'engine class, url, model and key per dialect' => sub {
   for my $dialect ( sort keys %expect ) {
     my $got = activate( '/dialect-'.$dialect.'.json' );
     is( [ @$got{qw( status engine_name engine_class )} ], [ 'completed', @{ $expect{$dialect} } ], $dialect.': activation' )
-      or next;
+      or do { diag( $dialect.': '.( $got->{error} // 'no error' ) ); next };
     for my $case ( [ 'cli-key', { api_key => 'cli-key' } ], [ undef, {} ] ) {
       my ( $key, $args ) = @$case;
       my $label = $dialect.( defined $key ? ' with -k' : ' without a key' );

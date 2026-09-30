@@ -58,7 +58,10 @@ subtest 'shipped packs, nothing at home or in the project' => sub {
   my $packs = build_packs(root => dir());
   my $caveman = $packs->packs_by_name->{caveman} or return fail('caveman shipped');
   is($caveman->origin, 'shipped', 'origin shipped');
-  like($caveman->path, qr{share/packs/caveman$}, 'from share/packs');
+  # The dist's share dir: share/ in a checkout (and next to blib/), or the
+  # File::ShareDir copy under auto/share/dist/ once built or installed.
+  like($caveman->path, qr{/(?:share|auto/share/dist/Langertha-Raider)/packs/caveman\z},
+    'from the shipped share dir');
   is($packs->skipped_packs, [], 'nothing skipped');
 };
 
