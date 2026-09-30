@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-30T07:52:08Z
+claimed_by: raider-worker-k131
+class: standard
+completed: 2026-09-30T07:52:03Z
+created: 2026-09-30T06:01:26Z
+id: 131
+priority: low
+started: 2026-09-30T06:55:49Z
+status: done
+tags:
+- provider-discovery
+- m5
+title: 'Provider C1: Manifest-Aenderungen klassifizieren (Zustimmung noetig ja/nein)'
+updated: 2026-09-30T07:52:08Z
+---
+
+Teil von #23, jetzt machbar. Reine Funktion: altes vs. neues Manifest -> Aenderungen von Origin, issuer, Endpunkt-base_url-Origin, Auth-Typ verlangen erneute Zustimmung; Modellliste nicht (Handoff 11.2). Fingerprint ueber das kanonische to_json aus Core. Tests mit Fixture-Paaren.
+
+2026-09-30 07:30 Plan/impl: new internal Langertha::Raider::Provider::Change (Moose, class methods): consent_view($manifest,$origin), fingerprint(...), classify(old,old_origin,new,new_origin) -> {changes:[{kind,consent,description,endpoint|auth|model}], needs_consent, old_fingerprint, new_fingerprint}. Invariant: needs_consent == fingerprints differ (every change to the consent view needs consent, nothing else does). Fingerprint deviates from card body: NOT over core's full to_json (that changes on model-list changes, which must stay benign) but over the consent view, canonicalised+sha256 via Approval->digest_arguments (one canonical form in the dist), view carries a version tag 'raider-provider-consent-1' so a future view change invalidates stored fingerprints (asks again, never skips). Test t/72_provider_change.t.
+
+2026-09-30 07:51 Decisions (PROVISIONAL = policy, for Getty): consent view = manifest origin (normalised scheme/host/port), issuer (exact string, OIDC-style; trailing slash counts), provider_id (PROVISIONAL: identity shown at consent, a manifest may not rename itself under a consent), and EVERY endpoint by id with base_url origin + dialect + resolved auth TYPE (not only endpoints in use: a benign model-list change can put any endpoint into use). Endpoint added -> consent; endpoint removed -> consent too (PROVISIONAL: narrows trust, but keeps needs_consent == fingerprint changed). Benign, reported: base_url path within the same origin, auth_ref renamed with same type, auth entries no endpoint names (added/removed/type), models added/removed/moved, capabilities (PROVISIONAL: a capability is a provider claim, never a local grant, ADR 0005/0007; changes what goes to an already-accepted origin, not where -- revisit if a capability ever implies a second origin), extensions (PROVISIONAL: inert in v1; once they carry MCP/pack refs each activation needs own policy anyway; handoff 11.2 lists Tool-/Paketangebote as consent-relevant -- revisit then). Also found: none outside the card; no core need.
+
+2026-09-30 07:51 Done, commit-ready (uncommitted). New: lib/Langertha/Raider/Provider/Change.pm (internal, ADR 0017 marker; consent_view / fingerprint / classify, pure logic, nothing stored or wired -- #133), t/72_provider_change.t (36 subtests over fixture pairs, offline). Verified against installed Langertha 0.503: t/00_load t/67 t/69 t/104 t/72 = 5 files, 83 tests PASS. 10 mutants all killed (provider_id not compared, dialect benign, view holds base_url not origin, model_added consent, capability change unreported, auth type dropped, endpoint_removed benign, origin not normalised, unused auth entries unreported, extensions in view). No new deps, nothing loaded by name -> no binary impact (verify-binary not run). Fingerprint = sha256 of canonical consent view via Approval->digest_arguments, not core's full to_json (would change on benign model changes). Open for Getty: provisional decisions in the note above (provider_id, endpoint removal, capabilities, extensions).
+
+2026-09-30 07:52 Committed as fa26dc2
