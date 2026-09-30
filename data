@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-30T06:15:48Z
+claimed_by: raider-worker-k134
+class: standard
+completed: 2026-09-30T06:15:48Z
+created: 2026-09-30T06:09:34Z
+id: 134
+priority: low
+started: 2026-09-30T06:10:41Z
+status: done
+tags:
+- bug
+- adr-0005
+- tools
+- journal
+title: Pausierender Self-Tool-Call (ask_user/pause) und raider_wait bekommen kein
+  tool.result/after-hook
+updated: 2026-09-30T06:15:54Z
+---
+
+Aus #120. (1) Nach respond wird die Antwort fuer den pausierenden Call (raider_ask_user/raider_pause) direkt gepusht, plugin_after_tool_call laeuft nie -> tool.call ohne tool.result (Library/REPL; Application ruft respond nicht). (2) _wait_self_tool_f feuert den before-hook, aber nie den after-hook -> dasselbe fuer raider_wait. Ziel: jeder tool.call hat genau ein tool.result, ueber _dispatch_tool_call_f bzw. denselben after-Pfad. Regressionstest.
+
+2026-09-30 06:13 Reproduced: t/101_raider_self_tool_results.t (Test2::V0, offline) 6/6 subtests red on HEAD 56a0ec4. Cause: (1) _respond_f pushes the answer for the pausing call straight onto results, no _after_tool_call_f; the continuation does not even keep the post-before-hook name/input. (2) _wait_self_tool_f only traces Langfuse, never plugin_after_tool_call; on cancel it returns nothing and _dispatch_tool_call_f ends the raid -- the wait gets no result at all (contradicts the cancel POD: cut-off calls get a cancelled result through plugin_after_tool_call). Plan: continuation keeps name/input/tool_t0, _respond_f runs the answer through _after_tool_call_f; wait (done or cancelled result) through _after_tool_call_f, pushed like a cut-off MCP call, next safe point ends the raid.
+
+2026-09-30 06:14 Done: lib/Langertha/Raider.pm -- _pause_raid keeps the call as plugin_before_tool_call handed it on (pending_name/pending_input/pending_t0) in the continuation; _respond_f runs the answer through _after_tool_call_f before resuming the batch, so raider_ask_user/raider_pause get tool.result under their own call id (Events counter not yet advanced) and plugin_after_tool_call can rewrite the answer. _wait_self_tool_f runs its result through _after_tool_call_f; on a cancel it returns _cancelled_tool_result (as a cut-off MCP call) instead of nothing, _dispatch_tool_call_f pushes it and the next safe point ends the raid. respond_f POD updated. Test t/101_raider_self_tool_results.t: 6/6 subtests red on 56a0ec4, green with fix. Targeted run (installed Langertha): 15 files, 123 tests, all pass (101,100,86,87,97,62,47,81,95,99,93,50,52,53,55). Behaviour side effects: a cut-off raider_wait now counts in metrics tool_calls and, if last in its batch, its tool turn is appended to session_history before the cancel (same as a cut-off MCP call); Langfuse now gets a tool span for the paused call on respond (start = when the pause began) and for a cancelled wait.
+
+2026-09-30 06:15 Committed as 280c787
