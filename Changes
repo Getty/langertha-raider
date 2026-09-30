@@ -79,7 +79,10 @@ Revision history for Langertha-Raider
       and REPL /config: every effective setting with its source (flag,
       .raider.yml layer, environment, default), the instructions source
       (-M, .raider.md, default), bare, where each pack comes from, and
-      whether the Perl tools are on and why.
+      whether the Perl tools are on and why, and each mounted tool with its
+      source and what it can do (read, write, network, code, message; tools
+      outside the built-in table show as unknown). Information only, nothing
+      is enforced.
     - Explicit -m and -k beat model:/api_key: from .raider.yml, and the
       banner shows the model the engine is actually built with. When neither
       -m nor a table default is set (e.g. -e minimax), the engine's own

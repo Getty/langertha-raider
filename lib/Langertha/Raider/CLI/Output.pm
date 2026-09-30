@@ -153,7 +153,9 @@ setting with its value, source, what it overrides and whether it applies to
 the engine or to raider; the instructions source (C<-M>, C<.raider.md>,
 C<default>) with C<(bare)> under C<--bare>; each pack with its state, the
 kind of place it was found in (C<project>, C<home>, C<shipped>, C<env>)
-and why it is on or off; the pack directories that were skipped, and why.
+and why it is on or off; the pack directories that were skipped, and why; the perl tools grant; and
+each mounted tool with its source and effect classes (C<unknown> for a tool
+the built-in table does not know).
 
 =cut
 
@@ -191,6 +193,14 @@ sub config_report {
   if (my $perl = $report->{perl_tools}) {
     $self->emit($self->c(meta => 'perl tools: '), $perl->{enabled} ? 'on' : 'off',
       '  ', $self->c(meta => '('.$perl->{reason}.')'), "\n");
+  }
+  if (my $tools = $report->{tools}) {
+    $self->emit($self->c(meta => 'tools:  '), $self->c(meta => '(what a tool can do: information only)'), "\n");
+    for my $t (@$tools) {
+      my $fx = $t->{effects};
+      $self->emit(sprintf("  %s %-10s  %s\n", $self->c(title => sprintf('%-22s', $t->{name})), $t->{source},
+        $self->c(meta => !$fx ? 'unknown' : @$fx ? join(', ', @$fx) : 'none')));
+    }
   }
   return;
 }

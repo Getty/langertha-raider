@@ -19,6 +19,7 @@ use Langertha::Raider::Packs     qw( build_packs );
 use Langertha::Raider::Config;
 use Langertha::Raider::Detect;
 use Langertha::Raider::EngineResolver;
+use Langertha::Raider::ToolEffects;
 use Langertha::Raider::SessionStore;
 use Langertha::Raider;
 
@@ -1506,6 +1507,12 @@ L</perl_tools_grant>: whether the Perl tools are mounted, and why.
 
 C<instructions> is L</mission_source> and C<bare> is L</bare>.
 
+C<tools> lists the mounted tools, each with its C<name>, its C<source>
+(C<engine:N>) and C<effects>: what it can do, from a static built-in table
+(C<read>, C<write>, C<network>, C<code>, C<message>; empty when it only
+steers the run), or undef when the table does not know the tool. Information
+only -- nothing is enforced by it.
+
 =cut
 
 sub explain_config {
@@ -1600,8 +1607,24 @@ sub explain_config {
     packs         => $self->packs->activation_report,
     skipped_packs => $self->packs->skipped_packs,
     perl_tools    => $self->perl_tools_grant,
+    tools         => $self->_tool_effects_report,
   };
 }
+
+# One entry per mounted tool: name, source (engine:N, the 1-based mount
+# position -- the name the internal gate sees) and its effect classes from
+# Langertha::Raider::ToolEffects, undef when the table does not know it.
+sub _tool_effects_report {
+  my ($self) = @_;
+  my $n = 0;
+  return [ map {
+    my $source = 'engine:'.++$n;
+    map { { name => $_->name, source => $source, effects => $self->_tool_effects_class->effects_for($_->name) } }
+      @{ $_->tools };
+  } @{ $self->_tool_servers } ];
+}
+
+sub _tool_effects_class { 'Langertha::Raider::ToolEffects' }
 
 sub _yml_source {
   my ($self, $layer) = @_;
