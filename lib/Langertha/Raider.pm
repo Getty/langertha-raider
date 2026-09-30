@@ -728,6 +728,24 @@ has _tools_dirty => (
   default => 0,
 );
 
+# The gate step of ADR 0005's one execution path ("check policy", k121): a
+# CodeRef the code that builds the raider hands in. Every tool call about to
+# run -- after plugin_before_tool_call and the inputSchema check -- is put to it
+# as its canonical call:
+#   $gate->( $raider, { name => ..., source => ..., arguments => ... } )
+# source is where the call runs: 'raider' (self-tools), 'inline', 'engine:N'
+# (the engine's Nth MCP server), 'catalog:NAME'; undef for a tool no source
+# offers. It answers { verdict => 'allow' }, { verdict => 'deny', reason => ... }
+# or { verdict => 'ask', reason => ... }. Without a gate every call runs.
+# Read-only and constructor-only on purpose: nothing a raid carries -- model
+# output, a plugin, a manifest -- sets or changes it (ADR 0005: permissions
+# never come from prompts). Internal (ADR 0017); no policy format yet.
+has _tool_gate => (
+  is => 'ro',
+  isa => 'CodeRef',
+  predicate => '_has_tool_gate',
+);
+
 has _inline_mcp => (
   is => 'rw',
   predicate => 'has_inline_mcp',
@@ -1797,7 +1815,7 @@ the final text. Updates history and metrics.
 async sub _gather_tools_f {
   my ( $self ) = @_;
   my $engine = $self->active_engine;
-  my ( @all_tools, %tool_server_map, %seen );
+  my ( @all_tools, %tool_server_map, %tool_source, %seen );
 
   # A name offered by more than one source is sent to the provider once --
   # providers reject a request that declares one function twice -- and the
@@ -1805,15 +1823,17 @@ async sub _gather_tools_f {
   # Langertha::Role::Tools->_tool_loop_tools does across mcp_servers (karr k332).
   # Raider assembles its own tool set from four kinds of source, so it needs its
   # own dedup. Returns true when the tool was accepted, false when it was a
-  # duplicate of an earlier source and dropped with a carp.
+  # duplicate of an earlier source and dropped with a carp. $source is the
+  # short name of the source the tool gate sees (k121).
   my $accept = sub {
-    my ( $tool, $label ) = @_;
+    my ( $tool, $label, $source ) = @_;
     my $name = $tool->{name};
     if ( my $first = $seen{$name} ) {
       carp "" . ( ref $self ) . ": tool '$name' is offered by $first and $label; using the first";
       return 0;
     }
     $seen{$name} = $label;
+    $tool_source{$name} = $source;
     push @all_tools, $tool;
     return 1;
   };
@@ -1825,7 +1845,7 @@ async sub _gather_tools_f {
       my $label = 'engine MCP server ' . ( ++$no ) . ' (' . ref($mcp) . ')';
       my $tools = await $mcp->list_tools;
       for my $tool (@$tools) {
-        $tool_server_map{$tool->{name}} = $mcp if $accept->($tool, $label);
+        $tool_server_map{$tool->{name}} = $mcp if $accept->($tool, $label, 'engine:'.$no);
       }
     }
   }
@@ -1835,7 +1855,7 @@ async sub _gather_tools_f {
     my $tools = await $self->_inline_mcp->list_tools;
     for my $tool (@$tools) {
       $tool_server_map{$tool->{name}} = $self->_inline_mcp
-        if $accept->($tool, 'inline MCP');
+        if $accept->($tool, 'inline MCP', 'inline');
     }
   }
 
@@ -1845,16 +1865,16 @@ async sub _gather_tools_f {
     my $tools = await $mcp->list_tools;
     for my $tool (@$tools) {
       $tool_server_map{$tool->{name}} = $mcp
-        if $accept->($tool, "catalog MCP '$name'");
+        if $accept->($tool, "catalog MCP '$name'", 'catalog:'.$name);
     }
   }
 
   # Self-tools (virtual — no MCP server mapping needed)
   if ($self->has_raider_mcp) {
-    $accept->($_, 'raider self-tools') for @{$self->_self_tool_definitions};
+    $accept->($_, 'raider self-tools', 'raider') for @{$self->_self_tool_definitions};
   }
 
-  return ( \@all_tools, \%tool_server_map );
+  return ( \@all_tools, \%tool_server_map, \%tool_source );
 }
 
 async sub _initialize_inline_mcp_f {
@@ -1991,7 +2011,7 @@ async sub _raid_f {
   await $self->_initialize_inline_mcp_f;
 
   # Gather tools from all sources
-  my ( $all_tools, $tool_server_map ) = await $self->_gather_tools_f;
+  my ( $all_tools, $tool_server_map, $tool_sources ) = await $self->_gather_tools_f;
 
   croak "No tools available (configure MCP servers, inline tools, or raider_mcp)"
     unless @$all_tools;
@@ -2030,6 +2050,7 @@ async sub _raid_f {
     langfuse         => $langfuse,
     trace_id         => $trace_id,
     tool_server_map  => $tool_server_map,
+    tool_sources     => $tool_sources,
     tool_schemas     => $self->_tool_schemas($all_tools),
     formatted_tools  => $formatted_tools,
     model_params     => $model_params,
@@ -2123,6 +2144,39 @@ sub _invalid_args_tool_result {
   return {
     content => [{ type => 'text',
       text => "arguments do not match the input schema of tool '".$name."': ".join('; ', @problems) }],
+    isError => JSON->true,
+  };
+}
+
+# The tool gate's verdict on the canonical call $call (see _tool_gate):
+# { verdict => 'allow' } when no gate is set. A gate that answers anything
+# but allow, deny or ask croaks -- a broken gate must neither let the call
+# through nor have its intent guessed.
+sub _gate_tool_call {
+  my ( $self, $call ) = @_;
+  return { verdict => 'allow' } unless $self->_has_tool_gate;
+  my $verdict = $self->_tool_gate->($self, $call);
+  croak __PACKAGE__."->_tool_gate gave no valid verdict for tool '".( $call->{name} // '' )."'"
+    unless ref $verdict eq 'HASH' && defined $verdict->{verdict}
+      && $verdict->{verdict} =~ /\A(?:allow|deny|ask)\z/;
+  return $verdict;
+}
+
+# The error result for a call the gate did not allow. ask is refused like
+# deny for now: no surface can ask for an approval yet (k121, provisional
+# until the approval step lands).
+sub _gate_refused_tool_result {
+  my ( $self, $name, $verdict ) = @_;
+  my $reason = $verdict->{reason};
+  my $has_reason = defined $reason && length $reason;
+  my $text = $verdict->{verdict} eq 'ask'
+    ? "Tool call '".$name."' was not run: it needs approval"
+      .( $has_reason ? ' ('.$reason.')' : '' ).', and this raid has no way to ask for it.'
+    : $has_reason
+      ? "Tool call '".$name."' was denied: ".$reason
+      : "Tool call '".$name."' was denied by policy.";
+  return {
+    content => [{ type => 'text', text => $text }],
     isError => JSON->true,
   };
 }
@@ -2272,9 +2326,10 @@ async sub _refresh_tools_f {
   return unless $self->_tools_dirty;
   my $engine = $self->active_engine;
   $state->{engine} = $engine;
-  my ( $all_tools, $new_map ) = await $self->_gather_tools_f;
+  my ( $all_tools, $new_map, $new_sources ) = await $self->_gather_tools_f;
   $state->{formatted_tools} = $engine->format_tools($all_tools);
   $state->{tool_server_map} = $new_map;
+  $state->{tool_sources} = $new_sources;
   $state->{tool_schemas} = $self->_tool_schemas($all_tools);
   $state->{model_params} = $self->_langfuse_model_parameters($engine)
     if $state->{langfuse};
@@ -2534,15 +2589,35 @@ async sub _dispatch_tool_call_f {
     return;
   }
 
-  my $result;
-
   # Virtual self-tools. A raider_-prefixed name routes here only when no tool
   # source announced it: an MCP source may offer a raider_-prefixed name and
   # win the first-wins dedup (karr k90), in which case it sits in
   # tool_server_map and was sent to the model as that MCP tool. Dispatch has
   # to follow the actual registration, not the prefix, or such a call dies as
   # "Unknown self-tool" instead of reaching its MCP source (karr k93).
-  if ($name =~ /^raider_/ && $self->has_raider_mcp && !$state->{tool_server_map}{$name}) {
+  my $self_tool = $name =~ /^raider_/ && $self->has_raider_mcp
+    && !$state->{tool_server_map}{$name};
+
+  # The gate (ADR 0005 "check policy", k121): after the inputSchema check, on
+  # the call exactly as it would run. A call it does not allow does not run;
+  # its error result takes the plugin_after_tool_call path like any other, so
+  # the call keeps one tool.call and one tool.result.
+  my $verdict = $self->_gate_tool_call({
+    name      => $name,
+    source    => $self_tool ? 'raider' : $state->{tool_sources}{$name},
+    arguments => $input,
+  });
+  unless ( $verdict->{verdict} eq 'allow' ) {
+    my $result = await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0,
+      $self->_gate_refused_tool_result($name, $verdict), 1);
+    push @$results, { tool_call => $tc, result => $result };
+    ${$state->{raid_tool_calls}}++;
+    return;
+  }
+
+  my $result;
+
+  if ($self_tool) {
     my $self_result = await $self->_execute_self_tool_f($name, $input);
 
     # Handle interactive self-tool results
