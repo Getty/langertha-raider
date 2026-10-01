@@ -1,0 +1,18 @@
+---
+class: standard
+completed: 2026-10-01T22:43:09Z
+created: 2026-10-01T21:56:01Z
+id: 144
+priority: high
+started: 2026-10-01T22:43:09Z
+status: done
+tags:
+- release
+- github
+title: 'GitHub release is created twice: bundle plugin and maint/release-after.pl'
+updated: 2026-10-01T22:43:20Z
+---
+
+Found during k143 by reading the plugin list; not verified in a release. The run_after_release hook in dist.ini calls maint/release-after.pl, which creates the GitHub release and uploads the tarball. The Author::GETTY bundle 0.326 also adds its GitHub::CreateRelease plugin in the AfterRelease phase, after Git::Push. Clarify before the next release: 1) order of the two, and whether the tag is already pushed when the maint script runs; 2) whether the second creation is a no-op, fails, or overwrites notes and assets; 3) which one fires the published event for the release-binaries workflow, which needs the maintainer token; 4) whether the bundle plugin can upload the tarball itself so the maint script can go, or the bundle plugin should be off for this dist. Skeid and Knarr have the same question on their own boards. Analysis only, from dzil dumpphases and plugin source; no release.
+
+2026-10-01 22:43 Answered and fixed in 4d897e3. 1) Run::AfterRelease ran before Git::Tag and Git::Push, so gh created tag 0.503 itself on the old remote head (3e6f2a2) and the release stopped before its git steps. 3)/4) GitHub::CreateRelease runs after Git::Push with the maintainer token from ~/.github-identity and attaches the tarball, so maint/release-after.pl is removed. VERSION bumped to 0.504 by hand in 58f2713, Changes 0.503 stamped. Still open for the maintainer: remote tag 0.503 points at 3e6f2a2, not at the released content.
