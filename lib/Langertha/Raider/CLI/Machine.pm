@@ -1,6 +1,6 @@
 package Langertha::Raider::CLI::Machine;
 # ABSTRACT: Internal writer of the raider CLI's machine output (JSON, MessagePack, YAML)
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 use Moose;
 use Moose::Util::TypeConstraints qw( enum );
 use namespace::autoclean;

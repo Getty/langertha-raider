@@ -1,6 +1,6 @@
 package Langertha::Raider::ConnectCheck;
 # ABSTRACT: Internal check that Net::Async::HTTP can open a connection to a URL
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 
 use strict;
 use warnings;

@@ -1,6 +1,6 @@
 package App::Raider::WebTools;
 # ABSTRACT: Reserved namespace — the web MCP tools moved to Langertha::Raider::WebTools
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 
 use strict;
 use warnings;

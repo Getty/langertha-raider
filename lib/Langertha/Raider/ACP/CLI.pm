@@ -1,5 +1,5 @@
 package Langertha::Raider::ACP::CLI;
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 # ABSTRACT: Internal dispatcher of the raider acp subcommands (client side)
 
 use strict;

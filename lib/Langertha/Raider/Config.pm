@@ -1,6 +1,6 @@
 package Langertha::Raider::Config;
 # ABSTRACT: Internal resolver and writer for the project config file
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

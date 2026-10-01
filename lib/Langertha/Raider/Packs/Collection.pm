@@ -1,5 +1,5 @@
 package Langertha::Raider::Packs::Collection;
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 # ABSTRACT: Set of loaded raider packs with per-session enable state
 
 =head1 DESCRIPTION

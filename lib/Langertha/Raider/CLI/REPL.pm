@@ -1,6 +1,6 @@
 package Langertha::Raider::CLI::REPL;
 # ABSTRACT: Internal interactive loop of the raider CLI
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 use Moose;
 use namespace::autoclean;
 use Config;

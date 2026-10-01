@@ -1,6 +1,6 @@
 package Langertha::Raider::CLI::Runner;
 # ABSTRACT: Internal runner of one raider CLI prompt, for a human or a machine
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 use Moose;
 use namespace::autoclean;
 use Config;

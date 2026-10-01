@@ -1,5 +1,5 @@
 package Langertha::Raider::PerlTools;
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 # ABSTRACT: MCP::Server factory with Perl evaluation, syntax check, and module install
 
 use strict;

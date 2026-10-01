@@ -1,6 +1,6 @@
 package Langertha::Raider::Instructions;
 # ABSTRACT: Internal resolver of the project instructions file
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 use Moose;
 use namespace::autoclean;
 use Path::Tiny;

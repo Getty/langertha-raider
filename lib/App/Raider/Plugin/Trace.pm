@@ -1,6 +1,6 @@
 package App::Raider::Plugin::Trace;
 # ABSTRACT: Reserved namespace — the Trace plugin moved to Langertha::Raider::Plugin::Trace
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 
 use strict;
 use warnings;

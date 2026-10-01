@@ -1,6 +1,6 @@
 package Langertha::Raider::Config::Migrate;
 # ABSTRACT: Internal converter of the legacy project files to .raider/ (raider config migrate)
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

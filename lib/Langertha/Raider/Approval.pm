@@ -1,6 +1,6 @@
 package Langertha::Raider::Approval;
 # ABSTRACT: Internal approval of one exact tool call, bound to session, run, tool, arguments and policy revision
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

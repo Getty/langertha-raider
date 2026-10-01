@@ -1,5 +1,5 @@
 package Langertha::Raider::Plugin::Situation;
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 # ABSTRACT: Inject situational context (current time, timezone, host, user) at the start of the first raid
 
 use Moose;

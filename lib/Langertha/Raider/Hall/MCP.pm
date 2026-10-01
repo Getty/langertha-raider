@@ -1,5 +1,5 @@
 package Langertha::Raider::Hall::MCP;
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 # ABSTRACT: Internal MCP tool adapter exposing the raider hall
 
 =head1 DESCRIPTION

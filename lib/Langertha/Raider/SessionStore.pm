@@ -1,6 +1,6 @@
 package Langertha::Raider::SessionStore;
 # ABSTRACT: Internal store of the session journals of one scope
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 use Moose;
 use Moose::Util::TypeConstraints qw( enum );
 use namespace::autoclean;

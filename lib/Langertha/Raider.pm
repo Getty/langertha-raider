@@ -1,6 +1,6 @@
 package Langertha::Raider;
 # ABSTRACT: Autonomous agent with conversation history and MCP tools
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 use Moose;
 use Future;
 use Future::AsyncAwait;

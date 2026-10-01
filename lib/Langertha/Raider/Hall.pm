@@ -1,5 +1,5 @@
 package Langertha::Raider::Hall;
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 # ABSTRACT: Hall daemon — spawns and manages raider processes
 
 =head1 SYNOPSIS

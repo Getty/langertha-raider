@@ -1,5 +1,5 @@
 package Langertha::Raider::WebTools;
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 # ABSTRACT: MCP::Server factory with web search and fetch tools (Net::Async::WebSearch + Net::Async::HTTP)
 
 use strict;

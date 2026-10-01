@@ -1,5 +1,5 @@
 package Langertha::Raider::Packs;
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 # ABSTRACT: Pack discovery, loading, and management for raider personas and power bundles
 
 use strict;

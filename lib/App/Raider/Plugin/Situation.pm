@@ -1,6 +1,6 @@
 package App::Raider::Plugin::Situation;
 # ABSTRACT: Reserved namespace — the Situation plugin moved to Langertha::Raider::Plugin::Situation
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 
 use strict;
 use warnings;

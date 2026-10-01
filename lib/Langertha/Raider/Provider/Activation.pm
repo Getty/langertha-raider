@@ -1,6 +1,6 @@
 package Langertha::Raider::Provider::Activation;
 # ABSTRACT: Internal activation of a provider manifest's endpoint as the engine of one raider run
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 use Moose;
 use namespace::autoclean;
 use Future::AsyncAwait;

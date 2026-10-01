@@ -1,6 +1,6 @@
 package Langertha::Raider::CLI;
 # ABSTRACT: Autonomous CLI agent that can browse directories, edit files, and run bash commands
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 use Moose;
 use namespace::autoclean;
 use Path::Tiny;

@@ -1,6 +1,6 @@
 package Langertha::Raider::CLI::Main;
 # ABSTRACT: Internal command-line entry point behind bin/raider
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 use Moose;
 use namespace::autoclean;
 use utf8;

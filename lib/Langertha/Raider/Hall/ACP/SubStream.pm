@@ -1,5 +1,5 @@
 package Langertha::Raider::Hall::ACP::SubStream;
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 # ABSTRACT: Internal stream shim feeding hall output into an ACP callback
 
 =head1 DESCRIPTION

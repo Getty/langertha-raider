@@ -1,6 +1,6 @@
 package Langertha::Raider::CLI::Sessions;
 # ABSTRACT: Internal session subcommands of the raider CLI: list, show, resume, fork, rm
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 use Moose;
 use namespace::autoclean;
 use JSON::MaybeXS ();

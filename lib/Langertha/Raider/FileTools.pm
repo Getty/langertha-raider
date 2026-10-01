@@ -1,5 +1,5 @@
 package Langertha::Raider::FileTools;
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 # ABSTRACT: MCP::Server factory with local filesystem tools (list/read/write/edit)
 
 use strict;

@@ -1,6 +1,6 @@
 package App::Raider::FileTools;
 # ABSTRACT: Reserved namespace — the filesystem MCP tools moved to Langertha::Raider::FileTools
-our $VERSION = '0.503';
+our $VERSION = '0.504';
 
 use strict;
 use warnings;
