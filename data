@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-10-01T21:53:18Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-10-01T21:53:18Z
+created: 2026-10-01T21:49:03Z
+id: 143
+priority: high
+started: 2026-10-01T21:49:32Z
+status: done
+tags:
+- release
+- docker
+title: Docker image via bundle Docker::API instead of maint/release-after.pl docker
+  build/push
+updated: 2026-10-01T21:53:22Z
+---
+
+maint/release-after.pl (dist.ini run_after_release) shells out to docker build / docker push. With DOCKER_HOST on the rootless Podman socket that dies in buildx and takes the git release steps with it (Skeid 0.003). Same change as skeid k89 / the knarr ticket: let [@Author::GETTY] 0.326 (Docker::API 0.104) build and push the image over the Engine API. Raider specifics: image stays raudssus/raider (karr #6); the published image is stage runtime-root with build arg RAIDER_VERSION, so the auto-default subsection is not enough -> docker_default = 0 plus one explicit [@Author::GETTY::Docker / runtime-root] subsection (target, build_arg = RAIDER_VERSION=%v). Keep the gh release create/upload (fires release-binaries.yml). Update dist.ini comments, t/60_docker_release.t, README release paragraph, Changes. No push, no release.
+
+2026-10-01 21:51 Done: dist.ini now has docker_image = raudssus/raider, docker_tags = latest %V %v, docker_default = 0 and one [@Author::GETTY::Docker / runtime-root] subsection (target = runtime-root, build_arg = RAIDER_VERSION=%v); run_after_release keeps maint/release-after.pl without --dir; the script is reduced to gh release view/create/upload (no docker, DOCKER_BIN, RAIDER_DOCKER_BUILD_ARGS, --image/--target/--dir). t/60_docker_release.t pins the new wiring; README release paragraph and Changes updated. Verified: perl -c maint/release-after.pl OK; prove -l t/60_docker_release.t 23 tests PASS (also inside the built dist); DZIL_DOCKER_API_SKIP=1 dzil build --no-tgz with DOCKER_HOST on a nonexistent socket exits 0 and logs the skip line for runtime-root/Docker::API; loading the config shows exactly 1 Docker::API plugin: image raudssus/raider, target runtime-root, build_arg expands to RAIDER_VERSION=0.503, refs latest/0/0.503, release_push 1. NOT verified: a real image build against Podman, the push, dzil test, the full suite. New versus before: major tag (raudssus/raider:0) is pushed too. OPEN 1: RAIDER_DOCKER_BUILD_ARGS has no replacement (build_arg templates expand dist variables only). OPEN 2: order changed - Docker::API pushes as a Releaser right after UploadToCPAN, before run_after_release; a push failure now stops before the gh release and the git tag. OPEN 3: .claude/agents/raider-release-manager.md step 'dzil build' and .claude/rules line 85 ('dzil build / dzil test are fine anytime') now mean an image build unless DZIL_DOCKER_API_SKIP=1 - not edited. Also found: the bundle adds GitHub::CreateRelease as an AfterRelease plugin after Git::Push, next to the gh release made by maint/release-after.pl - two things creating the same release, unchanged by this card.
+
+2026-10-01 21:53 Committed as f749a16
