@@ -17,12 +17,18 @@ WORKDIR ${RAIDER_SRC}
 COPY . .
 
 # The Docker context is the Dist::Zilla-built distribution directory. Install
-# prerequisites from the cpanfile through cpm, then install the dist.
+# prerequisites from the cpanfile through cpm, then what Makefile.PL itself
+# needs (the configure phase of the built META.json, which the cpanfile does
+# not carry), then install the dist.
 RUN cpm install -g \
         --cpanfile cpanfile \
         --resolver metacpan \
         --with-recommends \
         --without-test \
+    && cpm install -g \
+        --metafile META.json \
+        --resolver metacpan \
+        --top-level-phase configure \
     && perl Makefile.PL \
     && make install \
     && rm -rf ~/.perl-cpm ~/.cpanm

@@ -18,6 +18,8 @@ like($dockerfile, qr/cpm install\b.*--cpanfile cpanfile/s,
   'Dockerfile installs dependencies through cpm from the cpanfile');
 like($dockerfile, qr/cpm install\b.*--resolver metacpan/s,
   'Dockerfile uses the MetaCPAN resolver');
+like($dockerfile, qr/cpm install\b[^&]*--metafile META\.json[^&]*--top-level-phase configure[^&]*&& perl Makefile\.PL/s,
+  'Dockerfile installs the configure prereqs of the built META.json before Makefile.PL');
 like($dockerfile, qr/ARG RAIDER_VERSION=dev/,
   'Dockerfile has a dev-safe version build arg');
 like($dockerfile, qr/WORKDIR\s+\$\{RAIDER_SRC\}/,
