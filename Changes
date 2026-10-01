@@ -24,8 +24,14 @@ Revision history for Langertha-Raider
     - IO::Async::SSL is a requirement: every cloud engine and web_search
       speak https, and without it every request fails.
     - Docker builds install from the Dist::Zilla build directory via cpm and
-      the MetaCPAN resolver; no cpanfile.snapshot is shipped. GitHub and
-      Docker release publishing runs from maint/release-after.pl.
+      the MetaCPAN resolver; no cpanfile.snapshot is shipped. The GitHub
+      release is published from maint/release-after.pl.
+    - The raudssus/raider image (Dockerfile stage runtime-root) is built and
+      pushed by the bundle's Dist::Zilla::Plugin::Docker::API over the Engine
+      HTTP API, so rootless Podman works, and is tagged latest, <major> and
+      <version>. Every dzil build or dzil test now builds the image unless
+      DZIL_DOCKER_API_SKIP=1 is set. RAIDER_DOCKER_BUILD_ARGS and DOCKER_BIN
+      are gone.
 
   [Standalone binary]
     - Standalone Linux binaries (x86_64, aarch64) are attached to each GitHub
