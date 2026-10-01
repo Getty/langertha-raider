@@ -606,6 +606,7 @@ A prebuilt image is on Docker Hub as
 `Dockerfile` is multi-stage with two runtime targets: `runtime-root` (the Docker Hub
 default, tag `:latest` / `:<version>`) and `runtime-user` (non-root, uid/gid
 matchable to the host for interactive use in real project trees).
+`runtime-root` is the last stage, so a build without `--target` yields it.
 
 ```bash
 docker pull raudssus/raider
@@ -646,13 +647,13 @@ docker build \
   -t raider:local Langertha-Raider-$VERSION
 ```
 
-Use `--target runtime-root` for a root image. With the `dist.ini` as shipped,
-`dzil build` also builds the published `raudssus/raider` image (stage
-`runtime-root`) through the container engine at `DOCKER_HOST`; run
+Leave `--target` out (or use `--target runtime-root`) for a root image. With the
+`dist.ini` as shipped, `dzil build` also builds the published `raudssus/raider`
+image (stage `runtime-root`) through the container engine at `DOCKER_HOST`; run
 `DZIL_DOCKER_API_SKIP=1 dzil build` to build only the dist directory. On
-release, `dist.ini`'s `run_after_release` hook publishes the GitHub release and
-the bundle's Docker plugin pushes that image to Docker Hub as `latest`,
-`<major>` and `<version>`; that is the maintainer's step (`dzil release`).
+release, the `[@Author::GETTY]` bundle pushes that image to Docker Hub as
+`latest`, `<major>` and `<version>` and publishes the GitHub release; that is
+the maintainer's step (`dzil release`).
 
 ## Binary (no Perl needed)
 

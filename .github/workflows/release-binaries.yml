@@ -1,8 +1,9 @@
 name: release-binaries
 # Attaches a standalone raider binary per Linux arch to a published GitHub
-# release. `dzil release` creates that release through maint/release-after.pl
-# with the maintainer's gh token, which is what fires `release: published`
-# (a release made with a workflow's GITHUB_TOKEN would not).
+# release. `dzil release` creates that release through the bundle's
+# GitHub::CreateRelease with the maintainer's token (~/.github-identity), which
+# is what fires `release: published` (a release made with a workflow's
+# GITHUB_TOKEN would not).
 on:
   release:
     types: [published]

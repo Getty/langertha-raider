@@ -48,12 +48,6 @@ ENV HOME=/home/raider \
     TERM=xterm-256color
 WORKDIR /work
 
-# ------------------------------------------------------------------ runtime-root
-# Runs as root. This is the Docker Hub default and works well for one-off
-# sessions against a bind-mounted project tree.
-FROM runtime-base AS runtime-root
-ENTRYPOINT ["raider"]
-
 # ------------------------------------------------------------------ runtime-user
 # Runs as a non-root user. Build with --build-arg RAIDER_UID=$(id -u) and
 # --build-arg RAIDER_GID=$(id -g) to match host ownership under /work.
@@ -64,4 +58,12 @@ RUN groupadd -g ${RAIDER_GID} raider \
     && useradd -m -d /home/raider -u ${RAIDER_UID} -g ${RAIDER_GID} -s /bin/sh raider \
     && chown -R ${RAIDER_UID}:${RAIDER_GID} /home/raider /work
 USER raider
+ENTRYPOINT ["raider"]
+
+# ------------------------------------------------------------------ runtime-root
+# Runs as root. This is the Docker Hub default and works well for one-off
+# sessions against a bind-mounted project tree. It is the last stage on
+# purpose: a build without --target, which is what dzil release pushes, gets
+# this one.
+FROM runtime-base AS runtime-root
 ENTRYPOINT ["raider"]

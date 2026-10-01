@@ -27,10 +27,10 @@ code goes back to the worker as a note on its card, not as your own fix. **Never
    moves up whenever this dist starts using a new Langertha feature.
 2. **dist.ini** — check it follows the `[@Author::GETTY]` pattern used by
    `langertha-knarr`/`langertha-skeid`. The Docker Hub image is built and pushed
-   by the bundle's Docker::API (`docker_image` plus the
-   `[@Author::GETTY::Docker / runtime-root]` subsection: stage `runtime-root`,
-   tags `latest`, `<major>`, `<version>`); `run_after_release` only publishes the
-   GitHub release through `maint/release-after.pl`. The image name
+   by the bundle's Docker::API (`docker_image` + `docker_tags = latest %V %v`, no
+   subsection: the Dockerfile's last stage `runtime-root` is what gets built);
+   the GitHub release comes from the bundle's `GitHub::CreateRelease`. There is
+   no `run_after_release` and no `maint/release-after.pl`. The image name
    `raudssus/raider` is kept (decided 2026-09-24, karr #6).
 3. **`DZIL_DOCKER_API_SKIP=1 dzil build`** — runs clean: no missing files, no
    warnings. A plain `dzil build` also builds the image at `DOCKER_HOST`; run
