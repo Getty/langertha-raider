@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-10-01T22:12:12Z
+claimed_by: raider-worker
+class: standard
+completed: 2026-10-01T22:12:12Z
+created: 2026-10-01T22:03:22Z
+id: 145
+priority: high
+started: 2026-10-01T22:03:30Z
+status: done
+tags:
+- release
+- docker
+title: 'Docker image build fails: Makefile.PL needs File::ShareDir::Install, Dockerfile
+  installs only cpanfile deps'
+updated: 2026-10-01T22:12:12Z
+---
+
+Found while verifying k143 with a real image build against Podman (Docker::API wiring itself works: engine ready, build starts). The builder stage runs cpm with the cpanfile, then perl Makefile.PL. cpm finishes (109 distributions installed), then Makefile.PL line 9 dies: cannot locate File/ShareDir/Install.pm. That module is a configure-phase prereq of the built dist (share dir), present in META but not in the cpanfile, so the image cannot be built at all right now. Fix in the Dockerfile so configure prereqs of the built dist are installed before Makefile.PL, pin it in t/60_docker_release.t, verify by building the builder stage with podman on a DZIL_DOCKER_API_SKIP=1 built dist dir. No push, no release.
+
+2026-10-01 22:05 Cause confirmed: cpm builds File-ShareDir-Install only as a transient configure dep of other dists, never installs it globally. Fix: second cpm step in the builder stage reading the configure phase of the built META.json (--metafile META.json --top-level-phase configure, cpm 1.1.5 flags checked via --help). Image build running.
+
+2026-10-01 22:08 Done: Dockerfile builder stage gains a second cpm step before perl Makefile.PL: cpm install -g --metafile META.json --resolver metacpan --top-level-phase configure. It reads the configure phase of the built META.json, so any further configure prereq the bundle adds is covered; the cpanfile step and the stage layout are unchanged. t/60_docker_release.t pins the step and its position before Makefile.PL (24 tests pass). Verified: DZIL_DOCKER_API_SKIP=1 dzil build --no-tgz, podman build --target runtime-root exit 0 (109 dists from cpanfile, then 1 from META.json: File-ShareDir-Install-0.14); raider --version in the image says 'raider 0.503 (Langertha 0.503)', entrypoint [raider], user empty (root), workdir /work; dist_dir('Langertha-Raider') resolves and holds packs/ with 7 packs. Nothing else failed later in the build. No Changes entry (build infrastructure, image never published in the broken state). Test image and scratch build dir removed. Not committed.
+
+Committed as 5b3f24b
