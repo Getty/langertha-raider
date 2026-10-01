@@ -82,10 +82,12 @@ specific item, and every write is confirmed first.
 
 ## Release — never without permission
 
-`dzil build` / `dzil test` are fine anytime once they exist. `dzil release` is STRICTLY
-forbidden without the maintainer's explicit go-ahead — the old `raider` repo's release
-chain also created a GitHub release and pushed a Docker Hub image, and that automation is
-expected to carry over. Same lock applies to standalone `docker push` and `gh release`.
+`DZIL_DOCKER_API_SKIP=1 dzil build` / `dzil test` are fine anytime. Without that variable
+every `dzil build` and `dzil test` also builds the `raudssus/raider` image through the
+container engine at `DOCKER_HOST` (bundle Docker::API, see `dist.ini`) — a heavy run, only
+when the image itself is to be checked. `dzil release` is STRICTLY forbidden without the
+maintainer's explicit go-ahead — it uploads to CPAN, pushes the Docker Hub image and
+creates a GitHub release. Same lock applies to standalone `docker push` and `gh release`.
 For anything heading toward release: stop and ask.
 
 ## Raider-specific hazards
