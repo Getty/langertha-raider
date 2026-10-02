@@ -1,5 +1,7 @@
 # Langertha::Raider
 
+![Langertha Raider](assets/github.jpg)
+
 The autonomous agent engine of [Langertha](https://metacpan.org/dist/Langertha)
 (`Langertha::Raider`, plus the `Langertha::Raid` orchestration layer) together with
 the `raider` command-line agent built on it (`Langertha::Raider::CLI`).
@@ -214,14 +216,14 @@ conflict. What raider saves (`/model`, `--claude`, `--openai`, `--skills`) goes 
 the file in use, and to `.raider.yml` when there is none. It is read in layers,
 later ones winning:
 
-```
-built-in defaults
-  < ~/.raider/config.yml (same three layers as below)
-    < .raider.yml top-level keys
-      < .raider.yml default: section
-        < .raider.yml <engine>: section (openai:, anthropic:, ...)
-          < command-line -o / flags
-```
+![raider config layers, later ones winning](assets/config-layers.jpg)
+
+1. built-in defaults
+2. `~/.raider/config.yml` (the same three layers as 3–5)
+3. `.raider.yml` top-level keys
+4. `.raider.yml` `default:` section
+5. `.raider.yml` `<engine>:` section (`openai:`, `anthropic:`, ...)
+6. command-line `-o` / flags
 
 A project value replaces a home value, with three exceptions: `skills` and
 `no_detect` from both files add up, and `detect:` rules are replaced per pack.
