@@ -1,5 +1,5 @@
 package App::Raider;
-# ABSTRACT: Reserved namespace — the CLI entry point moved to Langertha::Raider::CLI
+# ABSTRACT: Reserved namespace - the CLI entry point moved to Langertha::Raider::CLI
 our $VERSION = '0.504';
 
 use strict;

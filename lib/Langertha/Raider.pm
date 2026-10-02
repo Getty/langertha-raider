@@ -82,12 +82,6 @@ with 'Langertha::Role::PluginHost', 'Langertha::Role::Runnable';
 
 =head1 DESCRIPTION
 
-=begin html
-
-<p><img src="/assets/github.jpg" alt="Langertha Raider" width="100%"></p>
-
-=end html
-
 Langertha::Raider is an autonomous agent that wraps a Langertha engine
 with MCP tools. It maintains conversation history across multiple
 interactions (raids), enabling multi-turn conversations where the LLM

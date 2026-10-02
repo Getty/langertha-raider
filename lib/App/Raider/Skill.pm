@@ -1,5 +1,5 @@
 package App::Raider::Skill;
-# ABSTRACT: Reserved namespace — the usage-doc generator moved to Langertha::Raider::Skill
+# ABSTRACT: Reserved namespace - the usage-doc generator moved to Langertha::Raider::Skill
 our $VERSION = '0.504';
 
 use strict;
