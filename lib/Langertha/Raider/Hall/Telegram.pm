@@ -172,28 +172,84 @@ sub _poll {
   $f->on_done(sub {
     my $self = $weak or return;
     delete $worker->{poll_future};
-    my ($resp) = @_;
-    my $updates = eval {
-      JSON::MaybeXS->new->decode($resp->decoded_content)->{result} // []
-    } // [];
-    for my $update (@$updates) {
-      $self->_handle_update($name, $update);
-      $worker->{offset} = $update->{update_id} + 1;
-    }
-    $self->hall->loop->later(sub { $self->_poll($name) });
+    $self->_poll_response($name, $_[0]);
   });
   $f->on_fail(sub {
     my $self = $weak or return;
     delete $worker->{poll_future};
     $self->hall->_emit('telegram.poll_error', { bot => $name, error => "$_[0]" });
-    # Back off a bit on failure so we don't hot-loop against a dead network.
-    my $timer = IO::Async::Timer::Countdown->new(
-      delay => 5,
-      on_expire => sub { $self->_poll($name) },
-    );
-    $self->hall->loop->add($timer);
-    $timer->start;
+    $self->_poll_later($name, $self->_backoff($worker));
   });
+}
+
+# Net::Async::HTTP hands 4xx/5xx back as a normal response, so the status
+# and the body's ok flag decide: an error answer is reported and retried
+# after a wait, never polled again at once.
+sub _poll_response {
+  my ($self, $name, $resp) = @_;
+  my $worker = $self->_workers->{$name} or return;
+  my $data = eval { JSON::MaybeXS->new->decode($resp->decoded_content) };
+  my $code = $resp->code;
+  my $ok = $resp->is_success && ref $data eq 'HASH' && $data->{ok};
+
+  unless ($ok) {
+    my $description = ref $data eq 'HASH' ? $data->{description} : undef;
+    $description //= $resp->is_success ? 'unreadable response' : ($resp->message // '');
+    my $token = $worker->{token};
+    $description =~ s/\Q$token\E/***/g if length $token;
+    my $error = 'HTTP '.($code // '?').': '.$description;
+    $self->hall->_emit('telegram.poll_error', {
+      bot => $name, status => $code, error => $error,
+    });
+    if ($code && $code == 401) {
+      # The token is wrong or revoked: retrying cannot help.
+      $worker->{active} = 0;
+      warn 'Telegram bot '.$name.': '.$error."\n";
+      return;
+    }
+    my $retry_after = ref $data eq 'HASH' && ref $data->{parameters} eq 'HASH'
+      ? $data->{parameters}{retry_after} : undef;
+    my $delay = $code && $code == 429 && $retry_after && $retry_after =~ /\A\d+\z/
+      ? $retry_after : $self->_backoff($worker);
+    $self->_poll_later($name, $delay);
+    return;
+  }
+
+  $worker->{failures} = 0;
+  for my $update (@{ $data->{result} // [] }) {
+    # One bad update must not stall the loop or leave the offset behind.
+    eval { $self->_handle_update($name, $update); 1 } or do {
+      my $err = $@ || 'unknown error';
+      $self->hall->_emit('telegram.update_error', {
+        bot => $name, update_id => $update->{update_id}, error => "$err",
+      });
+    };
+    $worker->{offset} = $update->{update_id} + 1;
+  }
+  $self->hall->loop->later(sub { $self->_poll($name) });
+}
+
+# Growing wait for consecutive failures: 5, 10, 20 ... capped at 300 s.
+sub _backoff {
+  my ($self, $worker) = @_;
+  my $n = ++$worker->{failures};
+  my $delay = 5 * 2 ** ($n > 6 ? 5 : $n - 1);
+  return $delay > 300 ? 300 : $delay;
+}
+
+sub _poll_later {
+  my ($self, $name, $delay) = @_;
+  weaken(my $weak = $self);
+  my $timer = IO::Async::Timer::Countdown->new(
+    delay => $delay,
+    on_expire => sub {
+      my $self = $weak or return;
+      $self->hall->loop->remove($_[0]);
+      $self->_poll($name);
+    },
+  );
+  $self->hall->loop->add($timer);
+  $timer->start;
 }
 
 sub _handle_update {

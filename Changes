@@ -39,6 +39,11 @@ Revision history for Langertha-Raider
       timeout (stall_timeout, 20 s), both tool errors, and stops reading and
       cancels the request at max_fetch_bytes instead of buffering the whole
       body first. Its User-Agent carries the dist version.
+    - The Telegram hall adapter no longer polls in a tight loop against error
+      answers: a non-2xx or ok:false reply is a telegram.poll_error with the
+      status and description, retried after retry_after (429) or a growing
+      backoff; 401 stops the bot. A failing update is a telegram.update_error
+      and no longer stalls polling or holds back the offset.
 
   [Standalone binary]
     - Standalone Linux binaries (x86_64, aarch64) are attached to each GitHub
