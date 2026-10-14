@@ -35,6 +35,11 @@ Revision history for Langertha-Raider
     - The GitHub release is published by the bundle's GitHub::CreateRelease
       after the tag is pushed, with the Changes section as release notes.
 
+    - web_fetch has a request timeout (fetch_timeout, 60 s) and a stall
+      timeout (stall_timeout, 20 s), both tool errors, and stops reading and
+      cancels the request at max_fetch_bytes instead of buffering the whole
+      body first. Its User-Agent carries the dist version.
+
   [Standalone binary]
     - Standalone Linux binaries (x86_64, aarch64) are attached to each GitHub
       release by the release-binaries workflow; the build, verify and

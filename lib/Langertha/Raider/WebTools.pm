@@ -4,6 +4,7 @@ our $VERSION = '0.504';
 
 use strict;
 use warnings;
+use Future;
 use Future::AsyncAwait;
 use HTTP::Request::Common qw( GET );
 use MCP::Server;
@@ -29,6 +30,8 @@ C<web_fetch>, run on the caller's L<IO::Async::Loop>.
     my $server = Langertha::Raider::WebTools::build_web_tools_server(
         loop           => $loop,         # required
         max_fetch_bytes => 2_000_000,
+        fetch_timeout   => 60,           # whole web_fetch request, seconds
+        stall_timeout   => 20,           # seconds without data
     );
 
 Returns an L<MCP::Server> instance with two tools:
@@ -43,7 +46,10 @@ or both C<GOOGLE_API_KEY> + C<GOOGLE_CSE_ID> are set in the environment.
 =item * C<web_fetch(url, [as_html])>  -- fetch a URL via L<Net::Async::HTTP>.
 Returns the status, the content type and the body, cut at
 C<max_fetch_bytes> (default 2_000_000). HTML is flattened to readable text
-unless C<as_html> is true.
+unless C<as_html> is true. The body is read in chunks and the request is
+cancelled once C<max_fetch_bytes> is exceeded; a request that exceeds
+C<fetch_timeout> (default 60 s) or stalls for C<stall_timeout> (default 20 s)
+without data is a tool error.
 
 C<limit> of C<web_search> defaults to 8.
 
@@ -73,9 +79,11 @@ sub build_web_tools_server {
   my %args = @_;
   my $loop            = $args{loop} or die "loop is required\n";
   my $max_fetch_bytes = $args{max_fetch_bytes} // 2_000_000;
+  my $fetch_timeout   = $args{fetch_timeout}   // 60;
+  my $stall_timeout   = $args{stall_timeout}   // 20;
 
   my $http = $args{http} // Net::Async::HTTP->new(
-    user_agent    => 'raider/0.004',
+    user_agent    => 'raider/'.$VERSION,
     max_in_flight => 4,
   );
   $loop->add($http);
@@ -173,11 +181,35 @@ sub build_web_tools_server {
         return $tool->text_result("Error: $error", 1);
       }
       my $req = GET($url);
-      $req->header('User-Agent' => 'raider/0.001');
+      $req->header('User-Agent' => 'raider/'.$VERSION);
+      # The body is read through on_header and cut off at max_fetch_bytes:
+      # the request is cancelled instead of buffering the whole download.
+      # The abort runs on the loop's next tick, closing the connection from
+      # inside the read handler is not safe (as Langertha's body cap).
+      my ( $too_big, $seen );
+      my $abort = Future->new;
+      my $trip = sub {
+        return if $too_big++;
+        $loop->later( sub { $abort->done unless $abort->is_ready } );
+      };
       # The same holds for every hop of a redirect: a redirect to https
       # fails here, before Net::Async::HTTP connects to it.
       my $f = $http->do_request(
-        request     => $req,
+        request       => $req,
+        timeout       => $fetch_timeout,
+        stall_timeout => $stall_timeout,
+        on_header     => sub {
+          my ($header) = @_;
+          $seen = $header;
+          return sub {
+            return $header unless @_;
+            return if $too_big;
+            $header->add_content( $_[0] ) if defined $_[0];
+            $trip->() if $header->is_success
+              && length( ${ $header->content_ref } ) > $max_fetch_bytes;
+            return;
+          };
+        },
         on_redirect => sub {
           my ( undef, $location ) = @_;
           my $error = connect_error($location);
@@ -185,15 +217,21 @@ sub build_web_tools_server {
         },
       );
       my $resp = eval {
-        $loop->await($f);
-        $f->get;
+        my $race = Future->wait_any( $f, $abort );
+        $loop->await($race);
+        $race->get;
       };
-      return $tool->text_result("Error: $@", 1) if $@;
+      my $err = $@;
+      if ($too_big && $seen) {
+        $resp = $seen;
+        $err  = '';
+      }
+      return $tool->text_result("Error: $err", 1) if $err;
       unless ($resp->is_success) {
         return $tool->text_result(
           sprintf("HTTP %s for %s", $resp->status_line, $url), 1);
       }
-      my $body = $resp->decoded_content // '';
+      my $body = eval { $resp->decoded_content } // $resp->content // '';
       if (length($body) > $max_fetch_bytes) {
         $body = substr($body, 0, $max_fetch_bytes) . "\n[truncated]\n";
       }
