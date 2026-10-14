@@ -1,0 +1,37 @@
+---
+claimed_at: 2026-10-14T04:03:11Z
+claimed_by: abbau
+class: standard
+completed: 2026-10-14T04:03:11Z
+created: 2026-10-06T19:39:58Z
+id: 146
+priority: medium
+started: 2026-10-14T03:27:41Z
+status: done
+tags:
+- bug
+- async
+- webtools
+- review-2026-10-06
+title: 'web_fetch: kein Timeout, max_fetch_bytes greift erst nach vollständigem Download'
+updated: 2026-10-14T04:03:11Z
+---
+
+`Langertha::Raider::WebTools::build_web_tools_server` baut den HTTP-Client ohne jedes Zeitlimit (`lib/Langertha/Raider/WebTools.pm:77-80`: nur `user_agent` und `max_in_flight`) und ruft im `web_fetch`-Tool `do_request` ebenfalls ohne `timeout`/`stall_timeout` (`WebTools.pm:179-186`). Net::Async::HTTP hat von sich aus keins. Danach blockiert `$loop->await($f)` (`:188`).
+
+1. **Hänger:** Ein Server, der die Verbindung annimmt und nie antwortet (oder einen Body endlos tröpfelt), hält den Tool-Aufruf -- und damit den Agentenlauf -- unbegrenzt fest. Die URL kommt vom Modell; einen Tool-Timeout eine Ebene höher gibt es nicht (`grep -n timeout lib/Langertha/Raider.pm` findet nur das `timeout`-Feld des Self-Tools `raider_wait_for`). `t/16_http_connect_failure.t` deckt nur den Verbindungs*fehler* ab, nicht die stille Gegenstelle.
+2. **Größe:** `max_fetch_bytes` (Default 2 MB, `:75`) wird erst auf `$resp->decoded_content` angewandt (`:196-199`), also nachdem der gesamte Body im Speicher liegt. Die Tool-Beschreibung verspricht 'Binary/large bodies are truncated' -- ein 4-GB-Download oder ein endloser Stream wird trotzdem komplett gepuffert, bevor abgeschnitten wird. Auf einer kleinen Maschine reicht das für den OOM.
+
+Nebenbei: zwei verschiedene, veraltete User-Agent-Strings (`raider/0.004` in `:78`, `raider/0.001` in `:176`) bei Dist-Version 0.504.
+
+**Fertig, wenn**
+
+- `web_fetch` ein `timeout` und ein `stall_timeout` setzt (konfigurierbar über `build_web_tools_server(...)`, sinnvoller Default), und ein Timeout als Tool-Fehler zurückkommt statt zu hängen;
+- der Body über `on_header`/Chunk-Callback gelesen und bei `max_fetch_bytes` abgebrochen wird (Request canceln), statt erst danach zu kürzen -- Langerthas `_body_cap_on_header` (`langertha/lib/Langertha/Role/AsyncHTTP.pm:384-402`) ist die Vorlage, inklusive `loop->later` fürs Canceln außerhalb des Read-Handlers;
+- der User-Agent aus `$VERSION` kommt;
+- ein Test neben `t/16_http_connect_failure.t` einen lokalen Listener nutzt, der annimmt und schweigt, bzw. mehr als das Limit sendet.
+
+---
+Fleet review 2026-10-06 · kind: bug · confidence: verified
+
+Umgesetzt: Branch worktree-abbau-146-147, Commit 35d1f7e, Worktree .claude/worktrees/abbau-146-147. Regressionstest t/17_web_fetch_limits.t rot gegen altes WebTools.pm (Haenger, Timeout-Kill), gruen gegen neues; Volllauf prove -r t: 106 Dateien, 965 Tests gruen (live uebersprungen). Randbefund: web_search hat weiterhin kein eigenes Timeout (geteilter $http ohne per-request timeout). Folge in langertha: keine.
