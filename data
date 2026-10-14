@@ -1,0 +1,47 @@
+---
+claimed_at: 2026-10-14T04:03:17Z
+claimed_by: abbau
+class: standard
+completed: 2026-10-14T04:03:17Z
+created: 2026-10-06T19:40:04Z
+id: 147
+priority: medium
+started: 2026-10-14T03:39:40Z
+status: done
+tags:
+- bug
+- hall
+- telegram
+- async
+- review-2026-10-06
+title: 'Hall::Telegram: Poll-Schleife ohne Backoff bei Fehlerantworten (401/409/429)
+  -- Dauerfeuer gegen api.telegram.org'
+updated: 2026-10-14T04:03:17Z
+---
+
+`Langertha::Raider::Hall::Telegram::_poll` (`lib/Langertha/Raider/Hall/Telegram.pm:148-197`) unterscheidet nur zwischen Transportfehler und 'Antwort da'. Net::Async::HTTP liefert 4xx/5xx als normale Antwort (`fail_on_error` ist aus), also landet jede Fehlerantwort im `on_done` (`:172-184`):
+
+```perl
+my $updates = eval { JSON::MaybeXS->new->decode($resp->decoded_content)->{result} // [] } // [];
+...
+$self->hall->loop->later(sub { $self->_poll($name) });
+```
+
+Bei `{"ok":false,...}` ist `result` leer, es gibt kein Event, und der nächste Poll startet sofort. Der 5-Sekunden-Timer existiert nur im `on_fail`-Zweig (`:185-196`). Eine Fehlerantwort kommt ohne Long-Poll-Wartezeit zurück -- die Schleife dreht also so schnell, wie das Netz antwortet:
+
+- **401** (Token falsch/widerrufen): Dauerschleife, nichts im Log, kein `telegram.poll_error`.
+- **409 Conflict** (zweite Instanz pollt denselben Bot -- genau der Fall bei zwei Halls oder einem vergessenen alten Prozess): beide hämmern gegeneinander.
+- **429** mit `parameters.retry_after`: wird ignoriert, die Schleife verlängert die Sperre selbst.
+
+Zweiter, kleinerer Punkt im selben Block (plausibel, nicht nachgestellt): stirbt `_handle_update` für ein Update (z. B. `_save_history` bei vollem Datenträger, `:269-277`), läuft die Exception aus dem `on_done` heraus, `offset` wird nicht weitergezählt und `_poll` nicht neu eingeplant -- der Bot verstummt bzw. die Hall fällt, und nach dem Neustart liefert Telegram dasselbe unbestätigte Update wieder.
+
+**Fertig, wenn**
+
+- eine Antwort mit `ok: false` oder Nicht-2xx als `telegram.poll_error` (Statuscode + `description`, nie das Token) gemeldet und mit Wartezeit wiederholt wird: `retry_after` bei 429, sonst wachsender Backoff; 401 deaktiviert den Bot wie der Connect-Fehler in `:154-159`;
+- `_handle_update` je Update in `eval` läuft, der Offset trotzdem weitergeht und der Fehler als Event sichtbar ist;
+- ein Test neben `t/59_hall_telegram_connect.t` mit injiziertem `ua` eine 401/409/429-Antwort liefert und prüft, dass nicht sofort neu gepollt wird.
+
+---
+Fleet review 2026-10-06 · kind: bug · confidence: verified
+
+Umgesetzt: Branch worktree-abbau-146-147, Worktree .claude/worktrees/abbau-146-147, Commit e679235. Test t/59_hall_telegram_poll_errors.t: 4 Subtests rot gegen alte Telegram.pm, gruen gegen neue; Volllauf prove -r t: 107 Dateien, 969 Tests gruen (live uebersprungen). Randbefunde: 2xx mit unlesbarem Body zaehlt jetzt als Fehler; Modul-POD erwaehnt telegram.poll_error/update_error nicht (Doku-Nachtrag offen). Folge in anderen Repos: keine.
