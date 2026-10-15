@@ -1,5 +1,5 @@
 package Langertha::Raider::CLI::Provider;
-# ABSTRACT: Internal provider commands of the raider CLI: inspect a manifest, activate it for --provider
+# ABSTRACT: Internal provider commands of the raider CLI: inspect a manifest, bind an alias, activate it for --provider
 our $VERSION = '0.504';
 use Moose;
 use namespace::autoclean;
@@ -7,6 +7,7 @@ use Langertha::Manifest;
 use Langertha::Manifest::Builder;
 use URI;
 use Langertha::Raider::Provider::Activation;
+use Langertha::Raider::Provider::Binding;
 use Langertha::Raider::Provider::Fetch;
 
 =head1 SYNOPSIS
@@ -33,6 +34,12 @@ C<raider --provider>: L</activate> picks the endpoint of the manifest a
 run uses (L<Langertha::Raider::Provider::Activation>) and reports why it
 cannot, for L<Langertha::Raider::CLI::Main>.
 
+C<raider provider add ALIAS HOST>: L</add> shows what a manifest declares
+and what would be pinned, asks a person, and stores the alias in the home
+file (L<Langertha::Raider::Provider::Binding>); C<raider --provider ALIAS>
+then activates through the stored binding and stops when it no longer
+matches.
+
 =attr output
 
 The L<Langertha::Raider::CLI::Output> the result goes to. Required.
@@ -40,6 +47,15 @@ The L<Langertha::Raider::CLI::Output> the result goes to. Required.
 =attr err
 
 Filehandle for failures in human output. Defaults to C<STDERR>.
+
+=attr in
+
+Filehandle the confirmation of L</add> is read from. Defaults to C<STDIN>.
+
+=attr interactive
+
+True when a person can confirm: L</in> and the output are terminals.
+L</add> stores nothing otherwise. Decided from the handles; a test sets it.
 
 =attr fetch_args
 
@@ -59,6 +75,17 @@ has err => (
   default => sub { \*STDERR },
 );
 
+has in => (
+  is      => 'ro',
+  default => sub { \*STDIN },
+);
+
+has interactive => (
+  is      => 'ro',
+  lazy    => 1,
+  default => sub { ( -t $_[0]->in && -t $_[0]->output->out ) ? 1 : 0 },
+);
+
 has fetch_args => (
   is      => 'ro',
   isa     => 'HashRef',
@@ -66,6 +93,7 @@ has fetch_args => (
 );
 
 sub fetch_class      { 'Langertha::Raider::Provider::Fetch' }
+sub binding_class    { 'Langertha::Raider::Provider::Binding' }
 sub activation_class { 'Langertha::Raider::Provider::Activation' }
 sub manifest_class   { 'Langertha::Manifest' }
 
@@ -107,20 +135,10 @@ L</document>); without, the report on L</output> and a failure on L</err>.
 
 sub inspect {
   my ( $self, $target, %opt ) = @_;
-  my $fetch = $self->fetcher(allow_internal => $opt{allow_internal} ? 1 : 0);
-  my $url = eval { $fetch->target_url($target) };
-  unless (defined $url) {
-    $self->_err('raider provider inspect: '.$self->output->error_text($@)."\n");
+  my ( $report, $manifest, $fetch ) = $self->_fetch_manifest($target, $opt{allow_internal});
+  unless ($report) {
+    $self->_err('raider provider inspect: '.$manifest."\n");
     return 2;
-  }
-  my $report = $fetch->fetch_f($url)->get;
-  my $manifest;
-  if ($report->{status} eq 'completed') {
-    $manifest = eval { $self->manifest_class->from_json($report->{body}) };
-    unless ($manifest) {
-      $report->{status} = 'failed';
-      $report->{error} = 'not a valid provider manifest: '.$self->output->error_text($@);
-    }
   }
   my $doc = $self->document($report, $manifest, $fetch);
   if (my $machine = $opt{machine}) {
@@ -135,10 +153,37 @@ sub inspect {
   return $manifest ? 0 : 1;
 }
 
+# ( $report, $manifest, $fetch ): the fetch report, the validated manifest
+# (undef when it is none; the report then says failed), the fetcher. For a
+# target that is none: an empty report and the error text.
+sub _fetch_manifest {
+  my ( $self, $target, $allow_internal ) = @_;
+  my $fetch = $self->fetcher(allow_internal => $allow_internal ? 1 : 0);
+  my $url = eval { $fetch->target_url($target) };
+  return ( undef, $self->output->error_text($@) ) unless defined $url;
+  my $report = $fetch->fetch_f($url)->get;
+  my $manifest;
+  if ($report->{status} eq 'completed') {
+    $manifest = eval { $self->manifest_class->from_json($report->{body}) };
+    unless ($manifest) {
+      $report->{status} = 'failed';
+      $report->{error} = 'not a valid provider manifest: '.$self->output->error_text($@);
+    }
+  }
+  return ( $report, $manifest, $fetch );
+}
+
 =method activate
 
     my ( $exit, $activation ) = $provider->activate($target,
-      allow_internal => $bool, model => $model, has_api_key => $bool);
+      allow_internal => $bool, model => $model, has_api_key => $bool,
+      binding => { alias => $alias, entry => $entry, credential_env => $name });
+
+With C<binding> (C<raider --provider ALIAS>) the manifest must still be
+what the alias accepted (L<Langertha::Raider::Provider::Binding/verify>);
+otherwise nothing runs and the message says to run C<raider provider add>
+again. C<$target> is then the alias's origin and C<allow_internal> its own,
+stored one.
 
 C<raider --provider TARGET>: the endpoint of the provider's manifest the
 run uses, through L<Langertha::Raider::Provider::Activation>. Returns
@@ -156,9 +201,16 @@ sub activate {
   my $activation = $self->activation_class->new(
     fetch => $self->fetcher(allow_internal => $opt{allow_internal} ? 1 : 0),
   );
+  my $binding = $opt{binding};
   my $got = $activation->activate_f($target,
     model       => $opt{model},
     has_api_key => $opt{has_api_key} ? 1 : 0,
+    ( $binding ? (
+      verify   => sub { $self->_verify_binding($binding, @_) },
+      key_hint => ( defined $binding->{entry}{credential_env}
+        ? 'the environment variable '.$binding->{entry}{credential_env}.', or -k KEY'
+        : '-k KEY' ),
+    ) : () ),
   )->get;
   unless ($got->{status} eq 'completed') {
     my $status = $got->{status} eq 'usage' ? '' : $got->{status}.': ';
@@ -167,6 +219,138 @@ sub activate {
   }
   $self->_err('raider --provider: warning: '.$_."\n") for @{ $got->{warnings} };
   return ( undef, $got );
+}
+
+sub _verify_binding {
+  my ( $self, $binding, $manifest, $origin ) = @_;
+  my $why = $self->binding_class->verify($binding->{entry}, $manifest, $origin);
+  return unless defined $why;
+  return "provider alias '".$binding->{alias}."' no longer matches what you accepted (".$why
+    .'); nothing was run. Review it with: raider provider inspect '.$binding->{entry}{origin}
+    .'  and accept it again with: raider provider add '.$binding->{alias}.' HOST'
+    .( $binding->{entry}{allow_internal} ? ' --allow-internal' : '' );
+}
+
+=method add
+
+    my $exit = $provider->add($alias, $target, config => $config,
+      allow_internal => $bool, credential_env => $name);
+
+C<raider provider add ALIAS HOST>: fetches and validates the manifest of
+C<$target> (L</inspect>'s fetch), shows what it declares and what would be
+pinned (origin, issuer, endpoints with their origin, dialect and auth, the
+environment variable the credential comes from, whether an internal
+address is allowed), asks on a terminal and, on a C<y>, stores the entry
+(L<Langertha::Raider::Provider::Binding>) under C<providers:> of the home
+file through L<Langertha::Raider::Config/update_home> (C<$config>). An
+existing alias is replaced after the same question, with what differs shown.
+
+Never headless: without a terminal (L</interactive>) nothing is fetched and
+nothing stored. Nothing is stored when the answer is not C<y>, the manifest
+is not valid, or it asks for auth and no C<credential_env> was given (never
+guessed from the environment).
+
+Returns the exit status: C<0> stored, C<1> not stored (headless, declined,
+refused, not fetched, not valid), C<2> when the command line has to
+change (an alias or variable name that is none, a target that is none, a
+C<credential_env> that does not fit the provider's auth).
+
+=cut
+
+sub add {
+  my ( $self, $alias, $target, %opt ) = @_;
+  my $binding = $self->binding_class;
+  my $say = sub { $self->_err('raider provider add: '.join('', @_)."\n") };
+  unless ($binding->valid_alias($alias)) {
+    $say->("alias '".( $alias // '' )."' is not a name: lowercase letters, digits, - and _ (at most 32)");
+    return 2;
+  }
+  if ( defined $opt{credential_env} && !$binding->valid_credential_env($opt{credential_env}) ) {
+    $say->("--credential-env '".$opt{credential_env}."' is not an environment variable name");
+    return 2;
+  }
+  unless ($self->interactive) {
+    $say->('needs a terminal: the endpoints and auth are shown first and accepted by a person; nothing was stored');
+    return 1;
+  }
+  my ( $report, $manifest, $fetch ) = $self->_fetch_manifest($target, $opt{allow_internal});
+  unless ($report) {
+    $say->($manifest);
+    return 2;
+  }
+  unless ($manifest) {
+    $say->($report->{status}.': '.$self->output->error_text($report->{error}));
+    return 1;
+  }
+  my $origin = $fetch->origin($report->{final_url} // $report->{url});
+  my $entry = eval {
+    $binding->entry($manifest, $origin,
+      allow_internal => $opt{allow_internal}, credential_env => $opt{credential_env});
+  };
+  unless ($entry) {
+    $say->($self->output->error_text($@));
+    return 1;
+  }
+  if ( @{ $entry->{auth} } && !defined $entry->{credential_env} ) {
+    $say->('the endpoints ask for auth ('.join(', ', @{ $entry->{auth} })
+      .'); name the environment variable the credential comes from: --credential-env NAME');
+    return 2;
+  }
+  if ( !@{ $entry->{auth} } && defined $entry->{credential_env} ) {
+    $say->('--credential-env: the provider asks for no auth, there is no credential to bind');
+    return 2;
+  }
+
+  my $doc = $self->document($report, $manifest, $fetch);
+  $self->show($doc, $manifest, footer => 0);
+  my $out = $self->output;
+  my $line = sub { $out->emit($out->c(meta => sprintf('%-11s ', $_[0])), @_[ 1 .. $#_ ], "\n") };
+  $out->emit("\n", $out->c(title => "binding '".$alias."'"), "\n");
+  $line->('origin', $entry->{origin});
+  $line->('issuer', $entry->{issuer});
+  $line->('auth', @{ $entry->{auth} } ? join(', ', @{ $entry->{auth} }) : 'none');
+  $line->('credential', defined $entry->{credential_env}
+    ? 'the value of $'.$entry->{credential_env}.' is sent to '.$entry->{origin}.' only'
+    : 'none');
+  $line->('internal', $entry->{allow_internal}
+    ? $out->c(warn => 'allowed: this alias may resolve to a loopback, private or link-local address')
+    : 'not allowed');
+  my $config = $opt{config};
+  my $stored = eval { $config->providers };
+  unless ($stored) {
+    $say->($self->output->error_text($@));
+    return 1;
+  }
+  my $old = $stored->{$alias};
+  if ( defined $old ) {
+    my $why = ref $old eq 'HASH' && !$binding->problem($old)
+      ? $binding->verify($old, $manifest, $origin) : 'the stored binding is not valid';
+    $out->emit($out->c(warn => "replaces the stored binding '".$alias."'"
+      .( defined $why ? ' (differs: '.$why.')' : ' (same pin; credential and metadata are rewritten)' )), "\n");
+  }
+  $out->emit("\n", $out->c(meta => 'Raider will keep this origin, issuer and auth; a change of any of them stops '
+    .'--provider '.$alias.' until you accept again.'), "\n");
+  $out->emit('Store this binding in ', $config->home_file // '~/.raider/config.yml', '? [y/N] ');
+  my $in = $self->in;
+  my $answer = <$in>;
+  unless ( defined $answer && $answer =~ /\A\s*y(?:es)?\s*\z/i ) {
+    $say->('not stored');
+    return 1;
+  }
+  my $written = eval {
+    $config->update_home(sub {
+      my ( $data ) = @_;
+      $data->{providers} //= {};
+      $data->{providers}{$alias} = $entry;
+      return 1;
+    });
+  };
+  unless ($written) {
+    $say->('not stored: '.$self->output->error_text($@ || 'the home file was not written'));
+    return 1;
+  }
+  $out->emit($out->c(title => "bound '".$alias."'"), ': raider --provider '.$alias."\n");
+  return 0;
 }
 
 =method document
@@ -271,14 +455,15 @@ sub notes {
 
 =method show
 
-    $provider->show($doc, $manifest);
+    $provider->show($doc, $manifest, footer => 0);
 
-The human report of a valid manifest.
+The human report of a valid manifest. It ends with "nothing was stored or
+bound" unless C<footer> is false (L</add> stores after it).
 
 =cut
 
 sub show {
-  my ( $self, $doc, $manifest ) = @_;
+  my ( $self, $doc, $manifest, %opt ) = @_;
   my $out = $self->output;
   my $line = sub { $out->emit($out->c(meta => sprintf('%-11s ', $_[0])), @_[ 1 .. $#_ ], "\n") };
   $line->('provider', $out->c(title => $manifest->provider_id));
@@ -309,7 +494,8 @@ sub show {
   $out->emit("\n") if @{ $doc->{warnings} } || @{ $doc->{notes} };
   $out->emit($out->c(warn => 'warning: '.$_), "\n") for @{ $doc->{warnings} };
   $out->emit($out->c(meta => 'note: '.$_), "\n") for @{ $doc->{notes} };
-  $out->emit("\n", $out->c(meta => 'What the provider claims; nothing was stored or bound.'), "\n");
+  $out->emit("\n", $out->c(meta => 'What the provider claims; nothing was stored or bound.'), "\n")
+    unless exists $opt{footer} && !$opt{footer};
   return;
 }
 

@@ -42,7 +42,7 @@ winning:
 =over
 
 =item C<top> -- every top-level key whose value is not a hash (plus
-C<skills>, C<detect> and C<project_tools>, which may be one)
+C<skills>, C<detect>, C<project_tools> and C<providers>, which may be one)
 
 =item C<default> -- the C<default:> section
 
@@ -74,10 +74,12 @@ value replaces the home's
 =back
 
 C<project_tools> is not layered at all: only the top level of the home
-file grants tools to projects (L</project_tools>).
+file grants tools to projects (L</project_tools>). Neither is C<providers>:
+only the top level of the home file holds provider bindings
+(L</providers>).
 
 The project writers never touch the home file (L</update_home> is the only
-one, with no caller yet). When the home file is the file in
+one; C<raider provider add> calls it). When the home file is the file in
 use -- raider runs in the home directory itself -- it is read once, as the
 project file, and there is no home layer.
 
@@ -90,7 +92,7 @@ overwrite it.
 =cut
 
 # Keys that configure raider itself and never reach the engine constructor.
-my %APP_KEY = map { $_ => 1 } qw( detect engine no_detect packs perl preferred_lib_target project_tools skills );
+my %APP_KEY = map { $_ => 1 } qw( detect engine no_detect packs perl preferred_lib_target project_tools providers skills );
 
 my %PROFILE_KEYWORD = (
   claude => 'claude',
@@ -330,7 +332,7 @@ sub file_exists { -f $_[0]->file ? 1 : 0 }
 # is an engine section.
 sub _may_be_mapping {
   my ( $self, $key ) = @_;
-  return $key eq 'skills' || $key eq 'detect' || $key eq 'project_tools';
+  return $key eq 'skills' || $key eq 'detect' || $key eq 'project_tools' || $key eq 'providers';
 }
 
 sub _is_section {
@@ -432,6 +434,14 @@ sub _resolve_file {
         # than the top level of the home file it is reported, not used.
         my $top = $name eq $prefix.'top';
         push @ignored, $self->_ignored_project_tools($name, $top)
+          unless $top && ( length $prefix || $self->_is_home_file );
+        next;
+      }
+      if ($key eq 'providers') {
+        # Read on its own (providers), never layered; only the top level of
+        # the home file holds provider bindings.
+        my $top = $name eq $prefix.'top';
+        push @ignored, $self->_ignored_providers($name, $top)
           unless $top && ( length $prefix || $self->_is_home_file );
         next;
       }
@@ -540,8 +550,8 @@ sub options {
     my $opts = $config->engine_options($engine_name);
 
 L</options> without raider's own keys (C<detect>, C<engine>, C<no_detect>,
-C<packs>, C<perl>, C<preferred_lib_target>, C<project_tools>, C<skills>): what goes to the
-engine constructor.
+C<packs>, C<perl>, C<preferred_lib_target>, C<project_tools>, C<providers>,
+C<skills>): what goes to the engine constructor.
 
 =cut
 
@@ -558,7 +568,7 @@ sub engine_options {
 
 True for the keys that configure raider itself (C<detect>, C<engine>,
 C<no_detect>, C<packs>, C<perl>, C<preferred_lib_target>, C<project_tools>,
-C<skills>) and never reach the engine constructor.
+C<providers>, C<skills>) and never reach the engine constructor.
 
 =cut
 
@@ -816,6 +826,37 @@ sub _ignored_project_tools {
   return { key => $layer.'.project_tools', reason => 'read only at the top level of ~/.raider/config.yml' };
 }
 
+sub _ignored_providers {
+  my ( $self, $layer, $top ) = @_;
+  return { key => 'providers', reason => 'only ~/.raider/config.yml holds provider bindings; a project file cannot' }
+    if $top;
+  return { key => $layer.'.providers', reason => 'read only at the top level of ~/.raider/config.yml' };
+}
+
+=method providers
+
+    my $bindings = $config->providers;   # { ALIAS => { origin => ..., ... } }
+
+The C<providers:> map of the home file (L</home_file>), as written by
+C<raider provider add> through L</update_home>: one flat entry per alias
+(see L<Langertha::Raider::Provider::Binding>). Empty when there is no home
+file or no such key. Read from the home file only -- a C<providers:> in a
+project file is ignored and reported (L</explain>), so a repository cannot
+plant a binding. Croaks like L</data> does, and when C<providers:> is not a
+mapping.
+
+=cut
+
+sub providers {
+  my ( $self ) = @_;
+  my $file = $self->home_file;
+  return {} unless defined $file && -f $file;
+  my $raw = $self->_load($file)->{providers};
+  return {} unless defined $raw;
+  croak 'Cannot use '.$file.': providers: must be a mapping of alias to binding' unless ref $raw eq 'HASH';
+  return $raw;
+}
+
 =method normalize_skill_spec
 
     my @specs = $config->normalize_skill_spec($item);
@@ -988,7 +1029,7 @@ sub _dump { YAML::PP->new->dump_string($_[1]) }
       return 1;             # true: write it
     });
 
-Internal, no caller yet besides tests. The one writer of the home file
+Internal. The one writer of the home file
 L</home_file>, shaped like the project writers: the callback gets the
 parsed data of that file (empty when the file is absent), changes it in
 place and returns true to have it written; false leaves the disk alone.

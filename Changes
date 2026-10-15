@@ -178,6 +178,20 @@ Revision history for Langertha-Raider
       up again; TLS still verifies the host name. Not combinable with -e,
       -o engine= or -o url=.
       The REPL banner shows the -k key as set without printing it.
+    - New raider provider add ALIAS HOST [--credential-env NAME]
+      [--allow-internal]: fetches and validates the manifest, shows its
+      endpoints, auth and what is pinned, asks on a terminal and stores the
+      alias under providers: in ~/.raider/config.yml (origin, issuer, auth
+      types, the name of the environment variable the credential comes
+      from, allow_internal, pinned_at, fingerprint -- never a secret).
+      Without a terminal nothing is fetched or stored. raider --provider
+      ALIAS runs on the stored binding: its origin and allow_internal, the
+      key from its credential_env (or -k); when origin, issuer, an
+      endpoint's origin or dialect or the auth types changed since it was
+      accepted, or the entry was edited, the run stops until provider add is
+      run again. A model-list or capability change does not. API keys in the
+      environment never select an alias; providers: in a project file is
+      ignored.
     - Saving skills (--skills, --claude, the /skill writers) no longer writes
       an empty skills: ~ into an existing default: section of the project
       config.

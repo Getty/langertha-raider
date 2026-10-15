@@ -117,7 +117,8 @@ raider config explain [options]     show each effective setting and its source
 raider config migrate [--dry-run]   move .raider.yml / .raider.md into .raider/
 raider session list | show | resume | fork | rm     see Sessions
 raider provider inspect HOST        show a provider's manifest, see Providers
-raider --provider HOST [options]    run on a provider's manifest endpoint, see Providers
+raider provider add ALIAS HOST      bind ALIAS to a provider (asks on a terminal), see Providers
+raider --provider HOST|ALIAS [options]   run on a provider's manifest endpoint, see Providers
 raider hall <subcommand>            the optional Raider Hall daemon
 raider acp <subcommand>             the bundled ACP client
 ```
@@ -397,8 +398,47 @@ The rules are provisional:
   redirected; the engine's other requests follow no redirect.
 - A model that does not declare `tools_native` is a warning, not an error.
 
-`raider provider add` with a stored alias and credential is still planned (see
-Roadmap).
+### Stored aliases
+
+`raider provider add` keeps a provider you have decided to trust under a name:
+
+```bash
+raider provider add acme provider.example --credential-env ACME_API_KEY
+raider --provider acme -m example-model "Summarize README.md"
+```
+
+`add` fetches and validates the manifest as `inspect` does, prints its endpoints,
+auth and what will be pinned, and asks on a terminal before it stores anything;
+without a terminal it stores nothing. The binding goes under `providers:` in
+`~/.raider/config.yml` (and nowhere else — a `providers:` in a project file is
+ignored):
+
+```yaml
+providers:
+  acme:
+    origin: https://provider.example:443
+    issuer: https://provider.example
+    auth: [api_key]
+    credential_env: ACME_API_KEY
+    allow_internal: 0
+    pinned_at: 2026-10-15T09:30:00Z
+    fingerprint: 3f2a...
+```
+
+- **Credential**: only the *name* of the environment variable is stored, never the
+  value; it is read at run time and sent to the pinned origin only (`-k` overrides
+  it for one run). It is required when the endpoints ask for auth and never guessed.
+  `*_API_KEY` variables of other providers never select or feed an alias.
+- **Pinned**: origin, issuer and auth types — and, in the fingerprint, each
+  endpoint's origin and dialect and the provider id. No TLS pin: a certificate
+  rotation changes nothing. A changed model list, capability or path does not
+  matter; anything pinned that changed stops `--provider ACME` until you run
+  `provider add` again and accept.
+- **`--allow-internal`** belongs to the alias (set it at `add`); it is part of what
+  you accepted, is refused next to a stored alias on the command line, and a
+  hand-edited entry no longer matches.
+- A name that is a stored alias is the binding; any other `--provider` value is a
+  HOST as before.
 
 ## Tools
 
@@ -715,8 +755,9 @@ vocabulary live in [`CONTEXT.md`](CONTEXT.md); it lands in small vertical slices
 - **Provider discovery** (ADR 0007) — `raider --provider host.tld` and
   `raider provider add` on top of the declarative `.well-known/langertha.json`
   manifest, with a local credential binding and alias. *Today: `raider provider
-  inspect` fetches, validates and shows a manifest, and `raider --provider HOST -k KEY`
-  runs on its endpoint for one run, storing nothing.*
+  inspect` fetches, validates and shows a manifest, `raider --provider HOST -k KEY`
+  runs on its endpoint for one run, and `raider provider add ALIAS HOST` stores a
+  pinned alias that `--provider ALIAS` runs on.*
 - **Delegates: Codex & Claude Code** (ADR 0006) — `--use-codex` / `--use-claude`
   adding `ask_codex` / `ask_claude` tools driven through a narrow task contract, and
   `raider delegate inspect`; the official binaries own their own login.

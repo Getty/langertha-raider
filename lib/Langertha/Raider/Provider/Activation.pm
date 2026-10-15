@@ -164,7 +164,14 @@ sub unsupported_dialects {
 =method activate_f
 
     my $got = await $activation->activate_f($target,
-      model => $model_or_undef, has_api_key => $bool);
+      model => $model_or_undef, has_api_key => $bool,
+      verify => $code_or_undef, key_hint => $text_or_undef);
+
+C<verify>, when given, is called with the validated manifest and the origin
+it came from, before anything is chosen; a string it returns refuses the
+activation with that text (a stored binding that no longer matches,
+L<Langertha::Raider::Provider::Binding>). C<key_hint> replaces C<-k KEY> in
+the message for a missing key.
 
 Resolves to a hash. C<status> is C<completed>, C<usage> (the command line
 names a target that is none, a model the manifest does not list, no model
@@ -201,6 +208,10 @@ async sub activate_f {
     return { status => 'failed', error => 'not a valid provider manifest: '.$error };
   }
   my $origin = $fetch->origin($report->{final_url} // $url);
+  if ( my $verify = $opt{verify} ) {
+    my $problem = $verify->($manifest, $origin);
+    return { status => 'refused', error => $problem } if defined $problem;
+  }
 
   my ( $model, $refusal ) = $self->choose_model($manifest, $opt{model});
   return $refusal if $refusal;
@@ -232,7 +243,7 @@ async sub activate_f {
       ."', which this raider cannot supply" }
       unless $auth->is_known_type;
     return { status => 'usage', error => $what." needs an API key (auth '".$auth->id."', type "
-      .$auth->type.'); pass it with -k KEY' }
+      .$auth->type.'); pass it with '.( $opt{key_hint} // '-k KEY' ) }
       unless $opt{has_api_key};
   }
 

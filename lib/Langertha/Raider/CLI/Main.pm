@@ -21,6 +21,7 @@ use Langertha::Raider::CLI::Sessions;
 use Langertha::Raider::Config;
 use Langertha::Raider::Config::Migrate;
 use Langertha::Raider::Hall::CLI;
+use Langertha::Raider::Provider::Binding;
 use Langertha::Raider::SessionStore;
 use Langertha::Raider::Skill;
 
@@ -34,7 +35,8 @@ use Langertha::Raider::Skill;
 B<Internal module.> Its interface may change without notice.
 
 Everything F<raider> does with its command line: the C<hall>, C<acp>,
-C<config explain>, C<config migrate>, C<session> and C<provider inspect> subcommands, option parsing, the skill exports, and
+C<config explain>, C<config migrate>, C<session>, C<provider inspect> and
+C<provider add> subcommands, option parsing, the skill exports, and
 then either the REPL (L<Langertha::Raider::CLI::REPL>) or one prompt
 (L<Langertha::Raider::CLI::Runner>). L</run> returns the exit status.
 
@@ -44,7 +46,8 @@ then either the REPL (L<Langertha::Raider::CLI::REPL>) or one prompt
 
 =item C<0> -- success, including C<--help>, C<--version>, the exports, C<config explain>,
 C<config migrate> (also with nothing to migrate, and C<--dry-run>), C<session list>, C<session show>, C<session fork>, C<session rm>,
-C<provider inspect> of a valid manifest and leaving the REPL.
+C<provider inspect> of a valid manifest, C<provider add> that stored the
+binding, and leaving the REPL.
 
 =item C<1> -- the run failed: the engine, a tool or the network raised an
 error (with a machine format, the output is the C<failed> document); for
@@ -54,7 +57,9 @@ failed; for C<provider inspect>: the manifest was refused (address, redirect), c
 not be fetched or is not valid; for C<--provider> also: its endpoint is
 not usable (another origin, not https, a refused address, a dialect or
 auth type this raider has no adapter for, no models, a model on several
-endpoints).
+endpoints), or a stored alias that no longer matches what was accepted;
+for C<provider add>: no terminal, an answer other than C<y>, a manifest
+that was refused, not fetched or not valid.
 
 =item C<2> -- usage error: unknown option, a C<-o> that is not
 C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
@@ -68,7 +73,9 @@ host or https origin, or a C<--stream-*> flag; for C<--provider>: a
 target that is none, C<-e>, C<-o engine=>, C<-o url=> or C<config explain>
 with it, a model the manifest does not list, no C<-m> where it lists
 several models, or no C<-k> where the endpoint needs a key;
-C<--allow-internal> without C<--provider>.
+C<--allow-internal> without C<--provider>, or with a stored alias; for
+C<provider add>: not two words, an alias or variable name that is none,
+auth asked for and no C<--credential-env>, a machine format.
 
 =item C<3> -- configuration error: the config file (F<.raider/config.yml>,
 else F<.raider.yml>; for C<config migrate> the F<.raider.yml> to migrate)
@@ -148,6 +155,7 @@ sub config_class  { 'Langertha::Raider::Config' }
 sub migrate_class { 'Langertha::Raider::Config::Migrate' }
 sub machine_class { 'Langertha::Raider::CLI::Machine' }
 sub provider_class { 'Langertha::Raider::CLI::Provider' }
+sub binding_class { 'Langertha::Raider::Provider::Binding' }
 sub repl_class    { 'Langertha::Raider::CLI::REPL' }
 sub runner_class  { 'Langertha::Raider::CLI::Runner' }
 sub session_store_class { 'Langertha::Raider::SessionStore' }
@@ -179,6 +187,9 @@ Usage: raider [options] [prompt...]
        raider provider inspect HOST [--json] [--allow-internal]
                                            fetch, validate and show a
                                            provider's manifest
+       raider provider add ALIAS HOST [--credential-env NAME] [--allow-internal]
+                                           bind ALIAS to a provider (asks
+                                           on a terminal); then --provider ALIAS
 
 Options:
   -e, --engine NAME        anthropic, openai, deepseek, groq, mistral, gemini,
@@ -187,13 +198,18 @@ Options:
                            env var — anthropic > openai > deepseek > ...)
   -m, --model NAME         Model identifier (engine-specific cheap default)
   -k, --api-key KEY        API key (overrides *_API_KEY env var)
-      --provider HOST[:PORT] | https://HOST[:PORT]
+      --provider HOST[:PORT] | https://HOST[:PORT] | ALIAS
                            Run on the model endpoint the provider's
                            manifest (/.well-known/langertha.json) declares;
                            nothing is stored. -m picks one of its models
                            (a must when it lists several); the key comes
                            only from -k, never from the config file or
                            the environment. Not with -e, -o engine= or -o url=
+                           An ALIAS (raider provider add) is the stored
+                           binding: its origin and allow-internal setting,
+                           its key from the environment variable it names
+                           (or -k); stops when the provider changed origin,
+                           issuer, endpoints or auth since you accepted it
       --allow-internal     With --provider: allow a loopback, private,
                            link-local or reserved provider address
   -o, --option KEY=VALUE   Engine attribute (repeatable), e.g.
@@ -438,11 +454,11 @@ sub run {
     return EXIT_OK;
   }
 
-  # raider provider inspect TARGET [options]. Only these two words make the
-  # subcommand; "raider provider is down?" stays a prompt.
-  if (@argv >= 2 && $argv[0] eq 'provider' && $argv[1] eq 'inspect') {
-    splice @argv, 0, 2;
-    return $self->provider_command(inspect => @argv);
+  # raider provider inspect TARGET | add ALIAS TARGET [options]. Only these
+  # words make the subcommand; "raider provider is down?" stays a prompt.
+  if (@argv >= 2 && $argv[0] eq 'provider' && $argv[1] =~ /\A(?:inspect|add)\z/) {
+    my ( undef, $cmd ) = splice @argv, 0, 2;
+    return $self->provider_command($cmd => @argv);
   }
 
   # raider config explain [options]: prints where each setting comes from
@@ -543,7 +559,7 @@ sub run {
   # in the message, and so does an invalid project_tools of the home file.
   # A legacy file next to the new one is not loaded, and said so (ADR 0011).
   my $config = $self->config_class->new(root => $opt->{root} // Path::Tiny->cwd->stringify);
-  unless (eval { $config->data; $config->home_data; $config->project_tools; 1 }) {
+  unless (eval { $config->data; $config->home_data; $config->project_tools; $config->providers; 1 }) {
     $self->_warn($self->output->error_text($@)."\n");
     return EXIT_CONFIG;
   }
@@ -554,11 +570,38 @@ sub run {
   # is built or saved.
   if (defined $opt->{provider}) {
     my $cli_opts = $opt->{engine_options};
+    my $target = $opt->{provider};
+    my %binding;
+    # A name that is a stored alias is the binding; any other is a HOST. The
+    # binding's origin and allow_internal are the stored ones -- never the
+    # command line's, and never an API key from the environment but its own
+    # credential_env (nothing is picked by what keys happen to be set).
+    if ( $self->binding_class->valid_alias($target) && exists $config->providers->{$target} ) {
+      my $alias = $target;
+      my $entry = $config->providers->{$alias};
+      if ( my $why = $self->binding_class->problem($entry) ) {
+        $self->_warn("raider --provider: alias '".$alias."' in ".$config->home_file.': '.$why
+          .'; accept it again with: raider provider add '.$alias." HOST\n");
+        return EXIT_CONFIG;
+      }
+      if ($opt->{allow_internal}) {
+        $self->_warn("--allow-internal: not with a stored alias; it is part of the binding, set by raider provider add\n");
+        return EXIT_USAGE;
+      }
+      $target  = $entry->{origin};
+      %binding = ( binding => { alias => $alias, entry => $entry },
+                   allow_internal => $entry->{allow_internal} ? 1 : 0 );
+      if ( !defined $opt->{api_key} && !exists $cli_opts->{api_key} && defined $entry->{credential_env} ) {
+        my $key = $ENV{ $entry->{credential_env} };
+        $args{api_key} = $key if defined $key && length $key;
+      }
+    }
     my ( $exit, $activation ) = $self->provider_class->new(output => $self->output, err => $self->err)->activate(
-      $opt->{provider},
+      $target,
       allow_internal => $opt->{allow_internal},
       model          => $opt->{model} // $cli_opts->{model},
-      has_api_key    => length($opt->{api_key} // $cli_opts->{api_key} // '') ? 1 : 0,
+      has_api_key    => length($opt->{api_key} // $cli_opts->{api_key} // $args{api_key} // '') ? 1 : 0,
+      %binding,
     );
     return $exit if defined $exit;
     $args{provider} = $activation;
@@ -904,6 +947,28 @@ redirect to another origin is not followed.
 
 Exit status: 0 a valid manifest, 1 refused, not fetched or not valid,
 2 usage error.
+
+Usage: raider provider add ALIAS HOST[:PORT] | https://HOST[:PORT] [options]
+
+Fetches and validates the manifest like inspect, shows its endpoints and
+auth and what would be pinned (origin, issuer, auth types), asks on a
+terminal, and stores the binding under providers: in ~/.raider/config.yml.
+raider --provider ALIAS then runs on it, and stops when the provider's
+origin, issuer, endpoints or auth changed since you accepted it; run add
+again to accept. Without a terminal, add stores nothing.
+
+Options:
+      --credential-env NAME
+                           Environment variable the credential is read
+                           from at run time (a must when the endpoints
+                           ask for auth). Only its name is stored, never
+                           the value.
+      --allow-internal     Pin this alias to a loopback, private or
+                           link-local address; part of the binding, not
+                           a setting of the run
+
+Exit status: 0 stored, 1 not stored (no terminal, declined, refused, not
+fetched or not valid), 2 usage error.
 USAGE
 
 =method provider_command
@@ -923,11 +988,20 @@ sub provider_command {
   # --allow-internal belongs to this subcommand only, so it is taken out
   # before the common options are parsed.
   my $allow_internal = 0;
+  my $credential_env;
   my @rest;
   while (@argv) {
     my $arg = shift @argv;
     if ($arg eq '--') { push @rest, $arg, @argv; last }
     if ($arg eq '--allow-internal') { $allow_internal = 1; next }
+    if ($cmd eq 'add' && $arg =~ /\A--credential-env(?:=(.*))?\z/s) {
+      $credential_env = defined $1 ? $1 : shift @argv;
+      unless (defined $credential_env) {
+        $self->_warn("raider provider add: --credential-env needs a variable name\n");
+        return EXIT_USAGE;
+      }
+      next;
+    }
     push @rest, $arg;
   }
   my ( $opt, @words ) = $self->parse_options(@rest) or return EXIT_USAGE;
@@ -935,8 +1009,14 @@ sub provider_command {
     $self->output->emit($self->provider_usage);
     return EXIT_OK;
   }
-  if (@words != 1) {
-    $self->_warn("Usage: raider provider inspect HOST[:PORT] | https://HOST[:PORT] [--json] [--allow-internal]\n");
+  if ( @words != ( $cmd eq 'add' ? 2 : 1 ) ) {
+    $self->_warn($cmd eq 'add'
+      ? "Usage: raider provider add ALIAS HOST[:PORT] | https://HOST[:PORT] [--credential-env NAME] [--allow-internal]\n"
+      : "Usage: raider provider inspect HOST[:PORT] | https://HOST[:PORT] [--json] [--allow-internal]\n");
+    return EXIT_USAGE;
+  }
+  if ( $cmd eq 'add' && $opt->{machine} ) {
+    $self->_warn("raider provider add: confirmed by a person on a terminal; no document output\n");
     return EXIT_USAGE;
   }
   $ENV{ANSI_COLORS_DISABLED} = 1 if $opt->{no_color} || $opt->{machine};
@@ -948,8 +1028,14 @@ sub provider_command {
     }
     $machine = $self->machine_class->new(%$m, out => $self->output->out);
   }
-  return $self->provider_class->new(output => $self->output, err => $self->err)
-    ->inspect($words[0], allow_internal => $allow_internal, machine => $machine);
+  my $provider = $self->provider_class->new(output => $self->output, err => $self->err, in => $self->in);
+  if ($cmd eq 'add') {
+    # The home file only: the project's root plays no part in a binding.
+    my $config = $self->config_class->new(root => $opt->{root} // Path::Tiny->cwd->stringify);
+    return $provider->add($words[0], $words[1],
+      config => $config, allow_internal => $allow_internal, credential_env => $credential_env);
+  }
+  return $provider->inspect($words[0], allow_internal => $allow_internal, machine => $machine);
 }
 
 =method provider_usage_error

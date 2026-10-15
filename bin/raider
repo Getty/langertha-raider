@@ -28,6 +28,8 @@ exit Langertha::Raider::CLI::Main->new->run(@ARGV);
     raider --continue "Now fix the first one"
     raider provider inspect provider.example --json
     raider --provider provider.example -m example-model -k "$KEY" "Summarize README.md"
+    raider provider add acme provider.example --credential-env ACME_API_KEY
+    raider --provider acme "Summarize README.md"
     raider hall start --acp-port 38421
     raider acp prompt 127.0.0.1:38421 --raider bjorn "Summarize status"
 
@@ -558,6 +560,7 @@ with exit status C<4>.
 =head1 PROVIDERS
 
     raider provider inspect HOST[:PORT] | https://HOST[:PORT] [--json] [--allow-internal]
+    raider provider add ALIAS HOST[:PORT] | https://HOST[:PORT] [--credential-env NAME] [--allow-internal]
 
 fetches C<https://HOST[:PORT]/.well-known/langertha.json>, the provider
 manifest of ADR 0007, validates it with L<Langertha::Manifest> and shows
@@ -611,8 +614,9 @@ fetches and validates the manifest as C<provider inspect> does (same
 limits and address rules) and runs on the endpoint of one of its models:
 one-shot, machine output and the REPL work as with C<-e>. Nothing is
 stored and nothing is remembered: naming the host on the command line is
-the whole release, as with C<-o url=>. C<raider provider add> with a
-stored alias and credential is not there yet. The rules are provisional:
+the whole release, as with C<-o url=>. A name that is a stored alias (see
+L</Stored aliases>) is the binding instead of a host. The rules are
+provisional:
 
 =over
 
@@ -663,6 +667,54 @@ document: a usage error exits with C<2>, a provider that cannot be used as
 it is (refused, not fetched, not valid, an unknown dialect or auth type)
 with C<1>.
 
+=head2 Stored aliases
+
+    raider provider add ALIAS HOST[:PORT] | https://HOST[:PORT] [--credential-env NAME] [--allow-internal]
+    raider --provider ALIAS [-m MODEL] [-k KEY] [options] [prompt...]
+
+C<provider add> fetches and validates the manifest as C<provider inspect>
+does, shows its endpoints and auth and what will be pinned, and asks
+C<[y/N]> on a terminal. Anything but C<y> stores nothing, and without a
+terminal (stdin or stdout not a TTY) nothing is fetched or stored at all.
+The binding goes under C<providers:> in F<~/.raider/config.yml> through the
+one home-file writer (a C<providers:> in a project file is ignored):
+
+    providers:
+      acme:
+        origin: https://provider.example:443
+        issuer: https://provider.example
+        auth: [api_key]
+        credential_env: ACME_API_KEY
+        allow_internal: 0
+        pinned_at: 2026-10-15T09:30:00Z
+        fingerprint: 3f2a...
+
+=over
+
+=item * B<The credential> is the I<name> of an environment variable
+(C<--credential-env>), required when the endpoints ask for auth and never
+guessed; its value is read at run time and goes to the pinned origin only.
+C<-k> overrides it for one run. No other C<*_API_KEY> ever selects or
+feeds an alias.
+
+=item * B<What is pinned> is the origin, the issuer and the auth types, and
+through the C<fingerprint> every endpoint's origin and dialect, the provider
+id and C<allow_internal> (no TLS pin). A change of the model list,
+capabilities or an endpoint path needs nothing. Anything pinned that changed
+-- or an entry edited by hand, or without a fingerprint -- stops
+C<--provider ALIAS> (exit C<1>, or C<3> for an entry that is not
+well-formed), naming what differs, until C<provider add> is run again and
+accepted.
+
+=item * B<C<--allow-internal>> belongs to the alias: given to C<add> it is
+stored and covered by the pin; it is a usage error next to a stored alias.
+
+=item * B<The name> is an alias when it is stored (lowercase letters,
+digits, C<-> and C<_>, at most 32: it can never look like a host); any
+other C<--provider> value is a HOST.
+
+=back
+
 =head2 The provider document
 
 C<--json>, C<--msgpack> and C<--yaml> write one document (no stream):
@@ -697,7 +749,8 @@ and compatibility rules are those of L</Versions>.
 
 =item C<0> -- success, including C<--help>, C<--version>, the exports, C<config explain>,
 C<config migrate> (also with nothing to migrate, and C<--dry-run>), C<session list>, C<session show>, C<session fork>, C<session rm>,
-C<provider inspect> of a valid manifest and leaving the REPL.
+C<provider inspect> of a valid manifest, C<provider add> that stored its
+binding, and leaving the REPL.
 
 =item C<1> -- the run failed: the engine, a tool or the network raised an
 error. With a machine output flag, the document says C<failed>. For
@@ -706,7 +759,10 @@ a step failed. For C<provider inspect>: the manifest was refused, could not be f
 not valid (the document says C<refused> or C<failed>). For C<--provider>
 also: its endpoint cannot be used (another origin, not C<https>, a refused
 address, a dialect or auth type this raider has no adapter for, no
-models, a model on several endpoints); see L</Using a provider>.
+models, a model on several endpoints) or a stored alias no longer matches
+what was accepted; see L</Using a provider> and L</Stored aliases>. For
+C<provider add>: no terminal, an answer other than C<y>, a manifest that
+was refused, not fetched or not valid.
 
 =item C<2> -- usage error: unknown option, a C<-o> that is not
 C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
@@ -716,8 +772,11 @@ for C<provider inspect> also no target or more than one, a
 target that is no host or C<https> origin, or a C<--stream-*> flag; for
 C<--provider> a target that is none, C<-e>, C<-o engine=>, C<-o url=> or
 C<config explain> with it, a model the manifest does not list, no C<-m>
-where it lists several, or no C<-k> where the endpoint needs a key; and
-C<--allow-internal> without C<--provider>.
+where it lists several, or no C<-k> (nor the alias's variable) where the
+endpoint needs a key; for C<provider add> not two words, an alias or
+variable name that is none, auth asked for without C<--credential-env> or
+a document format; and C<--allow-internal> without C<--provider> or with a
+stored alias.
 
 =item C<3> -- configuration error: the config file (project or home; for
 C<config migrate> the F<.raider.yml> to migrate) cannot be read, the
