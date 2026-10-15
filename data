@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-10-15T02:07:33Z
+claimed_by: raider-worker-k149
+class: standard
+completed: 2026-10-15T02:07:33Z
+created: 2026-10-15T01:22:01Z
+id: 149
+priority: low
+started: 2026-10-15T01:58:13Z
+status: done
+title: 'Hall::Telegram: POD nennt telegram.poll_error/update_error nicht'
+updated: 2026-10-15T02:07:33Z
+---
+
+Randbefund aus k147: Die neuen Events telegram.poll_error und telegram.update_error (Backoff bei 401/409/429, scheiternde Updates) fehlen im Modul-POD. Dazu: 2xx mit unlesbarem Body zaehlt jetzt als Fehler, auch dokumentieren.
+
+2026-10-15 01:53 Hall/Telegram.pm POD: Absatz 'Poll errors' (poll_error mit bot/status/error, 2xx mit unlesbarem Body = Fehler, Backoff, 401, Token-Maskierung, update_error). Nur POD, kein Changes-Eintrag.
+
+review: 8d3dcd3
+
+Branch worktree-k133-provider-add, Commit 8d3dcd3 (nur POD, podchecker ok).
