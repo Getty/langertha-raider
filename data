@@ -1,0 +1,43 @@
+---
+block_reason: Offene Getty-Entscheidungen (1)-(4), Empfehlung als Notiz
+blocked: true
+claimed_at: 2026-10-15T02:07:16Z
+claimed_by: raider-worker-k133
+class: standard
+completed: 2026-10-15T02:07:16Z
+created: 2026-09-30T06:01:41Z
+id: 133
+priority: low
+started: 2026-10-15T01:34:32Z
+status: done
+tags:
+- provider-discovery
+- m5
+- needs-decision
+title: 'Provider C3/C4: raider provider add ALIAS HOST + --provider ALIAS (gespeicherte
+  Bindung)'
+updated: 2026-10-15T05:07:14Z
+---
+
+Nach #118, #119, #131, #132. provider add: Fetch (#118), Endpunkte+Auth zeigen, interaktiv bestaetigen, headless -> Fehler; speichert Alias in ~/.raider/config.yml. --provider ALIAS nutzt die Bindung; zustimmungspflichtige Aenderung (#131) -> Fehler bis erneutes provider add; nie Autowahl aus API-Keys (Notiz #78).
+BLOCKIERT durch offene Getty-Entscheidungen: (1) Credential-Speicherung: Env-Var-Name-Referenz (Vorschlag) vs 0600-Secret-Datei vs Keyring vs Kommando; (2) Alias-Schema (providers: in config.yml); (3) was gepinnt wird (Vorschlag: Origin, issuer, Auth-Typen, kein TLS-Pin); (4) --allow-internal pro Alias speichern?
+
+Empfehlung (Abbau 2026-10-14, nicht entschieden/gebaut): (1) Credential-Speicherung: Env-Var-NAME als Referenz in config.yml (credential_env: FOO_API_KEY) -- kein Secret im Klartext, kein Keyring-Zwang, passt zu headless/CI; 0600-Secret-Datei erst bei konkretem Bedarf, Kommando-Variante nicht (Code-Ausführung aus Config). (2) Alias-Schema: providers: { ALIAS: { origin, issuer, auth: [typen], credential_env, allow_internal: bool, pinned_at } } -- flach, ein Eintrag je Alias, Schreibzugriff nur über den Home-Config-Writer (#132). (3) Pin: Origin + issuer + Auth-Typen, kein TLS-Pin (Zertifikatsrotation würde sonst dauernd Zustimmung erzwingen); Änderung = zustimmungspflichtig laut #131. (4) allow_internal pro Alias speichern: ja, explizit und selbst Teil der Pin-Klasse (Ein-/Ausschalten = erneute Zustimmung), nie global vererbbar. Karte bleibt blockiert bis Getty (1)-(4) bestätigt.
+
+2026-10-15 01:31 ENTSCHEIDUNG Getty 2026-10-15 (alle vier nach Empfehlung): (1) credential_env = Env-Var-Name als Referenz; (2) flache providers:-Map, ein Eintrag je Alias; (3) gepinnt werden Origin + issuer + Auth-Typen, kein TLS-Pin; (4) allow_internal pro Alias, Teil der Pin-Klasse. Karte ist damit bauen, nicht mehr blockiert.
+
+2026-10-15 01:53 Gebaut (nicht committet): Provider::Binding (neu, Pin/verify), CLI::Provider->add, Main: provider add + --provider ALIAS, Config->providers (nur Home-Datei; providers: in Projektdatei ignoriert+gemeldet), Activation verify/key_hint-Hook, Docs (README, bin/raider, Changes). Tests t/73 (CLI add+Lauf, FakeHTTPS, offline) und t/74 (Binding+Config). Mutationsproben (verify aus, allow_internal aus Fingerprint, CLI-allow_internal statt gespeichertem, Headless-Guard, Config liest Projektdatei) alle rot. OFFENE ENTSCHEIDUNGEN: (a) fingerprint ist ein zusaetzliches Feld ueber das beschlossene Schema hinaus - noetig, um Provider::Change.fingerprint zu nutzen; (b) credential_env ist NICHT Teil der Pin-Klasse (Beschluss nennt nur Origin/issuer/Auth/allow_internal) - Handeditieren auf andere Variable sendet anderes Secret an gepinnten Origin; ja/nein? (c) Alias gilt, wenn gespeichert, sonst HOST; Alias-Namen [a-z0-9_-]{1,32} ohne Punkt/Doppelpunkt; (d) headless add = Exit 1 vor jedem Fetch, kein --yes; (e) kein provider list/remove (Handedit/erneutes add).
+
+2026-10-15 01:53 Fuer Karten-Notiz auf #23 - was nach #133 noch fehlt: (1) ADR 0005 Policy/Executor (#120-#124): erneute Zustimmung gilt nur fuer Manifest-Pins, keine Policy/Executor-Anbindung, Capabilities autorisieren weiterhin nichts; (2) Alias-Verwaltung: kein provider list/show/remove, Aliase fehlen in config explain und REPL; (3) offen aus #119: (a) Modell auf mehreren Endpunkten/Defaults, (b) --provider-Fehler nur stderr auch mit --json (refused/failed-Dokument?), (c) REPL-Banner 'no API key required' trotz -k; (4) Core-Fixes an Hub gemeldet, Stand ungeklaert: Credential-Header bei Cross-Origin-Redirect, Gemini ohne Key; (5) Hall/ACP kennen --provider/Alias nicht; (6) Credential nur Env-Var-Name, nur api_key-Auth; 0600-Datei/Keyring bewusst zurueckgestellt; (7) Fixtures F33-F36/F38 aus dem Handoff: Abdeckung durch t/67-t/73 nicht systematisch gegen die Liste geprueft; (8) #78-Beschluss (Autowahl nie auf Aliase) ist durch t/73 'no credential' nur indirekt gesichert, kein eigener EngineResolver-Test.
+
+2026-10-15 01:53 Fertig, Tree commit-faehig. Vorschlag Commit: 'raider provider add ALIAS HOST and --provider ALIAS: pinned, stored provider binding (k133)'. Tests: prove -I~/dev/langertha/lib -Ilib -r t gruen (109 Dateien) bis auf t/15 (Stub-Loop ohne delay_future, durch #148 - dort angepasst, danach gruen).
+
+review: 5c9b31d auf worktree-k133-provider-add
+
+2026-10-15 Branch worktree-k133-provider-add (Worktree .claude/worktrees/k133-provider-add), Commit 5c9b31d. t/73 (12) + t/74 (9) + t/25,28,38,39 gruen; 5 Mutationsproben rot. Offen fuer Getty: (a) Zusatzfeld fingerprint im Alias-Eintrag (noetig fuer Provider::Change); (b) credential_env nicht Teil der Pin-Klasse - soll es das sein?; (c) kein provider list/remove/--yes. Folge in langertha: keine.
+
+2026-10-15 02:07 Hub 2026-10-15: gemergt (ff nach main, rebased auf 594190c), Suite 109 Dateien/991 Tests gruen, t/73+t/74 rot gegen altes lib/. OFFEN fuer Getty (aus Worker-Notiz): (a) Zusatzfeld fingerprint im Alias-Eintrag (fuer Provider::Change noetig) ok?; (b) credential_env nicht Teil der Pin-Klasse: soll es? (c) kein provider list/remove/--yes: bauen? Rest siehe #23.
+
+2026-10-15 ENTSCHEIDUNG Getty (Runde 2, bindend): (a) fingerprint als Zusatzfeld ja; (b) credential_env ist Teil der Pin-Klasse (Wechsel = erneute Zustimmung); (c) provider list/show/remove + --yes jetzt bauen.
+
+2026-10-15 Koordinator: Runde-2-Punkte (a)-(c) gebaut und gemerged ueber #150 (e30d1d7, d43ba81), Suite 110 Dateien/1012 gruen.
