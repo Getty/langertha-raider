@@ -30,6 +30,7 @@ principle and lane are in `.claude/rules/raider-rules.md`.
 | Task | Agent |
 |---|---|
 | Implement / refactor / debug behavior-relevant code | `raider-worker` (default) |
+| Standalone binary: packing, `scripts/*-binary*.sh`, release-binaries workflow, packed-only failures | `raider-binary-worker` |
 | Write/extend tests | `raider-test-writer` |
 | Commits, `Changes`, card → done, pre-release audit | `raider-release-manager` |
 

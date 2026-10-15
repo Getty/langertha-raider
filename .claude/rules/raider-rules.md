@@ -42,6 +42,7 @@ This rule depends on whether the Agent/Task tool is available to you.
   | Task | Agent |
   |---|---|
   | Implement / refactor / debug behavior-relevant code | `raider-worker` (default) |
+  | Standalone binary: packing, verify-binary, packed-only failures | `raider-binary-worker` |
   | Write/extend tests | `raider-test-writer` |
   | Commits, `Changes`, card → done, pre-release audit | `raider-release-manager` |
 
