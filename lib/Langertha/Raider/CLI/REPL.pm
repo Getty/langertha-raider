@@ -200,6 +200,7 @@ sub banner {
     # only an endpoint with an auth_ref needs one. Never print the key.
     ? ( defined $resolver->provider->{auth}
         ? 'auth '.$resolver->provider->{auth}.' ('.( length $resolver->api_key ? 'set' : 'missing' ).')'
+        : length $resolver->api_key ? '(the endpoint asks for none; the key you gave is set and sent)'
         : '(no API key required)' )
     : defined $env
       ? ($ENV{$env} ? $env.' (set)' : $env.' (missing)')

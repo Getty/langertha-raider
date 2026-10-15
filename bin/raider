@@ -200,6 +200,11 @@ Runs on the model endpoint a provider's manifest declares, for this one
 run; see L</Using a provider>. Not with C<-e>, C<-o engine=>, C<-o url=>
 or C<config explain>.
 
+=opt --provider-endpoint ID
+
+With C<--provider>: the manifest endpoint to run on, when the model is
+offered on several; see L</Several endpoints and failures>.
+
 =opt --allow-internal
 
 With C<--provider> (and C<provider inspect>): releases loopback, private,
@@ -666,10 +671,19 @@ stderr, not an error: raider works through tool calls.
 
 =back
 
-Failures are reported on stderr before anything runs, without a machine
-document: a usage error exits with C<2>, a provider that cannot be used as
-it is (refused, not fetched, not valid, an unknown dialect or auth type)
-with C<1>.
+=head2 Several endpoints and failures
+
+A model that the manifest lists on several endpoints raider can use is
+refused, not guessed: the error names the endpoints and C<--provider-endpoint
+ID> chooses one (also for an alias).
+
+Failures are reported on stderr before anything runs: a usage error exits
+with C<2>, a provider that cannot be used as it is (refused, not fetched,
+not valid, an unknown dialect or auth type) with C<1>. With a machine
+output flag the same failure is also one document on stdout, C<status>
+C<refused> (an address, redirect, origin or stored binding the rules do not
+allow) or C<failed>, with C<error> and the C<provider> as given; the exit
+status is the same with and without the flag.
 
 =head2 Stored aliases
 
@@ -800,8 +814,9 @@ where it lists several, or no C<-k> (nor the alias's variable) where the
 endpoint needs a key; for C<provider add> not two words, an alias or
 variable name that is none, auth asked for without C<--credential-env> or
 a document format; for C<provider show> and C<provider remove> not one
-word or an alias that is not stored; and C<--allow-internal> without
-C<--provider> or with a stored alias.
+word or an alias that is not stored; and C<--allow-internal> or
+C<--provider-endpoint> without C<--provider>, or C<--allow-internal> with a
+stored alias.
 
 =item C<3> -- configuration error: the config file (project or home; for
 C<config migrate> the F<.raider.yml> to migrate) cannot be read, the

@@ -454,6 +454,10 @@ The aliases also show in `raider config explain` and the REPL banner.
   hand-edited entry no longer matches.
 - A name that is a stored alias is the binding; any other `--provider` value is a
   HOST as before.
+- A model that the manifest lists on several usable endpoints is refused with the
+  endpoints named; `--provider-endpoint ID` chooses one.
+- A `--provider` that cannot run is also one `refused` or `failed` document on
+  stdout with `--json`; the exit status is the same with and without it.
 
 ## Tools
 

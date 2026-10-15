@@ -177,8 +177,8 @@ sub _fetch_manifest {
 =method activate
 
     my ( $exit, $activation ) = $provider->activate($target,
-      allow_internal => $bool, model => $model, has_api_key => $bool,
-      binding => { alias => $alias, entry => $entry, credential_env => $name });
+      allow_internal => $bool, model => $model, endpoint => $id, has_api_key => $bool,
+      machine => $machine, binding => { alias => $alias, entry => $entry, credential_env => $name });
 
 With C<binding> (C<raider --provider ALIAS>) the manifest must still be
 what the alias accepted (L<Langertha::Raider::Provider::Binding/verify>);
@@ -205,6 +205,7 @@ sub activate {
   my $binding = $opt{binding};
   my $got = $activation->activate_f($target,
     model       => $opt{model},
+    endpoint    => $opt{endpoint},
     has_api_key => $opt{has_api_key} ? 1 : 0,
     ( $binding ? (
       verify   => sub { $self->_verify_binding($binding, @_) },
@@ -216,10 +217,34 @@ sub activate {
   unless ($got->{status} eq 'completed') {
     my $status = $got->{status} eq 'usage' ? '' : $got->{status}.': ';
     $self->_err('raider --provider: '.$status.$self->output->error_text($got->{error})."\n");
+    $self->failure_document($opt{machine}, $got->{status}, $got->{error}, $target) if $opt{machine};
     return $got->{status} eq 'usage' ? 2 : 1;
   }
   $self->_err('raider --provider: warning: '.$_."\n") for @{ $got->{warnings} };
   return ( undef, $got );
+}
+
+=method failure_document
+
+    $provider->failure_document($machine, 'refused', $error, $target);
+
+With a machine format (C<--json> and friends), the C<--provider> that could
+not run is also a document on stdout, as for a run that failed (ADR 0013):
+C<status> C<refused> for a policy refusal (address, redirect, origin, a
+stored alias that no longer matches), else C<failed> (also for a usage
+error, whose exit status stays C<2>), C<error> and the C<provider> target.
+The message on L</err> is kept.
+
+=cut
+
+sub failure_document {
+  my ( $self, $machine, $status, $error, $target ) = @_;
+  $machine->finish($machine->document(
+    ( $status eq 'refused' ? 'refused' : 'failed' ),
+    error    => $self->output->error_text($error),
+    provider => $target,
+  ));
+  return;
 }
 
 sub _verify_binding {

@@ -61,7 +61,8 @@ auth type this raider has no adapter for, no models, a model on several
 endpoints), or a stored alias that no longer matches what was accepted;
 for C<provider add>: no terminal, an answer other than C<y>, a manifest
 that was refused, not fetched or not valid; for C<provider remove>: no
-terminal and no C<--yes>, or an answer other than C<y>.
+terminal and no C<--yes>, or an answer other than C<y>. With a machine
+format a failed C<--provider> is also the C<refused> or C<failed> document.
 
 =item C<2> -- usage error: unknown option, a C<-o> that is not
 C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
@@ -218,6 +219,9 @@ Options:
                            its key from the environment variable it names
                            (or -k); stops when the provider changed origin,
                            issuer, endpoints or auth since you accepted it
+      --provider-endpoint ID
+                           With --provider: the manifest endpoint to use
+                           when the model is offered on several
       --allow-internal     With --provider: allow a loopback, private,
                            link-local or reserved provider address
   -o, --option KEY=VALUE   Engine attribute (repeatable), e.g.
@@ -332,6 +336,7 @@ sub parse_options {
     $parser->getoptionsfromarray(\@argv,
       'e|engine=s'            => \$opt{engine},
       'provider=s'            => \$opt{provider},
+      'provider-endpoint=s'   => \$opt{provider_endpoint},
       'allow-internal'        => \$opt{allow_internal},
       'm|model=s'             => \$opt{model},
       'r|root=s'              => \$opt{root},
@@ -532,6 +537,10 @@ sub run {
   }
   if (my $problem = $self->provider_usage_error($opt, $config_cmd)) {
     $self->_warn($problem."\n");
+    if ( $opt->{machine} && defined $opt->{provider} ) {
+      my $machine = $self->machine_class->new(%{ $opt->{machine} }, out => $self->output->out);
+      $self->_provider_failure($machine, failed => $problem, $opt->{provider}, Time::HiRes::time());
+    }
     return EXIT_USAGE;
   }
   if ($session_cmd) {
@@ -588,12 +597,16 @@ sub run {
       my $alias = $target;
       my $entry = $config->providers->{$alias};
       if ( my $why = $self->binding_class->problem($entry) ) {
-        $self->_warn("raider --provider: alias '".$alias."' in ".$config->home_file.': '.$why
-          .'; accept it again with: raider provider add '.$alias." HOST\n");
+        my $text = "raider --provider: alias '".$alias."' in ".$config->home_file.': '.$why
+          .'; accept it again with: raider provider add '.$alias.' HOST';
+        $self->_warn($text."\n");
+        $self->_provider_failure($machine, failed => $text, $alias, $t0);
         return EXIT_CONFIG;
       }
       if ($opt->{allow_internal}) {
-        $self->_warn("--allow-internal: not with a stored alias; it is part of the binding, set by raider provider add\n");
+        my $text = '--allow-internal: not with a stored alias; it is part of the binding, set by raider provider add';
+        $self->_warn($text."\n");
+        $self->_provider_failure($machine, failed => $text, $alias, $t0);
         return EXIT_USAGE;
       }
       $target  = $entry->{origin};
@@ -608,6 +621,8 @@ sub run {
       $target,
       allow_internal => $opt->{allow_internal},
       model          => $opt->{model} // $cli_opts->{model},
+      endpoint       => $opt->{provider_endpoint},
+      machine        => $machine,
       has_api_key    => length($opt->{api_key} // $cli_opts->{api_key} // $args{api_key} // '') ? 1 : 0,
       %binding,
     );
@@ -1074,6 +1089,16 @@ sub provider_command {
   return $provider->inspect($words[0], allow_internal => $allow_internal, machine => $machine);
 }
 
+# A failed --provider before the activation ran, as the failed document of
+# a machine format (nothing without one).
+sub _provider_failure {
+  my ( $self, $machine, $status, $error, $target, $t0 ) = @_;
+  return unless $machine;
+  $machine->finish($machine->document($status,
+    error => $error, provider => $target, elapsed => Time::HiRes::time() - $t0));
+  return;
+}
+
 =method provider_usage_error
 
     my $problem = $main->provider_usage_error($opt, $config_cmd);
@@ -1088,7 +1113,9 @@ C<config explain>; C<--allow-internal> only goes with C<--provider>.
 sub provider_usage_error {
   my ( $self, $opt, $config_cmd ) = @_;
   unless (defined $opt->{provider}) {
-    return $opt->{allow_internal} ? '--allow-internal: only with --provider' : undef;
+    return '--allow-internal: only with --provider' if $opt->{allow_internal};
+    return '--provider-endpoint: only with --provider' if defined $opt->{provider_endpoint};
+    return;
   }
   my $cli_opts = $opt->{engine_options} // {};
   my @conflicts = (
