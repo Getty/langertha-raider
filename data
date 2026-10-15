@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-10-15T02:07:27Z
+claimed_by: raider-worker-k148
+class: standard
+completed: 2026-10-15T02:07:27Z
+created: 2026-10-15T01:21:55Z
+id: 148
+priority: medium
+started: 2026-10-15T01:57:55Z
+status: done
+title: 'web_search: kein eigenes Timeout (geteilter $http ohne per-request timeout)'
+updated: 2026-10-15T02:07:27Z
+---
+
+Randbefund aus k146: web_fetch hat jetzt Request- und Stall-Timeouts, web_search nutzt weiter den geteilten $http ohne per-request timeout und kann haengen. Gleiche Timeouts wie web_fetch setzen, Regressionstest nach t/17_web_fetch_limits.t.
+
+2026-10-15 01:53 WebTools.pm: Default-Http mit timeout/stall_timeout, web_search-Gesamttimeout (wait_any, Tool-Fehler). t/17 neuer Subtest, Mutationsprobe rot; t/15 TestLoop um delay_future ergaenzt. Changes-Eintrag.
+
+review: d129ece
+
+Branch worktree-k133-provider-add, Commit d129ece. t/15,t/16,t/17 gruen, Mutation rot. Luecke: Default-Client-timeout/stall_timeout offline nicht testbar (https), Test belegt nur den Gesamt-Timer.
