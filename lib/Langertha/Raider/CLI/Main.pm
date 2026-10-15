@@ -35,8 +35,8 @@ use Langertha::Raider::Skill;
 B<Internal module.> Its interface may change without notice.
 
 Everything F<raider> does with its command line: the C<hall>, C<acp>,
-C<config explain>, C<config migrate>, C<session>, C<provider inspect> and
-C<provider add> subcommands, option parsing, the skill exports, and
+C<config explain>, C<config migrate>, C<session>, C<provider inspect>,
+C<provider add>, C<provider list>, C<provider show> and C<provider remove> subcommands, option parsing, the skill exports, and
 then either the REPL (L<Langertha::Raider::CLI::REPL>) or one prompt
 (L<Langertha::Raider::CLI::Runner>). L</run> returns the exit status.
 
@@ -47,7 +47,8 @@ then either the REPL (L<Langertha::Raider::CLI::REPL>) or one prompt
 =item C<0> -- success, including C<--help>, C<--version>, the exports, C<config explain>,
 C<config migrate> (also with nothing to migrate, and C<--dry-run>), C<session list>, C<session show>, C<session fork>, C<session rm>,
 C<provider inspect> of a valid manifest, C<provider add> that stored the
-binding, and leaving the REPL.
+binding, C<provider list>, C<provider show> and C<provider remove> that
+removed the alias, and leaving the REPL.
 
 =item C<1> -- the run failed: the engine, a tool or the network raised an
 error (with a machine format, the output is the C<failed> document); for
@@ -59,7 +60,8 @@ not usable (another origin, not https, a refused address, a dialect or
 auth type this raider has no adapter for, no models, a model on several
 endpoints), or a stored alias that no longer matches what was accepted;
 for C<provider add>: no terminal, an answer other than C<y>, a manifest
-that was refused, not fetched or not valid.
+that was refused, not fetched or not valid; for C<provider remove>: no
+terminal and no C<--yes>, or an answer other than C<y>.
 
 =item C<2> -- usage error: unknown option, a C<-o> that is not
 C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
@@ -75,7 +77,9 @@ with it, a model the manifest does not list, no C<-m> where it lists
 several models, or no C<-k> where the endpoint needs a key;
 C<--allow-internal> without C<--provider>, or with a stored alias; for
 C<provider add>: not two words, an alias or variable name that is none,
-auth asked for and no C<--credential-env>, a machine format.
+auth asked for and no C<--credential-env>, a machine format; for
+C<provider show> and C<provider remove>: not one word, or an alias that is
+not stored.
 
 =item C<3> -- configuration error: the config file (F<.raider/config.yml>,
 else F<.raider.yml>; for C<config migrate> the F<.raider.yml> to migrate)
@@ -190,6 +194,10 @@ Usage: raider [options] [prompt...]
        raider provider add ALIAS HOST [--credential-env NAME] [--allow-internal]
                                            bind ALIAS to a provider (asks
                                            on a terminal); then --provider ALIAS
+       raider provider list [--json]       the stored provider aliases
+       raider provider show ALIAS [--json] one alias, every field
+       raider provider remove ALIAS [--yes]
+                                           delete an alias (asks, or --yes)
 
 Options:
   -e, --engine NAME        anthropic, openai, deepseek, groq, mistral, gemini,
@@ -454,9 +462,9 @@ sub run {
     return EXIT_OK;
   }
 
-  # raider provider inspect TARGET | add ALIAS TARGET [options]. Only these
+  # raider provider inspect TARGET | add ALIAS TARGET | list | show ALIAS | remove ALIAS [options]. Only these
   # words make the subcommand; "raider provider is down?" stays a prompt.
-  if (@argv >= 2 && $argv[0] eq 'provider' && $argv[1] =~ /\A(?:inspect|add)\z/) {
+  if (@argv >= 2 && $argv[0] eq 'provider' && $argv[1] =~ /\A(?:inspect|add|list|show|remove)\z/) {
     my ( undef, $cmd ) = splice @argv, 0, 2;
     return $self->provider_command($cmd => @argv);
   }
@@ -604,6 +612,7 @@ sub run {
       %binding,
     );
     return $exit if defined $exit;
+    $activation->{alias} = $binding{binding}{alias} if $binding{binding};
     $args{provider} = $activation;
   }
 
@@ -969,6 +978,19 @@ Options:
 
 Exit status: 0 stored, 1 not stored (no terminal, declined, refused, not
 fetched or not valid), 2 usage error.
+
+Usage: raider provider list [--json]
+       raider provider show ALIAS [--json]
+       raider provider remove ALIAS [--yes]
+
+list and show print the aliases stored in ~/.raider/config.yml (origin,
+issuer, auth types, the name of the credential variable, whether an
+internal address is allowed, when it was accepted); nothing is fetched.
+remove asks on a terminal; without one it needs --yes and is an error
+otherwise.
+
+Exit status: 0 done, 1 not done (declined, no terminal and no --yes),
+2 usage error or an alias that is not stored.
 USAGE
 
 =method provider_command
@@ -988,12 +1010,16 @@ sub provider_command {
   # --allow-internal belongs to this subcommand only, so it is taken out
   # before the common options are parsed.
   my $allow_internal = 0;
+  my $yes = 0;
   my $credential_env;
   my @rest;
   while (@argv) {
     my $arg = shift @argv;
     if ($arg eq '--') { push @rest, $arg, @argv; last }
-    if ($arg eq '--allow-internal') { $allow_internal = 1; next }
+    if ($cmd eq 'inspect' || $cmd eq 'add') {
+      if ($arg eq '--allow-internal') { $allow_internal = 1; next }
+    }
+    if ($cmd eq 'remove' && $arg eq '--yes') { $yes = 1; next }
     if ($cmd eq 'add' && $arg =~ /\A--credential-env(?:=(.*))?\z/s) {
       $credential_env = defined $1 ? $1 : shift @argv;
       unless (defined $credential_env) {
@@ -1009,14 +1035,20 @@ sub provider_command {
     $self->output->emit($self->provider_usage);
     return EXIT_OK;
   }
-  if ( @words != ( $cmd eq 'add' ? 2 : 1 ) ) {
-    $self->_warn($cmd eq 'add'
-      ? "Usage: raider provider add ALIAS HOST[:PORT] | https://HOST[:PORT] [--credential-env NAME] [--allow-internal]\n"
-      : "Usage: raider provider inspect HOST[:PORT] | https://HOST[:PORT] [--json] [--allow-internal]\n");
+  my %words = ( add => 2, list => 0 );
+  if ( @words != ( $words{$cmd} // 1 ) ) {
+    my %usage = (
+      add     => 'raider provider add ALIAS HOST[:PORT] | https://HOST[:PORT] [--credential-env NAME] [--allow-internal]',
+      list    => 'raider provider list [--json]',
+      show    => 'raider provider show ALIAS [--json]',
+      remove  => 'raider provider remove ALIAS [--yes]',
+      inspect => 'raider provider inspect HOST[:PORT] | https://HOST[:PORT] [--json] [--allow-internal]',
+    );
+    $self->_warn('Usage: '.$usage{$cmd}."\n");
     return EXIT_USAGE;
   }
-  if ( $cmd eq 'add' && $opt->{machine} ) {
-    $self->_warn("raider provider add: confirmed by a person on a terminal; no document output\n");
+  if ( ( $cmd eq 'add' || $cmd eq 'remove' ) && $opt->{machine} ) {
+    $self->_warn('raider provider '.$cmd.": confirmed by a person on a terminal or by --yes; no document output\n");
     return EXIT_USAGE;
   }
   $ENV{ANSI_COLORS_DISABLED} = 1 if $opt->{no_color} || $opt->{machine};
@@ -1029,12 +1061,16 @@ sub provider_command {
     $machine = $self->machine_class->new(%$m, out => $self->output->out);
   }
   my $provider = $self->provider_class->new(output => $self->output, err => $self->err, in => $self->in);
+  # The home file only: the project's root plays no part in a binding.
+  my $config = $cmd =~ /\A(?:add|list|show|remove)\z/
+    ? $self->config_class->new(root => $opt->{root} // Path::Tiny->cwd->stringify) : undef;
   if ($cmd eq 'add') {
-    # The home file only: the project's root plays no part in a binding.
-    my $config = $self->config_class->new(root => $opt->{root} // Path::Tiny->cwd->stringify);
     return $provider->add($words[0], $words[1],
       config => $config, allow_internal => $allow_internal, credential_env => $credential_env);
   }
+  return $provider->list( config => $config, machine => $machine ) if $cmd eq 'list';
+  return $provider->describe( $words[0], config => $config, machine => $machine ) if $cmd eq 'show';
+  return $provider->remove( $words[0], config => $config, yes => $yes ) if $cmd eq 'remove';
   return $provider->inspect($words[0], allow_internal => $allow_internal, machine => $machine);
 }
 

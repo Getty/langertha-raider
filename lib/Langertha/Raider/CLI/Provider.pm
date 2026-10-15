@@ -38,7 +38,8 @@ C<raider provider add ALIAS HOST>: L</add> shows what a manifest declares
 and what would be pinned, asks a person, and stores the alias in the home
 file (L<Langertha::Raider::Provider::Binding>); C<raider --provider ALIAS>
 then activates through the stored binding and stops when it no longer
-matches.
+matches. C<provider list>, C<show> and C<remove> manage the stored
+aliases.
 
 =attr output
 
@@ -325,8 +326,11 @@ sub add {
   if ( defined $old ) {
     my $why = ref $old eq 'HASH' && !$binding->problem($old)
       ? $binding->verify($old, $manifest, $origin) : 'the stored binding is not valid';
+    my $env_changed = ref $old eq 'HASH' && ( $old->{credential_env} // '' ) ne ( $entry->{credential_env} // '' )
+      ? 'credential_env '.( $old->{credential_env} // 'none' ).' -> '.( $entry->{credential_env} // 'none' ) : undef;
     $out->emit($out->c(warn => "replaces the stored binding '".$alias."'"
-      .( defined $why ? ' (differs: '.$why.')' : ' (same pin; credential and metadata are rewritten)' )), "\n");
+      .( defined $env_changed ? ' ('.$env_changed.'; the value of the new variable is what is sent)'
+        : defined $why ? ' (differs: '.$why.')' : ' (same pin; metadata is rewritten)' )), "\n");
   }
   $out->emit("\n", $out->c(meta => 'Raider will keep this origin, issuer and auth; a change of any of them stops '
     .'--provider '.$alias.' until you accept again.'), "\n");
@@ -351,6 +355,161 @@ sub add {
   }
   $out->emit($out->c(title => "bound '".$alias."'"), ': raider --provider '.$alias."\n");
   return 0;
+}
+
+=method list
+
+    my $exit = $provider->list( config => $config, machine => $machine );
+
+C<raider provider list>: the aliases stored under C<providers:> of the
+home file, sorted, each with its origin, issuer, auth types, credential
+variable (the name, never a value), whether an internal address is allowed
+and when it was accepted; an entry that cannot be used says why. Nothing is
+fetched. With a machine, one document: C<status> C<completed> and
+C<providers>, a list of the L<Langertha::Raider::Provider::Binding/summary>
+rows without C<fingerprint>. Returns C<0>; C<1> when the home file cannot
+be read.
+
+=cut
+
+sub list {
+  my ( $self, %opt ) = @_;
+  my $rows = $self->_rows($opt{config});
+  return 1 unless $rows;
+  if ( my $machine = $opt{machine} ) {
+    $machine->write({ version => $machine->version, status => 'completed',
+      providers => [ map { $self->_public($_) } @$rows ] });
+    return 0;
+  }
+  my $out = $self->output;
+  unless (@$rows) {
+    $out->emit($out->c(meta => 'no provider aliases; bind one with: raider provider add ALIAS HOST'), "\n");
+    return 0;
+  }
+  for my $row (@$rows) {
+    $out->emit(sprintf('%s  ', $out->c(title => sprintf('%-16s', $row->{alias}))),
+      $row->{problem} ? $out->c(warn => 'unusable: '.$row->{problem})
+        : join('  ', $row->{origin},
+          $out->c(meta => 'auth: '.( @{ $row->{auth} } ? join(', ', @{ $row->{auth} }) : 'none' )),
+          $out->c(meta => 'credential: '.( $row->{credential_env} // 'none' )),
+          ( $row->{allow_internal} ? $out->c(warn => 'internal allowed') : () )),
+      "\n");
+  }
+  return 0;
+}
+
+=method describe
+
+    my $exit = $provider->describe($alias, config => $config, machine => $machine);
+
+C<raider provider show ALIAS>: one stored alias with every field of its
+entry, including the pinned C<fingerprint>. Returns C<0>; C<2> for an
+alias that is not stored; C<1> when the home file cannot be read.
+
+=cut
+
+sub describe {
+  my ( $self, $alias, %opt ) = @_;
+  my $rows = $self->_rows($opt{config});
+  return 1 unless $rows;
+  my ( $row ) = grep { $_->{alias} eq ( $alias // '' ) } @$rows;
+  unless ($row) {
+    $self->_err("raider provider show: no stored alias '".( $alias // '' )."'\n");
+    return 2;
+  }
+  if ( my $machine = $opt{machine} ) {
+    $machine->write({ version => $machine->version, status => 'completed', provider => $row });
+    return 0;
+  }
+  my $out = $self->output;
+  my $line = sub { $out->emit($out->c(meta => sprintf('%-15s ', $_[0])), @_[ 1 .. $#_ ], "\n") };
+  $line->('alias', $out->c(title => $row->{alias}));
+  $line->('unusable', $out->c(warn => $row->{problem})) if $row->{problem};
+  $line->('origin', $row->{origin} // '');
+  $line->('issuer', $row->{issuer} // '');
+  $line->('auth', @{ $row->{auth} // [] } ? join(', ', @{ $row->{auth} }) : 'none');
+  $line->('credential_env', $row->{credential_env} // 'none');
+  $line->('allow_internal', $row->{allow_internal} ? 'yes' : 'no');
+  $line->('pinned_at', $row->{pinned_at} // '');
+  $line->('fingerprint', $row->{fingerprint} // '');
+  return 0;
+}
+
+=method remove
+
+    my $exit = $provider->remove($alias, config => $config, yes => $bool);
+
+C<raider provider remove ALIAS>: deletes the alias from C<providers:> of
+the home file through L<Langertha::Raider::Config/update_home>. Asks on a
+terminal; without a terminal it needs C<yes> (C<--yes>) and is an error
+otherwise, nothing removed. Returns C<0> removed, C<1> not removed
+(declined, no terminal and no C<yes>, home file not written), C<2> for an
+alias that is not stored.
+
+=cut
+
+sub remove {
+  my ( $self, $alias, %opt ) = @_;
+  my $say = sub { $self->_err('raider provider remove: '.join('', @_)."\n") };
+  my $config = $opt{config};
+  my $stored = eval { $config->providers };
+  unless ($stored) {
+    $say->($self->output->error_text($@));
+    return 1;
+  }
+  unless ( defined $alias && exists $stored->{$alias} ) {
+    $say->("no stored alias '".( $alias // '' )."'");
+    return 2;
+  }
+  unless ( $opt{yes} ) {
+    unless ($self->interactive) {
+      $say->('needs a terminal to ask, or --yes; nothing was removed');
+      return 1;
+    }
+    my $out = $self->output;
+    my $entry = $stored->{$alias};
+    $out->emit("Remove the binding '".$alias."'".( ref $entry eq 'HASH' && defined $entry->{origin}
+      ? ' ('.$entry->{origin}.')' : '' ).' from ', $config->home_file // '~/.raider/config.yml', '? [y/N] ');
+    my $in = $self->in;
+    my $answer = <$in>;
+    unless ( defined $answer && $answer =~ /\A\s*y(?:es)?\s*\z/i ) {
+      $say->('not removed');
+      return 1;
+    }
+  }
+  my $written = eval {
+    $config->update_home(sub {
+      my ( $data ) = @_;
+      return 0 unless ref $data->{providers} eq 'HASH' && exists $data->{providers}{$alias};
+      delete $data->{providers}{$alias};
+      delete $data->{providers} unless %{ $data->{providers} };
+      return 1;
+    });
+  };
+  unless ($written) {
+    $say->('not removed: '.$self->output->error_text($@ || 'the home file was not written'));
+    return 1;
+  }
+  $self->output->emit($self->output->c(title => "removed '".$alias."'"), "\n");
+  return 0;
+}
+
+# The stored aliases as Binding summaries, sorted; undef (after the
+# message) when the home file cannot be read.
+sub _rows {
+  my ( $self, $config ) = @_;
+  my $stored = eval { $config->providers };
+  unless ($stored) {
+    $self->_err('raider provider: '.$self->output->error_text($@)."\n");
+    return;
+  }
+  return [ map { $self->binding_class->summary($_, $stored->{$_}) } sort keys %$stored ];
+}
+
+# A row of the list document: the fingerprint is for show.
+sub _public {
+  my ( $self, $row ) = @_;
+  return { map { $_ => $row->{$_} } grep { $_ ne 'fingerprint' } keys %$row };
 }
 
 =method document

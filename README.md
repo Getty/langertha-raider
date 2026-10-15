@@ -118,6 +118,7 @@ raider config migrate [--dry-run]   move .raider.yml / .raider.md into .raider/
 raider session list | show | resume | fork | rm     see Sessions
 raider provider inspect HOST        show a provider's manifest, see Providers
 raider provider add ALIAS HOST      bind ALIAS to a provider (asks on a terminal), see Providers
+raider provider list | show ALIAS | remove ALIAS [--yes]     the stored aliases, see Providers
 raider --provider HOST|ALIAS [options]   run on a provider's manifest endpoint, see Providers
 raider hall <subcommand>            the optional Raider Hall daemon
 raider acp <subcommand>             the bundled ACP client
@@ -425,11 +426,25 @@ providers:
     fingerprint: 3f2a...
 ```
 
+`fingerprint` is a field of its own beyond origin, issuer and auth: the digest of
+what you accepted, which `--provider ACME` compares.
+
+```bash
+raider provider list                 # the stored aliases, nothing fetched
+raider provider show acme            # every field, the fingerprint included
+raider provider remove acme          # asks; without a terminal it needs --yes
+```
+
+The aliases also show in `raider config explain` and the REPL banner.
+
 - **Credential**: only the *name* of the environment variable is stored, never the
   value; it is read at run time and sent to the pinned origin only (`-k` overrides
   it for one run). It is required when the endpoints ask for auth and never guessed.
-  `*_API_KEY` variables of other providers never select or feed an alias.
-- **Pinned**: origin, issuer and auth types — and, in the fingerprint, each
+  `*_API_KEY` variables of other providers never select or feed an alias. The name
+  is pinned too: another variable is another secret going to the same origin, so a
+  change needs `provider add` again and `--provider ACME` stops until then.
+- **Pinned**: origin, issuer and auth types, the credential variable and
+  `--allow-internal` — and, in the fingerprint, each
   endpoint's origin and dialect and the provider id. No TLS pin: a certificate
   rotation changes nothing. A changed model list, capability or path does not
   matter; anything pinned that changed stops `--provider ACME` until you run

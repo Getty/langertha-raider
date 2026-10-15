@@ -163,7 +163,9 @@ each mounted tool with its source and effect classes (C<unknown> for a tool
 the built-in table does not know); and, when F<~/.raider/config.yml> has a
 C<project_tools>, each of its selectors (matched or not, and why) and each
 tool name with the selectors granting it, the packs requesting it and
-whether raider knows it -- information only.
+whether raider knows it -- information only; and, when the home file has
+stored provider aliases (C<providers:>), each with origin, auth types,
+credential variable name and whether an internal address is allowed.
 
 =cut
 
@@ -217,6 +219,17 @@ sub config_report {
       my $fx = $t->{effects};
       $self->emit(sprintf("  %s %-10s  %s\n", $self->c(title => sprintf('%-22s', $t->{name})), $t->{source},
         $self->c(meta => !$fx ? 'unknown' : @$fx ? join(', ', @$fx) : 'none')));
+    }
+  }
+  if (my $providers = $report->{providers}) {
+    $self->emit($self->c(meta => 'providers: '), $self->c(meta => '(stored aliases of the home file; raider provider list|show|remove)'), "\n");
+    for my $p (@$providers) {
+      $self->emit(sprintf("  %s %s\n", $self->c(title => sprintf('%-20s', $p->{alias})),
+        $p->{problem} ? $self->c(warn => 'unusable: '.$p->{problem})
+          : join('  ', $p->{origin},
+            $self->c(meta => 'auth: '.( @{ $p->{auth} } ? join(', ', @{ $p->{auth} }) : 'none' )),
+            $self->c(meta => 'credential: '.( $p->{credential_env} // 'none' )),
+            ( $p->{allow_internal} ? $self->c(warn => 'internal allowed') : () ))));
     }
   }
   if (my $pt = $report->{project_tools}) {

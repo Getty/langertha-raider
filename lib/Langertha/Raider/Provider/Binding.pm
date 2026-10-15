@@ -41,7 +41,10 @@ trust decision.
 =item C<credential_env> -- the B<name> of the environment variable the
 credential is read from at run time. The secret itself is never written to
 a file; the name is shown before the user accepts, because that variable's
-value is what goes to the provider.
+value is what goes to the provider. It is part of the pin: pointing an
+alias at another variable (by hand, say) would send another secret to the
+pinned origin, so it needs the same renewed acceptance (C<raider provider
+add>) as a changed origin, and C<raider --provider ALIAS> stops until then.
 
 =item C<allow_internal> -- whether this alias may resolve to a loopback,
 private or link-local address. Per alias and part of what the user
@@ -50,9 +53,10 @@ global setting and not switched by a command-line flag.
 
 =item C<pinned_at> -- when the user accepted, UTC, for display only.
 
-=item C<fingerprint> -- the L<Langertha::Raider::Provider::Change/fingerprint>
-of the accepted manifest (origin, issuer, provider id, every endpoint's
-origin, dialect and auth type) together with C<allow_internal>. The
+=item C<fingerprint> -- a field beyond origin, issuer and auth, the
+L<Langertha::Raider::Provider::Change/fingerprint> of the accepted
+manifest (origin, issuer, provider id, every endpoint's origin, dialect and
+auth type) together with C<allow_internal> and C<credential_env>. The
 precise record that L</verify> compares: it also catches an endpoint that
 moved, which C<origin>, C<issuer> and C<auth> alone would not show. An entry
 without one never matches.
@@ -69,7 +73,7 @@ sub change_class { 'Langertha::Raider::Provider::Change' }
 sub digest_class { 'Langertha::Raider::Approval' }
 
 # The name of the pin's shape, part of the fingerprint like Change's VIEW.
-use constant PIN => 'raider-provider-binding-1';
+use constant PIN => 'raider-provider-binding-2';
 
 =method valid_alias
 
@@ -113,16 +117,21 @@ sub auth_types {
 
 =method fingerprint
 
-    my $hex = $class->fingerprint($manifest, $origin, $allow_internal);
+    my $hex = $class->fingerprint($manifest, $origin, $allow_internal, $credential_env);
+
+The digest the entry pins: the consent fingerprint of the manifest plus the
+two binding settings that are part of the pin class. C<$credential_env> is
+undef for a provider that asks for no auth.
 
 =cut
 
 sub fingerprint {
-  my ( $self, $manifest, $origin, $allow_internal ) = @_;
+  my ( $self, $manifest, $origin, $allow_internal, $credential_env ) = @_;
   return $self->digest_class->digest_arguments({
     pin            => PIN,
     consent        => $self->change_class->fingerprint($manifest, $origin),
     allow_internal => $allow_internal ? 1 : 0,
+    credential_env => $credential_env // '',
   });
 }
 
@@ -151,7 +160,7 @@ sub entry {
     ( defined $env ? ( credential_env => $env ) : () ),
     allow_internal => $allow,
     pinned_at      => strftime('%Y-%m-%dT%H:%M:%SZ', gmtime( $opt{now} // time )),
-    fingerprint    => $self->fingerprint($manifest, $origin, $allow),
+    fingerprint    => $self->fingerprint($manifest, $origin, $allow, $env),
   };
 }
 
@@ -177,6 +186,36 @@ sub problem {
   return;
 }
 
+=method summary
+
+    my $row = $class->summary($alias, $entry);
+
+The stored entry as a flat, display-safe hash for C<provider list|show>,
+C<config explain> and the REPL: C<alias>, C<origin>, C<issuer>, C<auth>
+(a list), C<credential_env> (or undef), C<allow_internal> (0 or 1),
+C<pinned_at>, C<fingerprint> and, when the entry cannot be used
+(L</problem>), C<problem>. Never reads the environment: whether the
+variable is set is not part of it.
+
+=cut
+
+sub summary {
+  my ( $self, $alias, $entry ) = @_;
+  my $problem = $self->problem($entry);
+  return { alias => $alias, problem => $problem } if ref $entry ne 'HASH';
+  return {
+    alias          => $alias,
+    origin         => $entry->{origin},
+    issuer         => $entry->{issuer},
+    auth           => [ ref $entry->{auth} eq 'ARRAY' ? grep { defined && !ref } @{ $entry->{auth} } : () ],
+    credential_env => $entry->{credential_env},
+    allow_internal => $entry->{allow_internal} ? 1 : 0,
+    pinned_at      => $entry->{pinned_at},
+    fingerprint    => $entry->{fingerprint},
+    ( defined $problem ? ( problem => $problem ) : () ),
+  };
+}
+
 =method verify
 
     my $why = $class->verify($entry, $manifest, $origin);
@@ -195,14 +234,14 @@ sub verify {
   my $view = $self->change_class->consent_view($manifest, $origin);
   my $allow = $entry->{allow_internal} ? 1 : 0;
   return if defined $entry->{fingerprint}
-    && $entry->{fingerprint} eq $self->fingerprint($manifest, $origin, $allow);
+    && $entry->{fingerprint} eq $self->fingerprint($manifest, $origin, $allow, $entry->{credential_env});
   my @why;
   push @why, 'origin '.$entry->{origin}.' -> '.$view->{origin} if $entry->{origin} ne $view->{origin};
   push @why, 'issuer '.$entry->{issuer}.' -> '.$view->{issuer} if $entry->{issuer} ne $view->{issuer};
   my @auth = $self->auth_types($manifest, $origin);
   my @was  = sort @{ $entry->{auth} // [] };
   push @why, 'auth ['.join(', ', @was).'] -> ['.join(', ', @auth).']' if "@was" ne "@auth";
-  push @why, 'the endpoints, their origins, dialects or auth, or the binding itself, differ from what was accepted'
+  push @why, 'the endpoints, their origins, dialects or auth, or the binding itself (credential_env, allow_internal), differ from what was accepted'
     unless @why;
   return join('; ', @why);
 }

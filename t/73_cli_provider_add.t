@@ -309,6 +309,41 @@ subtest 'a hand-edited entry never matches' => sub {
   like( $err, qr/alias 'acme' in .*config\.yml: is not a mapping; accept it again with: raider provider add acme HOST/, 'says so' );
 };
 
+subtest 'credential_env is pinned: another variable needs renewed consent (k150)' => sub {
+  serve( manifest() );
+  local $ENV{ACME_KEY} = 'sk-acme';
+  local $ENV{OTHER_SECRET} = 'sk-other-secret';
+  my ( $exit, $out, $err ) = main_run( "y\n", qw( provider add acme ), $host, qw( --allow-internal --credential-env ACME_KEY ) );
+  is( $exit, 0, 'a fresh binding' ) or diag $err;
+  my $before = () = chat_requests();
+  ( $exit, $out, $err ) = main_run( '', '--provider', 'acme', '--json', 'hi' );
+  is( $exit, 0, 'as accepted: runs' ) or diag $err;
+
+  my $data = stored();
+  $data->{providers}{acme}{credential_env} = 'OTHER_SECRET';
+  $config_file->spew_utf8( YAML::PP->new->dump_string($data) );
+  $before = () = chat_requests();
+  ( $exit, $out, $err ) = main_run( '', '--provider', 'acme', '--json', 'hi' );
+  is( $exit, 1, 'by hand to another variable: exit 1' );
+  like( $err, qr/provider alias 'acme' no longer matches what you accepted \(.*credential_env/, 'says what differs' );
+  is( scalar( () = chat_requests() ), $before, 'no request: the other secret was not sent' );
+
+  ( $exit, $out, $err ) = main_run( "y\n", qw( provider add acme ), $host, qw( --allow-internal --credential-env OTHER_SECRET ) );
+  is( $exit, 0, 'provider add with the new variable' ) or diag $err;
+  like( $out, qr/replaces the stored binding 'acme' \(differs: .*\(credential_env, allow_internal\)/, 'the stored one is not what was accepted' )
+    or diag $out;
+  $before = () = chat_requests();
+  ( $exit, $out, $err ) = main_run( '', '--provider', 'acme', '--json', 'hi' );
+  is( $exit, 0, 'after the renewed consent: runs' ) or diag $err;
+  is( [ map { $_->{headers}{authorization} } chat_since($before) ], [ ('Bearer sk-other-secret') x scalar( () = chat_since($before) ) ],
+    'and sends the new variable' );
+
+  ( $exit, $out, $err ) = main_run( "y\n", qw( provider add acme ), $host, qw( --allow-internal --credential-env ACME_KEY ) );
+  is( $exit, 0, 'pointing it back through provider add' ) or diag $err;
+  like( $out, qr/replaces the stored binding 'acme' \(credential_env OTHER_SECRET -> ACME_KEY; the value of the new variable is what is sent\)/,
+    'the change of variable is named before the question' ) or diag $out;
+};
+
 subtest 'a project file cannot bind a provider' => sub {
   my $project = Path::Tiny->tempdir;
   $project->child('.raider.yml')->spew_utf8( "providers:\n  planted:\n    origin: https://evil.example\n" );

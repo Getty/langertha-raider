@@ -20,6 +20,7 @@ use Langertha::Raider::Config;
 use Langertha::Raider::Instructions;
 use Langertha::Raider::Detect;
 use Langertha::Raider::EngineResolver;
+use Langertha::Raider::Provider::Binding;
 use Langertha::Raider::ToolEffects;
 use Langertha::Raider::SessionStore;
 use Langertha::Raider;
@@ -1662,8 +1663,10 @@ sub explain_config {
   } if $self->has_cli_skill_sources;
 
   my ( $detecting, $why ) = $self->detection_state;
+  my $bindings = eval { $self->config->providers } // {};
   return {
     %$report,
+    ( %$bindings ? ( providers => [ map { $self->_binding_class->summary($_, $bindings->{$_}) } sort keys %$bindings ] ) : () ),
     values        => \@values,
     ignored       => \@ignored,
     ( $report->{project_tools}
@@ -1694,6 +1697,8 @@ sub _tool_effects_report {
 }
 
 sub _tool_effects_class { 'Langertha::Raider::ToolEffects' }
+
+sub _binding_class { 'Langertha::Raider::Provider::Binding' }
 
 # One entry per tool name that project_tools names or an active pack
 # requests: the matching selectors that grant it, the packs that request

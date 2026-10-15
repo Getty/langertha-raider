@@ -839,7 +839,10 @@ sub _ignored_providers {
 
 The C<providers:> map of the home file (L</home_file>), as written by
 C<raider provider add> through L</update_home>: one flat entry per alias
-(see L<Langertha::Raider::Provider::Binding>). Empty when there is no home
+(C<origin>, C<issuer>, C<auth>, C<credential_env>, C<allow_internal>,
+C<pinned_at> and the C<fingerprint> of what was accepted; see
+L<Langertha::Raider::Provider::Binding>). C<raider provider remove> deletes
+one through the same writer. Empty when there is no home
 file or no such key. Read from the home file only -- a C<providers:> in a
 project file is ignored and reported (L</explain>), so a repository cannot
 plant a binding. Croaks like L</data> does, and when C<providers:> is not a

@@ -195,6 +195,15 @@ Revision history for Langertha-Raider
       run again. A model-list or capability change does not. API keys in the
       environment never select an alias; providers: in a project file is
       ignored.
+    - New raider provider list, provider show ALIAS and provider remove ALIAS
+      [--yes] manage the stored aliases: list and show print what is pinned
+      (never a secret) and fetch nothing, remove asks on a terminal and needs
+      --yes without one. The aliases also appear in raider config explain and
+      the REPL banner.
+    - credential_env of a stored alias is part of the pin: another variable,
+      by hand or through provider add, needs the renewed acceptance, and
+      raider --provider ALIAS stops until then. Aliases stored before this
+      release are asked for again once.
     - Saving skills (--skills, --claude, the /skill writers) no longer writes
       an empty skills: ~ into an existing default: section of the project
       config.

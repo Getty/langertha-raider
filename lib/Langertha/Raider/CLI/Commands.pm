@@ -197,6 +197,10 @@ sub cmd_model {
 
   if (!length $arg || $subcmd eq 'list') {
     my $current = $app->has_model ? $app->model : '';
+    if ($app->has_provider) {
+      my $p = $app->provider;
+      $out->emit($out->c(meta => 'provider:'), ' ', $out->c(title => ( defined $p->{alias} ? $p->{alias}.' ('.$p->{provider_id}.')' : $p->{provider_id} )), "\n");
+    }
     $out->emit($out->c(meta => 'engine:  '), $out->c(title => $app->engine_name), "\n");
     $out->emit($out->c(meta => 'model:   '), $out->c(title => length $current ? $current : '(engine default)'), "\n");
     my $engine = eval { $app->_engine };

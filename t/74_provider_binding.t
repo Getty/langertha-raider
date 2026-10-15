@@ -85,6 +85,29 @@ subtest 'allow_internal is part of the pin class' => sub {
   like( $class->verify( { %$internal, allow_internal => 0 }, $accepted, $ORIGIN ), qr/differ/, 'switched off by hand' );
 };
 
+subtest 'credential_env is part of the pin class (k150)' => sub {
+  my $moved = { %$entry, credential_env => 'OTHER_SECRET' };
+  my $why = $class->verify( $moved, $accepted, $ORIGIN );
+  like( $why, qr/credential_env/, 'another variable by hand: no match, and the message names credential_env' );
+  my $other = $class->entry( $accepted, $ORIGIN, credential_env => 'OTHER_SECRET', allow_internal => 0 );
+  isnt( $other->{fingerprint}, $entry->{fingerprint}, 'the variable is covered by the fingerprint' );
+  is( $class->verify( $other, $accepted, $ORIGIN ), undef, 'accepted anew with it, it matches' );
+  like( $class->verify( { %$entry, credential_env => undef }, $accepted, $ORIGIN ), qr/differ/, 'dropped by hand' );
+  my $none = $class->entry( manifest( sub { delete $_[0]{endpoints}[0]{auth_ref}; $_[0]{auth} = [] } ), $ORIGIN );
+  is( $class->verify( { %$none, credential_env => 'X' }, manifest( sub { delete $_[0]{endpoints}[0]{auth_ref}; $_[0]{auth} = [] } ), $ORIGIN ),
+    match(qr/differ/), 'added by hand to a binding without auth' );
+};
+
+subtest 'summary: the display-safe fields' => sub {
+  is( $class->summary( acme => $entry ), {
+    alias => 'acme', origin => $ORIGIN.':443', issuer => $ORIGIN, auth => ['api_key'],
+    credential_env => 'EXAMPLE_API_KEY', allow_internal => 0, pinned_at => '1970-01-01T00:00:00Z',
+    fingerprint => $entry->{fingerprint},
+  }, 'fields' );
+  is( $class->summary( bad => 'x' ), { alias => 'bad', problem => 'is not a mapping' }, 'a non-mapping says why' );
+  like( $class->summary( bad => { %$entry, fingerprint => undef } )->{problem}, qr/fingerprint is missing/, 'a malformed entry' );
+};
+
 subtest 'a stored entry is not trusted beyond its shape' => sub {
   my %ok = %$entry;
   for my $case (

@@ -29,6 +29,7 @@ exit Langertha::Raider::CLI::Main->new->run(@ARGV);
     raider provider inspect provider.example --json
     raider --provider provider.example -m example-model -k "$KEY" "Summarize README.md"
     raider provider add acme provider.example --credential-env ACME_API_KEY
+    raider provider list
     raider --provider acme "Summarize README.md"
     raider hall start --acp-port 38421
     raider acp prompt 127.0.0.1:38421 --raider bjorn "Summarize status"
@@ -561,8 +562,11 @@ with exit status C<4>.
 
     raider provider inspect HOST[:PORT] | https://HOST[:PORT] [--json] [--allow-internal]
     raider provider add ALIAS HOST[:PORT] | https://HOST[:PORT] [--credential-env NAME] [--allow-internal]
+    raider provider list [--json]
+    raider provider show ALIAS [--json]
+    raider provider remove ALIAS [--yes]
 
-fetches C<https://HOST[:PORT]/.well-known/langertha.json>, the provider
+C<provider inspect> fetches C<https://HOST[:PORT]/.well-known/langertha.json>, the provider
 manifest of ADR 0007, validates it with L<Langertha::Manifest> and shows
 what it declares: the provider id, the issuer, every endpoint (id,
 dialect, base URL, auth reference), every auth entry (id, type) and every
@@ -689,17 +693,24 @@ one home-file writer (a C<providers:> in a project file is ignored):
         pinned_at: 2026-10-15T09:30:00Z
         fingerprint: 3f2a...
 
+C<fingerprint> is a field beyond the origin, issuer and auth types: the
+digest of what was accepted (below), which is what C<--provider ALIAS>
+compares, so an endpoint that moved is seen too.
+
 =over
 
 =item * B<The credential> is the I<name> of an environment variable
 (C<--credential-env>), required when the endpoints ask for auth and never
 guessed; its value is read at run time and goes to the pinned origin only.
 C<-k> overrides it for one run. No other C<*_API_KEY> ever selects or
-feeds an alias.
+feeds an alias. The name is pinned too: another variable (edited by hand,
+or given to C<provider add> again) is another secret sent to the same
+origin, so it needs the renewed acceptance of C<provider add>; until then
+C<--provider ALIAS> stops.
 
-=item * B<What is pinned> is the origin, the issuer and the auth types, and
-through the C<fingerprint> every endpoint's origin and dialect, the provider
-id and C<allow_internal> (no TLS pin). A change of the model list,
+=item * B<What is pinned> is the origin, the issuer and the auth types, the
+credential variable and C<allow_internal>, and through the C<fingerprint>
+every endpoint's origin and dialect and the provider id (no TLS pin). A change of the model list,
 capabilities or an endpoint path needs nothing. Anything pinned that changed
 -- or an entry edited by hand, or without a fingerprint -- stops
 C<--provider ALIAS> (exit C<1>, or C<3> for an entry that is not
@@ -712,6 +723,17 @@ stored and covered by the pin; it is a usage error next to a stored alias.
 =item * B<The name> is an alias when it is stored (lowercase letters,
 digits, C<-> and C<_>, at most 32: it can never look like a host); any
 other C<--provider> value is a HOST.
+
+=item * B<C<provider list>> and B<C<provider show ALIAS>> print what is
+stored (origin, issuer, auth types, the I<name> of the credential variable,
+whether an internal address is allowed, when it was accepted; C<show> also
+the fingerprint) and fetch nothing; an entry that cannot be used says why.
+C<--json> gives one document (C<providers>, or C<provider>). The aliases
+are also in C<raider config explain> and the REPL banner.
+
+=item * B<C<provider remove ALIAS>> deletes the entry through the same
+home-file writer, after asking on a terminal. Without a terminal it needs
+C<--yes> and is an error otherwise; nothing is removed then.
 
 =back
 
@@ -750,7 +772,8 @@ and compatibility rules are those of L</Versions>.
 =item C<0> -- success, including C<--help>, C<--version>, the exports, C<config explain>,
 C<config migrate> (also with nothing to migrate, and C<--dry-run>), C<session list>, C<session show>, C<session fork>, C<session rm>,
 C<provider inspect> of a valid manifest, C<provider add> that stored its
-binding, and leaving the REPL.
+binding, C<provider list>, C<provider show> and C<provider remove> that
+removed its alias, and leaving the REPL.
 
 =item C<1> -- the run failed: the engine, a tool or the network raised an
 error. With a machine output flag, the document says C<failed>. For
@@ -762,7 +785,8 @@ address, a dialect or auth type this raider has no adapter for, no
 models, a model on several endpoints) or a stored alias no longer matches
 what was accepted; see L</Using a provider> and L</Stored aliases>. For
 C<provider add>: no terminal, an answer other than C<y>, a manifest that
-was refused, not fetched or not valid.
+was refused, not fetched or not valid. For C<provider remove>: no terminal
+and no C<--yes>, or an answer other than C<y>.
 
 =item C<2> -- usage error: unknown option, a C<-o> that is not
 C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
@@ -775,8 +799,9 @@ C<config explain> with it, a model the manifest does not list, no C<-m>
 where it lists several, or no C<-k> (nor the alias's variable) where the
 endpoint needs a key; for C<provider add> not two words, an alias or
 variable name that is none, auth asked for without C<--credential-env> or
-a document format; and C<--allow-internal> without C<--provider> or with a
-stored alias.
+a document format; for C<provider show> and C<provider remove> not one
+word or an alias that is not stored; and C<--allow-internal> without
+C<--provider> or with a stored alias.
 
 =item C<3> -- configuration error: the config file (project or home; for
 C<config migrate> the F<.raider.yml> to migrate) cannot be read, the

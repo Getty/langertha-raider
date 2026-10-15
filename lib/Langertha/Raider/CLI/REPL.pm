@@ -232,6 +232,11 @@ sub banner {
     $out->emit($out->c(meta => '          '),
       $out->c(warn => 'seeing '.$ign->{path}.', ignoring (use --'.$ign->{profile}.' to load)'), "\n");
   }
+  if ($resolver->has_provider) {
+    my $p = $resolver->provider;
+    $line->('provider: ', ( defined $p->{alias} ? $p->{alias}.' (stored alias, ' : '(' ).( $p->{provider_id} // '' )
+      .', endpoint '.( $p->{endpoint} // '' ).', '.( $p->{url} // '' ).')');
+  }
   $line->('engine:   ', $app->engine_name);
   $line->('model:    ', $model);
   $line->('api key:  ', $env_display);
