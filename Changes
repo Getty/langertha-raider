@@ -39,6 +39,9 @@ Revision history for Langertha-Raider
       timeout (stall_timeout, 20 s), both tool errors, and stops reading and
       cancels the request at max_fetch_bytes instead of buffering the whole
       body first. Its User-Agent carries the dist version.
+    - web_search ends within fetch_timeout as a tool error when a search
+      provider never answers, and its default HTTP client stops requests at
+      fetch_timeout and stall_timeout like web_fetch.
     - The Telegram hall adapter no longer polls in a tight loop against error
       answers: a non-2xx or ok:false reply is a telegram.poll_error with the
       status and description, retried after retry_after (429) or a growing

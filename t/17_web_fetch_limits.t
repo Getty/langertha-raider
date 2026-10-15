@@ -1,10 +1,13 @@
 #!/usr/bin/env perl
-# ABSTRACT: web_fetch ends on a silent peer and stops reading at max_fetch_bytes (k146)
+# ABSTRACT: web_fetch ends on a silent peer and stops reading at max_fetch_bytes (k146); web_search ends too (k148)
 use strict;
 use warnings;
 use Test2::V0;
 use IO::Async::Listener;
 use IO::Async::Loop;
+use Net::Async::HTTP;
+use Net::Async::WebSearch;
+use Net::Async::WebSearch::Provider::SearxNG;
 use Time::HiRes qw( time );
 
 use Langertha::Raider::WebTools qw( build_web_tools_server );
@@ -73,6 +76,31 @@ subtest 'endless body: cut off at max_fetch_bytes' => sub {
   ok( length($text) < 101_000, 'body is cut at the limit' );
   ok( $sent < 10_000_000, 'sender was stopped long before 100 MB' );
   like( $requests[-1], qr{User-Agent: raider/\d}i, 'user agent carries the version' );
+};
+
+subtest 'web_search: a provider that never answers is a tool error, not a hang (k148)' => sub {
+  # The search runs through its own client, which has no timeouts of its
+  # own: only raider's limit on the whole search ends it.
+  my $http = Net::Async::HTTP->new;
+  $loop->add($http);
+  my $ws = Net::Async::WebSearch->new( http => $http );
+  $ws->add_provider( Net::Async::WebSearch::Provider::SearxNG->new( endpoint => "http://127.0.0.1:$port" ) );
+  my $search_server = build_web_tools_server(
+    loop => $loop, web_search => $ws, fetch_timeout => 2, stall_timeout => 1 );
+  my ($search) = grep { $_->name eq 'web_search' } @{ $search_server->tools };
+  $mode = 'silent';
+  my $seen = @requests;
+  my ( $res, $hung );
+  local $SIG{ALRM} = sub { $hung = 1; die "hung\n" };
+  my $t = time;
+  alarm 15;
+  eval { $res = $search->code->( $search, { query => 'perl' } ); 1 };
+  alarm 0;
+  ok( !$hung, 'web_search ends' );
+  ok( @requests > $seen, 'the provider was asked' );
+  ok( $res && $res->{isError}, 'tool error' );
+  like( $res->{content}[0]{text}, qr/web_search timed out after 2s/, 'says it timed out' ) if $res;
+  ok( time - $t < 10, 'within the timeout' );
 };
 
 done_testing;

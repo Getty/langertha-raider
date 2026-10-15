@@ -30,7 +30,7 @@ C<web_fetch>, run on the caller's L<IO::Async::Loop>.
     my $server = Langertha::Raider::WebTools::build_web_tools_server(
         loop           => $loop,         # required
         max_fetch_bytes => 2_000_000,
-        fetch_timeout   => 60,           # whole web_fetch request, seconds
+        fetch_timeout   => 60,           # whole web_fetch request or web_search, seconds
         stall_timeout   => 20,           # seconds without data
     );
 
@@ -42,6 +42,10 @@ Returns an L<MCP::Server> instance with two tools:
 L<Net::Async::WebSearch>. DuckDuckGo is always enabled (keyless). Brave,
 Serper and Google are auto-added when C<BRAVE_API_KEY>, C<SERPER_API_KEY>,
 or both C<GOOGLE_API_KEY> + C<GOOGLE_CSE_ID> are set in the environment.
+The whole search ends within C<fetch_timeout> (default 60 s) -- a provider
+that never answers is a tool error -- and the requests of the default
+HTTP client stop at C<fetch_timeout> and after C<stall_timeout> (default
+20 s) without data, as for C<web_fetch>.
 
 =item * C<web_fetch(url, [as_html])>  -- fetch a URL via L<Net::Async::HTTP>.
 Returns the status, the content type and the body, cut at
@@ -85,6 +89,10 @@ sub build_web_tools_server {
   my $http = $args{http} // Net::Async::HTTP->new(
     user_agent    => 'raider/'.$VERSION,
     max_in_flight => 4,
+    # Defaults of every request the search providers make (k148); web_fetch
+    # passes its own per request.
+    timeout       => $fetch_timeout,
+    stall_timeout => $stall_timeout,
   );
   $loop->add($http);
 
@@ -133,10 +141,17 @@ sub build_web_tools_server {
       if (my $error = connect_error('https:')) {
         return $tool->text_result("Error: $error", 1);
       }
+      # The whole search ends within fetch_timeout, whatever http the
+      # providers use: a provider that never answers is a tool error.
       my $f = $ws->search(query => $query, limit => $limit);
       my $out = eval {
-        $loop->await($f);
-        $f->get;
+        my $race = Future->wait_any(
+          $f,
+          $loop->delay_future( after => $fetch_timeout )
+            ->then_fail('web_search timed out after '.$fetch_timeout."s\n"),
+        );
+        $loop->await($race);
+        $race->get;
       };
       return $tool->text_result("Error: $@", 1) if $@;
       my @lines;

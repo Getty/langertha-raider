@@ -9,6 +9,8 @@ use Langertha::Raider::WebTools qw( build_web_tools_server );
   package TestLoop;
   sub new { bless { awaited => 0 }, shift }
   sub add { }
+  # web_search bounds the whole search with a timer (k148); never fires here.
+  sub delay_future { Future->new }
   sub await {
     my ($self, $f) = @_;
     $self->{awaited}++;
