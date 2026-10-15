@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-10-15T05:07:08Z
+claimed_by: raider-worker-k150
+class: standard
+completed: 2026-10-15T05:07:08Z
+created: 2026-10-15T04:41:42Z
+id: 150
+priority: medium
+started: 2026-10-15T04:42:23Z
+status: done
+title: 'Provider-Alias-Verwaltung und #119/#133-Restpunkte (Entscheidungen Runde 2)'
+updated: 2026-10-15T05:07:08Z
+---
+
+2026-10-15 05:01 Fertig (Branch provider-rest): e30d1d7 (list/show/remove --yes, credential_env im Pin, fingerprint dokumentiert, Aliase in config explain/REPL), d43ba81 (--provider-endpoint, refused/failed-Dokument mit --json, Banner-Key-Zeile, F33-F38-Tests, EngineResolver-Test #78). Vollsuite gruen: 110 Dateien / 1012 Tests (2 live-Dateien skipped). Neue Tests rot gegen altes lib/ (t/69,70,71,73,74,75; t/59 per Mutation rot). KONSERVATIV: (a) #119(a) 'Endpunktwahl' existierte nicht -> neue Option --provider-endpoint ID (nur mit --provider; Mehrdeutigkeit bleibt exit 1 failed, falsche ID exit 2); (b) Failure-Dokument: status refused|failed (usage->failed, Exit 2), Felder error, provider, stderr-Meldung bleibt; (c) PIN-Konstante auf binding-2: bisher gespeicherte Aliase verlangen einmal erneutes provider add; (d) provider list/show/remove: list ohne fingerprint im JSON, show mit; unbekannter Alias exit 2; leeres providers: wird entfernt; (e) --yes nur fuer remove. F33-F36/F38: durch t/67,68,70 plus neu t/73 (add) abgedeckt; F38 = es gibt keinen Fallback, getestet. NICHT gebaut: Hall/ACP kennen --provider/Alias weiterhin nicht (Notiz); ADR-0005-Policy/Executor. Binary: keine neuen Abhaengigkeiten.
+
+review: e30d1d7, d43ba81 auf provider-rest; Suite gruen (1012 Tests)
