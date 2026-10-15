@@ -39,6 +39,37 @@ a bot does not poll: the hall warns and emits C<telegram.poll_error> with the
 module's name, and a reply is an C<error> result. Nothing is sent, so
 nothing waits for a connection that cannot open.
 
+B<Poll errors.> Every C<getUpdates> answer that is not a usable result emits
+C<telegram.poll_error> with the C<bot>, the HTTP C<status> (when there was
+an answer) and an C<error> of the form C<HTTP 409: description>, and the bot
+polls again only after a wait, never at once:
+
+=over
+
+=item * a non-2xx status, or C<ok: false> in the body, is an error answer;
+
+=item * a 2xx answer whose body cannot be read as the Bot API's JSON object
+(C<HTTP 200: unreadable response>) counts as an error answer as well, and no
+update of it is handled;
+
+=item * a failure of the request itself (network, TLS, timeout) emits the
+event without a C<status>;
+
+=item * C<429> waits the C<retry_after> seconds Telegram sent; every other
+failure waits 5 s, doubling with each consecutive one up to 300 s, and the
+wait starts over after an answer that was usable;
+
+=item * C<401> (the token is wrong or revoked) stops the bot with a warning
+instead of retrying;
+
+=item * the bot's token is masked (C<***>) in the reported C<error>.
+
+=back
+
+An update whose handling dies does not stop the loop: it emits
+C<telegram.update_error> with the C<bot>, the C<update_id> and the C<error>,
+and polling continues with the offset behind that update.
+
 =cut
 
 use Moose;
