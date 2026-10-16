@@ -843,7 +843,7 @@ sub _emit {
   my %closed;
   for my $sub (@{[ @{$self->{_subscribers} // []} ]}) {
     my $stream = $sub->{stream};
-    unless ($stream && $stream->handle && $stream->handle->opened) {
+    unless ($stream && $self->_stream_opened($stream)) {
       $closed{$sub} = 1;
       next;
     }
@@ -852,6 +852,15 @@ sub _emit {
     eval { $stream->write("$json\n") };
   }
   $self->{_subscribers} = [ grep { !$closed{$_} } @{$self->{_subscribers} // []} ];
+}
+
+# Whether a subscriber's stream can still be written to: an
+# IO::Async::Stream of a control socket client (no `handle` method, only
+# read_handle/write_handle) or the shim of an ACP session.
+sub _stream_opened {
+  my ($self, $stream) = @_;
+  my $handle = $stream->can('write_handle') ? $stream->write_handle : $stream->handle;
+  return $handle && $handle->opened;
 }
 
 sub _broadcast_to_socket {

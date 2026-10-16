@@ -399,6 +399,11 @@ Revision history for Langertha-Raider
       /clear in the REPL is recorded and honoured on resume.
 
   [Hall]
+    - A client that subscribed to the hall's events on the control socket no
+      longer makes the next event die: the hall asked its stream for ->handle,
+      which an IO::Async::Stream does not have, so spawn answered "command
+      failed" (the raider was started nevertheless) and no event reached the
+      subscriber.
     - raider hall start/spawn/attach/logs/kill no longer treat options as
       positional arguments (e.g. `start --daemon DIR` ignored DIR).
       spawn/attach/logs/kill take an optional hall DIR as first argument
