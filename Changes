@@ -26,6 +26,18 @@ Revision history for Langertha-Raider
     - t/201_remote_session.t: a session on another agent -- an ACP client opens a
       session on a hall in its own process, the hall spawns a real raider on
       `-e mock`, and the answer and the tool's file come back from the remote side.
+    - Hall scenario suite: t/202_hall_scenarios.t runs every t/scenarios/hall/*.yml
+      against a real hall in a process of its own (free ACP port, temporary root)
+      whose raiders are real raider processes on `-e mock`, driven over the
+      control socket and ACP (Test::Raider::HallScenario documents the YAML
+      format: hall config, rules of the scripted model, steps, expectations).
+      Scenarios: spawn/ps/done with logs and events, the binding queue of a
+      numbered slot and of an ACP session, ACP session continuity in the
+      session journal, cancel (ACP, kill, escalation after cancel_grace), the
+      hall tools (hall_status, hall_spawn), a cron entry, Telegram against a
+      local fake Bot API (allowed chat answered by telegram_reply, stranger
+      ignored, routing '*' and per chat) and a hall restart. 04d (tool
+      processes outliving a cancel that escalated to KILL) is listed as skipped.
 
   [Distribution]
     - Langertha-Raider is the merge of the App-Raider distribution with the
