@@ -6,6 +6,8 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Path::Tiny;
+use Langertha::Engine::Virtual;
+use Langertha::Virtual::Rules ();
 
 our @EXPORT_OK = qw( mock_app );
 
@@ -27,7 +29,8 @@ our @EXPORT_OK = qw( mock_app );
 
 =head1 DESCRIPTION
 
-The mock model answers from a script, one entry per model request: either
+The mock model is L<Langertha::Engine::Virtual> (Langertha 0.504 and later)
+answering from a script, one entry per model request: either
 C<< { tool_calls => [ [ $name, \%arguments ], ... ] } >> or C<< { text => $answer } >>.
 When the script runs out it answers C<done>. Everything else is the real
 thing: L<Langertha::Raider::Application>, the raid loop, the plugins, and the
@@ -41,86 +44,23 @@ happened to the files, the tool results and the answer.
 =cut
 
 {
-  package Test::Raider::MockAI::Response;
-  use Moose;
-  sub is_success  { 1 }
-  sub status_line { '200 OK' }
-  sub content     { '' }
-  __PACKAGE__->meta->make_immutable;
-}
-
-{
-  package Test::Raider::MockAI::HTTP;
-  use Moose;
-  use IO::Async::Loop;
-  has loop => (is => 'ro', required => 1);
-  sub do_request { return $_[0]->loop->new_future->done(Test::Raider::MockAI::Response->new) }
-  __PACKAGE__->meta->make_immutable;
-}
-
-{
-  package Test::Raider::MockAI::Engine;
-  use Moose;
-  with 'Langertha::Role::Tools';
-
-  has chat_model     => (is => 'ro', default => 'mock-model');
-  has script         => (is => 'rw', default => sub { [] });
-  has loop           => (is => 'ro', required => 1);
-  has requests       => (is => 'ro', default => sub { [] });
-  has results        => (is => 'ro', default => sub { [] });
-  has calls          => (is => 'ro', default => sub { [] });
-  has _http          => (is => 'ro', lazy => 1,
-    default => sub { Test::Raider::MockAI::HTTP->new(loop => $_[0]->loop) });
-
-  sub async_request_f { return $_[0]->_http->do_request }
-  sub async_loop      { return $_[0]->loop }
-
-  sub format_tools            { return $_[1] }
-  sub response_tool_calls     { return $_[1]->{tool_calls} // [] }
-  sub response_text_content   { return $_[1]->{text} }
-  sub extract_tool_call       { return ( $_[1]->{name}, $_[1]->{input} ) }
-  sub think_tag_filter        { 0 }
-
-  sub build_tool_chat_request {
-    my ( $self, $conversation ) = @_;
-    push @{ $self->requests }, [ @$conversation ];
-    return { request => 1 };
-  }
-
-  # The next scripted step, in the shape the raid loop reads.
-  sub parse_response {
-    my ( $self ) = @_;
-    my $step = shift @{ $self->script } // { text => 'done' };
-    return { text => $step->{text} } unless $step->{tool_calls};
-    my $i = 0;
-    return { text => $step->{text}, tool_calls => [ map {
-      my ( $name, $input ) = @$_;
-      push @{ $self->calls }, [ $name, $input ];
-      { id => 'mock'.++$i, name => $name, input => $input }
-    } @{ $step->{tool_calls} } ] };
-  }
-
-  sub format_tool_results {
-    my ( $self, $data, $results ) = @_;
-    push @{ $self->results }, @$results;
-    return map { { role => 'tool', content => 'r' } } @$results;
-  }
-
-  __PACKAGE__->meta->make_immutable;
-}
-
-{
   package Test::Raider::MockAI::App;
   use Moose;
   extends 'Langertha::Raider::Application';
   has script => (is => 'ro', default => sub { [] });
   sub mock_engine { $_[0]->_engine }
+  # A scenario step { tool_calls => [ [ name, \%args ], ... ] } or { text => ... }
+  # as the engine's own reaction.
   sub _build_engine {
     my ( $self ) = @_;
-    return Test::Raider::MockAI::Engine->new(
-      script      => [ @{ $self->script } ],
-      loop        => $self->loop,
-      mcp_servers => $self->_mcps,
+    return Langertha::Engine::Virtual->new(
+      script => [ map {
+        $_->{tool_calls} ? Langertha::Virtual::Rules::tools( $_->{tool_calls} )
+                         : Langertha::Virtual::Rules::answer( $_->{text} // 'done' )
+      } @{ $self->script } ],
+      fallback        => Langertha::Virtual::Rules::answer('done'),
+      langfuse_enabled => 0,
+      mcp_servers     => $self->_mcps,
     );
   }
   __PACKAGE__->meta->make_immutable;

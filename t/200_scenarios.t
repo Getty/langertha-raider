@@ -8,6 +8,10 @@ use FindBin;
 use lib "$FindBin::Bin/lib";
 use Path::Tiny;
 use YAML::PP;
+BEGIN {
+  eval { require Langertha::Engine::Virtual; 1 }
+    or plan skip_all => 'needs Langertha::Engine::Virtual (Langertha 0.504 or later)';
+}
 use Test::Raider::MockAI qw( mock_app );
 
 # Each F<t/scenarios/NN-name.yml> is one step of what raider has to do end to
