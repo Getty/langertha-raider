@@ -163,6 +163,8 @@ my %ENV_VAR = (
   cerebras   => 'CEREBRAS_API_KEY',
   openrouter => 'OPENROUTER_API_KEY',
   ollama     => undef,
+  mock       => undef,
+  virtual    => undef,
 );
 
 my %ENGINE_CLASS = (
@@ -176,10 +178,13 @@ my %ENGINE_CLASS = (
   cerebras   => 'Langertha::Engine::Cerebras',
   openrouter => 'Langertha::Engine::OpenRouter',
   ollama     => 'Langertha::Engine::Ollama',
+  # The rule-driven test engine: no network, no key (-e mock -o rules_file=...).
+  mock       => 'Langertha::Engine::Virtual',
+  virtual    => 'Langertha::Engine::Virtual',
 );
 
 my @ENGINE_NAMES = qw(
-  anthropic openai deepseek groq mistral gemini minimax cerebras openrouter ollama
+  anthropic openai deepseek groq mistral gemini minimax cerebras openrouter ollama mock virtual
 );
 
 =method engine_names

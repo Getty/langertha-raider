@@ -6,6 +6,12 @@ Revision history for Langertha-Raider
     - Marked as in development (POD and README): a developer release, not yet
       covered end to end. Release it with `dzil release --trial`.
 
+  [Engines]
+    - `-e mock` (alias `virtual`) selects Langertha::Engine::Virtual, the rule-driven
+      engine without network or key (`-o rules_file=rules.yml`), so raider can be run
+      by hand and in tests against a scripted "model". It gets the prompt as typed:
+      the [situation] line is left out, because rules match word for word.
+
   [Tests]
     - Scenario suite: t/200_scenarios.t runs every t/scenarios/*.yml with a
       scripted model (Langertha::Engine::Virtual, via Test::Raider::MockAI; skipped
@@ -17,6 +23,9 @@ Revision history for Langertha-Raider
       arguments, a failing bash command and a conversation across two prompts
       (`prompts:`, `requests:` in the scenario format). The approval scenario
       is skipped until policy/executor exist.
+    - t/201_remote_session.t: a session on another agent -- an ACP client opens a
+      session on a hall in its own process, the hall spawns a real raider on
+      `-e mock`, and the answer and the tool's file come back from the remote side.
 
   [Distribution]
     - Langertha-Raider is the merge of the App-Raider distribution with the

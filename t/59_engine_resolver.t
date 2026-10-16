@@ -55,7 +55,7 @@ subtest 'model and key' => sub {
 subtest 'engine names and key variables' => sub {
   my $class = 'Langertha::Raider::EngineResolver';
   is([ $class->engine_names ],
-    [qw( anthropic openai deepseek groq mistral gemini minimax cerebras openrouter ollama )],
+    [qw( anthropic openai deepseek groq mistral gemini minimax cerebras openrouter ollama mock virtual )],
     'every known engine, fixed order');
   is(dies { resolver(undef, engine => $_)->engine_class }, undef, 'engine class for '.$_)
     for $class->engine_names;

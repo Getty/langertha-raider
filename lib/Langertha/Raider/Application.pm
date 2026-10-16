@@ -1048,8 +1048,11 @@ sub _engine_args {
 sub _raider_plugins {
   my ($self) = @_;
   weaken(my $app = $self);
+  # The rule-driven test engine (-e mock) matches the prompt word for word, so
+  # it gets the prompt as typed, without the [situation] line and its clock.
+  my $virtual = $self->engine_resolver->engine_class eq 'Langertha::Engine::Virtual';
   # Events last, so it reports the tool calls that actually run.
-  return ( '+Langertha::Raider::Plugin::Situation',
+  return ( ( $virtual ? () : '+Langertha::Raider::Plugin::Situation' ),
     '+Langertha::Raider::Plugin::Events', { on_event => sub { $app->event(@_) if $app } } );
 }
 
