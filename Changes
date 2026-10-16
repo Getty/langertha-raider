@@ -2,6 +2,18 @@ Revision history for Langertha-Raider
 
 {{$NEXT}}
 
+  [Status]
+    - Marked as in development (POD and README): a developer release, not yet
+      covered end to end. Release it with `dzil release --trial`.
+
+  [Tests]
+    - Scenario suite: t/200_scenarios.t runs every t/scenarios/*.yml with a
+      scripted model (Test::Raider::MockAI) driving the real application, raid
+      loop and stock tools (files, bash) in a temporary root; a scenario states
+      the model's answers, the files and tool results that must follow. Start
+      scenarios cover write_file, read_file/edit_file, bash, a path leaving the
+      root and an unknown tool.
+
   [Distribution]
     - Langertha-Raider is the merge of the App-Raider distribution with the
       agent engine extracted from Langertha core. Langertha::Raider,

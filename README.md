@@ -20,6 +20,12 @@ providers `-e` knows (from Perl, `Langertha::Raider` takes any Langertha engine)
  perl agent - powered by Langertha
 ```
 
+> **Status: in development.** Released as a developer release. The engine, the
+> CLI and the Hall work, but the whole is not yet covered end to end; an acceptance
+> suite with a scripted model (`t/scenarios/`) is being built up step by step, and
+> parts of the design (policy and executor, provider discovery with re-consent) are
+> unfinished. Expect interface changes between releases.
+
 > This README describes what `raider` **does today**. The wider vision — the
 > home-directory assistant, provider discovery, delegates, reviewed long-term
 > memory, editor integration over stdio — lives in
