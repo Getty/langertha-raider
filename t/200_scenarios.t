@@ -20,7 +20,8 @@ use Test::Raider::MockAI qw( mock_app );
 #
 #   title:   what the scenario shows
 #   files:   { path => content }        written to the root before the run
-#   prompt:  the user prompt
+#   prompt:  the user prompt (or `prompts:`, a list run one after the other on
+#            the same raider, so the conversation carries over)
 #   script:  the model's answers, one per request:
 #              - tool_calls: [ [ tool_name, { arguments } ], ... ]
 #              - text: the final answer
@@ -28,6 +29,8 @@ use Test::Raider::MockAI qw( mock_app );
 #     answer:      the final answer, exactly
 #     files:       { path => content }  must exist afterwards with this content
 #     absent:      [ path, ... ]        must not exist afterwards
+#     requests:    [ { index: N, contains: text, absent: text } ] -- the text of the
+#                  conversation the model saw in request N (0-based)
 #     tools:       one entry per tool call, in order:
 #                    name:   the tool
 #                    error:  true if the call must have failed (default false)
@@ -50,7 +53,9 @@ for my $file (@files) {
     $root->child($_)->touchpath->spew_utf8( $s->{files}{$_} ) for keys %{ $s->{files} // {} };
 
     my $app    = mock_app( root => "$root", script => $s->{script} // [] );
-    my $answer = eval { '' . $app->run( $s->{prompt} // 'go' ) };
+    my @prompts = $s->{prompts} ? @{ $s->{prompts} } : ( $s->{prompt} // 'go' );
+    my $answer;
+    $answer = eval { '' . $app->run($_) } for @prompts;
     is( $@, '', 'the raid finishes' );
     my $expect = $s->{expect} // {};
 
@@ -61,6 +66,17 @@ for my $file (@files) {
         && is( $root->child($p)->slurp_utf8, $expect->{files}{$p}, "$p content" );
     }
     ok( !$root->child($_)->exists, "$_ absent" ) for @{ $expect->{absent} // [] };
+
+    for my $r ( @{ $expect->{requests} // [] } ) {
+      my $req = $app->mock_engine->requests->[ $r->{index} ];
+      ok( $req, "request $r->{index} was made" ) or next;
+      my $seen = join "\n", map {
+        my $c = $_->{content};
+        ref $c ? join( ' ', map { $_->{text} // '' } @$c ) : ( $c // '' )
+      } @{ $req->{body}{messages} // [] };
+      like( $seen, qr/\Q$r->{contains}\E/, "request $r->{index} contains '$r->{contains}'" ) if defined $r->{contains};
+      unlike( $seen, qr/\Q$r->{absent}\E/, "request $r->{index} lacks '$r->{absent}'" ) if defined $r->{absent};
+    }
 
     if ( my $want = $expect->{tools} ) {
       my @got = @{ $app->mock_engine->results };

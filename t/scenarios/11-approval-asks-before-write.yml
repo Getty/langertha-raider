@@ -1,0 +1,9 @@
+title: a write needs approval before it runs (ADR 0005 -- not built yet)
+skip: "Approval is internal logic only (Langertha::Raider::Approval); nothing asks for or consults an approval yet. Un-skip when policy/executor (#120-#124) land."
+prompt: Write a file.
+script:
+  - tool_calls:
+      - [ write_file, { path: a.txt, content: x } ]
+  - text: fertig
+expect:
+  absent: [ a.txt ]
