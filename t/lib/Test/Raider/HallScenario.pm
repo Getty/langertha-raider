@@ -68,6 +68,11 @@ socket's commands of that name.
 =item * C<acp_session: { as, raider }>, C<acp_prompt: { session, text, as,
 wait }> (C<wait: false> sends and returns), C<acp_wait: { prompt }>,
 C<acp_cancel: { session }>, C<acp_reconnect: {}>.
+C<acp_permissions: { answers: [once|always|reject|reject_always|cancelled|bogus|ignore, ...] }>
+sets how the scenario's ACP client answers C<session/request_permission>
+(default reject); C<expect_permission_requests: { count, first: { title_like,
+kind, options, names_like } }> checks what the hall asked. C<expect_file>
+takes C<absent: true>.
 
 =item * C<wait_event: { type, <field>: value, nth, as, timeout }> -- until the
 C<nth> (default first) matching event is on the bus; C<as> keeps it, and as a
@@ -600,6 +605,19 @@ YAML
         push @{ $self->{acp_streams}{ $msg->{params}{sessionId} // '' } }, $u->{content}{text} // ''
           if ref $u->{content} eq 'HASH';
       }
+      elsif ( ( $msg->{method} // '' ) eq 'session/request_permission' ) {
+        # The ACP client of the scenario answers from acp_permissions (default: reject).
+        push @{ $self->{permission_requests} }, $msg->{params};
+        my $how = shift @{ $self->{permission_answers} } // 'reject';
+        my %kind = ( once => 'allow_once', always => 'allow_always', reject => 'reject_once', reject_always => 'reject_always' );
+        my ($opt) = grep { $_->{kind} eq ( $kind{$how} // '' ) } @{ $msg->{params}{options} };
+        my $outcome = $how eq 'ignore'    ? undef
+                    : $how eq 'cancelled' ? { outcome => 'cancelled' }
+                    : $how eq 'bogus'     ? { outcome => 'selected', optionId => 'no-such-option' }
+                    : { outcome => 'selected', optionId => $opt ? $opt->{optionId} : 'none-offered' };
+        $self->{acp}->send( $JSON->encode({ jsonrpc => '2.0', id => $msg->{id}, result => { outcome => $outcome } }) . "\n" )
+          if $outcome;
+      }
     }
     return;
   }
@@ -706,7 +724,7 @@ YAML
     return;
   }
 
-  sub step_sleep { select undef, undef, undef, $_[1]; $_[0]->_pump_events(0) }
+  sub step_sleep { select undef, undef, undef, $_[1]; $_[0]->_pump_events(0); $_[0]->_pump_acp(0) }
 
   sub step_wait_event {
     my ( $self, $a ) = @_;
@@ -841,6 +859,7 @@ YAML
   sub step_expect_file {
     my ( $self, $a ) = @_;
     my $file = $self->{root}->child( $a->{path} );
+    return $self->_ok( !$file->exists, "$a->{path} is absent" ) if exists $a->{absent} && $a->{absent};
     $self->_ok( $file->is_file, "$a->{path} exists" ) or return;
     $self->_is( $file->slurp_utf8, $a->{content}, "$a->{path} content" ) if exists $a->{content};
     $self->_like( $file->slurp_utf8, $a->{like}, "$a->{path} content" ) if exists $a->{like};
@@ -915,6 +934,45 @@ YAML
     $self->_is( $resp->{result} && $resp->{result}{stopReason}, $a->{stop_reason}, "ACP $a->{prompt}: stop reason" ) if exists $a->{stop_reason};
     $self->_like( $stream, $a->{text_like}, "ACP $a->{prompt}: streamed text" ) if exists $a->{text_like};
     $self->_like( $resp->{error} && $resp->{error}{message}, $a->{error_like}, "ACP $a->{prompt}: error" ) if exists $a->{error_like};
+    return;
+  }
+
+  # The answers the scenario's ACP client gives to session/request_permission,
+  # one per question in order: once | always | reject | reject_always |
+  # cancelled | bogus (an option that was not offered) | ignore (no response).
+  # When the list runs out the client rejects.
+  sub step_acp_permissions {
+    my ( $self, $a ) = @_;
+    $self->{permission_answers} = [ @{ $a->{answers} // [] } ];
+    return;
+  }
+
+  # Waits until the hall has asked `count` (default 1) questions.
+  sub step_wait_permission_request {
+    my ( $self, $a ) = @_;
+    my $deadline = Test::Raider::HallScenario::now() + ( $a->{timeout} // 30 );
+    while ( @{ $self->{permission_requests} // [] } < ( $a->{count} // 1 ) && Test::Raider::HallScenario::now() < $deadline ) {
+      $self->_pump_acp(0.1);
+      $self->_pump_events(0);
+    }
+    $self->_ok( @{ $self->{permission_requests} // [] } >= ( $a->{count} // 1 ), 'the hall asked the client' );
+    return;
+  }
+
+  sub step_expect_permission_requests {
+    my ( $self, $a ) = @_;
+    my @got = @{ $self->{permission_requests} // [] };
+    $self->_is( scalar @got, $a->{count}, 'number of session/request_permission requests' ) if exists $a->{count};
+    if ( my $first = $a->{first} ) {
+      my $req = $got[0] or return $self->_ok( 0, 'a session/request_permission request was made' );
+      $self->_like( $req->{toolCall}{title}, $first->{title_like}, 'permission request: title' ) if exists $first->{title_like};
+      $self->_is( $req->{toolCall}{kind}, $first->{kind}, 'permission request: kind' ) if exists $first->{kind};
+      $self->_is( $req->{toolCall}{status}, 'pending', 'permission request: status' );
+      $self->_is( join( ',', map { $_->{kind} } @{ $req->{options} } ), $first->{options}, 'permission request: option kinds' )
+        if exists $first->{options};
+      $self->_like( join( ' | ', map { $_->{name} } @{ $req->{options} } ), $first->{names_like}, 'permission request: option names' )
+        if exists $first->{names_like};
+    }
     return;
   }
 

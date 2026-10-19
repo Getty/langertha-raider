@@ -12,6 +12,7 @@ use Path::Tiny;
 use Scalar::Util qw( refaddr );
 use URI;
 use Langertha::Raider::Home;
+use Langertha::Raider::Permissions::ReadOnlyBash;
 use Langertha::Raider::Permissions::Rule;
 use Langertha::Raider::ToolEffects;
 use Langertha::Raider::ToolNames;
@@ -67,6 +68,14 @@ every tool raider does not know (a foreign MCP tool).
 =item C<acceptEdits> -- as C<default>, and C<write_file> / C<edit_file> are
 allowed inside the root or an additional directory.
 
+=item C<auto> -- as C<acceptEdits>, and bash commands that only read are
+allowed without asking: a fixed list
+(L<Langertha::Raider::Permissions::ReadOnlyBash>) where every part of the
+command must be on it and none may hold a substitution or a redirection into
+a file. The raider equivalent of Claude Code's C<defaultMode: "auto">;
+everything else asks, deny and ask rules hold, the person's allow rules add
+to it.
+
 =item C<plan> -- as C<default> for reading and network tools; changing tools
 are refused, even when an allow rule names them.
 
@@ -81,7 +90,7 @@ L</source_servers>, is foreign, whatever its name.
 
 =cut
 
-my @MODES = qw( default acceptEdits plan bypassPermissions );
+my @MODES = qw( default acceptEdits auto plan bypassPermissions );
 my %MODE  = map { $_ => 1 } @MODES;
 
 # Tools that face the person or only steer the run: allowed without a rule,
@@ -120,7 +129,7 @@ has mode => ( is => 'ro', isa => 'Str', writer => '_set_mode', default => 'defau
 
 =attr mode
 
-The permission mode: C<default>, C<acceptEdits>, C<plan> or
+The permission mode: C<default>, C<acceptEdits>, C<auto>, C<plan> or
 C<bypassPermissions>. Croaks on construction with any other name; changed
 with L</set_mode>.
 
@@ -264,6 +273,7 @@ sub report {
   return {
     mode          => $self->mode,
     mode_source   => $self->mode_source,
+    ( $self->mode eq 'auto' ? ( mode_note => $self->mode_note ) : () ),
     ignored_modes => [ map { { %$_ } } @{ $self->ignored_modes } ],
     rules         => { map {
       my $kind = $_;
@@ -277,9 +287,25 @@ sub report {
 =method report
 
 The policy for C<config explain> and C</permissions>: C<mode>,
-C<mode_source>, C<ignored_modes>, C<rules> (per kind the valid rules with
+C<mode_source>, C<mode_note> (only in C<auto> mode: how it maps), C<ignored_modes>, C<rules> (per kind the valid rules with
 their source, session rules included), C<invalid_rules> (with C<kind> and
 C<error>) and C<additional_directories> (absolute, with their source).
+
+=cut
+
+sub mode_note {
+  my ( $self ) = @_;
+  return unless $self->mode eq 'auto';
+  return $self->mode_source =~ /settings/
+    ? 'claude auto -> raider acceptEdits + read-only bash allowlist'
+    : 'auto -> acceptEdits + read-only bash allowlist';
+}
+
+=method mode_note
+
+How the C<auto> mode maps, for C<config explain> and C</permissions>: for a
+mode from the Claude settings C<claude auto -> raider acceptEdits +
+read-only bash allowlist>. Nothing in any other mode.
 
 =cut
 
@@ -519,8 +545,10 @@ sub decide {
   }
 
   return $self->_by_mode( allow => $mode.' mode' ) if $class eq 'read' || $class eq 'control';
-  return $self->_by_mode( allow => 'acceptEdits mode, inside the allowed directories' )
-    if $mode eq 'acceptEdits' && $builtin && $self->_edit_in_allowed_roots( $call, $ctx );
+  return $self->_by_mode( allow => 'auto mode, a read-only bash command' )
+    if $mode eq 'auto' && $builtin && $name eq 'bash' && $self->_read_only_bash($call);
+  return $self->_by_mode( allow => $mode.' mode, inside the allowed directories' )
+    if ( $mode eq 'acceptEdits' || $mode eq 'auto' ) &&$builtin && $self->_edit_in_allowed_roots( $call, $ctx );
 
   my $what = $class eq 'unknown'
     ? $name.' is not a tool of raider'.( defined $server ? " (MCP server '".$server."')" : '' )
@@ -603,6 +631,12 @@ sub _allowing_rules {
     push @used, $rule unless $seen{ refaddr $rule }++;
   }
   return @used;
+}
+
+sub _read_only_bash {
+  my ( $self, $call ) = @_;
+  my $command = ref $call->{arguments} eq 'HASH' ? $call->{arguments}{command} : undef;
+  return Langertha::Raider::Permissions::ReadOnlyBash->covers($command);
 }
 
 sub _edit_in_allowed_roots {

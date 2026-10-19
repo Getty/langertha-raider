@@ -100,6 +100,7 @@ Without a matching rule:
 |---|---|---|---|
 | `default` | tools that only read or have no effects; `ask_user`, `raider_ask_user`, `todo_write`, `skill`, `exit_plan_mode` | write, code, network, message; every foreign or unknown tool | — |
 | `acceptEdits` | as default, plus `write_file` / `edit_file` inside the root or an additional directory | the rest as default (bash too) | — |
+| `auto` (Nachtrag P2) | as `acceptEdits`, plus bash commands from the fixed read-only allowlist | the rest | — |
 | `plan` | as default for reading and control tools | network; foreign and unknown tools | write, code, message — "plan mode: … present your plan with exit_plan_mode first"; **allow rules do not lift it** |
 | `bypassPermissions` | everything | — | **only what a deny rule names** |
 
@@ -148,7 +149,7 @@ offered for a command with a substitution, a redirection into a file or a heredo
 - **no** (with an optional reason): an error result "The user refused this call: <reason>.
   Do not try the same call again; ask the user what they want or change your plan."
 
-With nobody to ask — a one-shot run, `--json`, the Hall, ACP, a library without the
+With nobody to ask — a one-shot run, `--json`, the Hall (ACP sessions excepted, Nachtrag P2), a library without the
 callback — an ask is refused with the reason, the rule that would allow the call, where to
 put it (`.raider/config.yml`, `.claude/settings.json` in the Claude layout) and the
 `--permission-mode` that would. The raider's own text for an ask that reaches it ("this
@@ -198,9 +199,11 @@ rules and a mode switched during the session.
 
 ### 11. Hall and ACP
 
-Non-interactive. A hall raider entry may set `permission_mode`, passed as
+A hall raider entry may set `permission_mode`, passed as
 `--permission-mode`; without it the project decides as in §3 (the hall does not validate
-the name — the raider refuses an unknown one). ACP runs through the hall.
+the name — the raider refuses an unknown one). ACP runs through the hall. A run that
+belongs to no ACP session (control socket, cron, Telegram) is non-interactive: an ask is
+refused. A run of an ACP session asks the ACP client (Nachtrag P2, below).
 
 ### 12. `config explain`
 
@@ -228,11 +231,111 @@ additional directories.
   allow rules, `default_mode` / `defaultMode`, `--permission-mode acceptEdits` or
   `bypassPermissions`, or `permission_mode` on a hall raider. Tests and scenarios that test
   tools, not approvals, run in `bypassPermissions` (scenario harness default).
-- Follow-ups (not built): ACP's `session/request_permission` as a way to ask an editor;
-  `/reload` reads new additional directories into the policy but the mounted file and search
-  tools keep the ones they were built with; no scenario for `mcp__` rules, because the
-  harness cannot mount a foreign MCP server; the inheritance of the policy into sub-agents
-  (stream A, through `for_subrun`).
+- Follow-ups (not built): no scenario for `mcp__` rules, because the harness cannot mount
+  a foreign MCP server; the inheritance of the policy into sub-agents (stream A, through
+  `for_subrun`). ACP's `session/request_permission` and live additional directories after
+  `/reload` are built, see Nachtrag P2.
+
+## Nachtrag P2 (k158)
+
+Three follow-ups of the first slice.
+
+### P2.1 `/reload` reaches the additional directories of the mounted tools
+
+§9 said the file and search tools keep the directories they were built with. That is
+withdrawn. `extra_roots` of `build_file_tools_server` and of `SearchTools` may be a CodeRef
+returning the list; it is called on every tool call. The application passes one that reads
+`permissions->additional_directory_paths`, so `reload_permissions` (which replaces the policy)
+is enough: a directory added is reachable and one removed refused from the next call on. An
+ArrayRef still works for libraries. Each call resolves the roots with `realpath` again, so
+the symlink-escape check is unchanged.
+
+### P2.2 `defaultMode: "auto"`
+
+Claude Code's `auto` mode (a classifier decides) has no counterpart in raider and was skipped
+as an unknown mode. It now maps, strictly, to **`auto`: acceptEdits plus a fixed allowlist of
+read-only bash commands**; everything else asks. `auto` is a fifth mode name
+(`default acceptEdits auto plan bypassPermissions`), resolved at one place
+(`Permissions::decide`) and therefore valid wherever a mode is: `--permission-mode auto`,
+`permissions.default_mode: auto` of the raider config, `defaultMode: "auto"` of the Claude
+settings, `/permissions mode auto`, `permission_mode: auto` on a hall raider. Other Claude names
+(`dontAsk`, ...) are still skipped and reported. The mode is part of `policy_revision`
+(approvals given in another mode are void).
+
+- Order is unchanged: deny rules first (they hold in `auto`), then ask rules, then allow
+  rules, then the mode. Allow rules of the person add to the allowlist.
+- The allowlist lives in `Langertha::Raider::Permissions::ReadOnlyBash`, fixed and not
+  configurable (more commands = allow rules). The command is split by `Rule->shell_parts` and
+  **every part** must be on the list, written as a plain command word without path, wrapper or
+  `VAR=value`; the whole command must be free of substitutions, heredocs, redirections into a
+  file (`/dev/null` and `2>&1` are fine) and open quotes; every argument is a plain word or a
+  quote without `$`, backtick or backslash. So `git status && ls` runs, `git status; rm x`,
+  `cat $(x)` and `ls > f` ask.
+- Commands: `ls pwd cat head tail wc echo which uname whoami id basename dirname realpath
+  readlink stat du df cut tr nl diff sha256sum sha1sum md5sum cksum jq ps uptime nproc cd true
+  false`; `date` only to show a time; `uniq` with at most one file; `sort` without `-o` /
+  `--output`; `grep egrep fgrep rg` without `--pre`, `--pre-glob`, `--hostname-bin`, `-z`,
+  `--search-zip`; `find` without `-exec -execdir -ok -okdir -delete -fprint -fprint0 -fprintf
+  -fls`; `git` directly followed by `status diff log show blame describe shortlog rev-parse
+  ls-files ls-tree cat-file` (no global options, none of `--output`, `--ext-diff`,
+  `--open-files-in-pager`, `--textconv`, `--exec-path`, also not abbreviated) and `git
+  branch/remote/tag` only to list.
+- Known residue: git runs what the repository's own config names (pager, `core.fsmonitor`,
+  textconv drivers). `auto` trusts the repository like `acceptEdits` trusts the root.
+- `config explain` and `/permissions` show the mode with its source and the mapping line
+  `claude auto -> raider acceptEdits + read-only bash allowlist` (for a mode from the Claude
+  settings; `auto -> acceptEdits + read-only bash allowlist` otherwise).
+
+### P2.3 ACP `session/request_permission`
+
+Read: <https://agentclientprotocol.com/protocol/tool-calls> (ACP protocol version 1): the
+agent MAY send `session/request_permission` with `sessionId`, `toolCall` (a ToolCallUpdate;
+`toolCallId` required) and `options` (`optionId`, `name`, `kind` in `allow_once`,
+`allow_always`, `reject_once`, `reject_always`); the client answers with `result.outcome`
+either `{ outcome: "cancelled" }` or `{ outcome: "selected", optionId }`, and MUST answer
+`cancelled` when the prompt turn is cancelled.
+
+The hall starts every run as a separate raider process with no stdin, so the question needs a
+channel back:
+
+- **Channel.** For a run bound to an ACP session, `Hall::_spawn_raider` creates a
+  `Hall::PermissionChannel` (a Unix socket in a private 0700 temp directory, removed when
+  the run is reaped) and passes its path as the hidden option `--permission-channel PATH`.
+  The raider process sets `Langertha::Raider::PermissionChannel` as `on_permission_request`
+  (not in the REPL). JSON Lines: `{id, tool, source, arguments, reason, rule}` →
+  `{id, answer: once|session|no, reason}`. The raider blocks synchronously like the REPL's ask.
+- **Who asks.** The ACP adapter registers per session a handler
+  (`Hall::register_permission_handler(binding, cb)`; dropped with the session). Runs of a
+  binding without a handler (control socket, cron, Telegram) get no channel and no option and
+  are refused as before. The adapter sends `session/request_permission` on the session's
+  stream and matches the client's response by `id` in `_dispatch` (until now it ignored all
+  responses).
+- **Options.** `allow_once` ("Allow once") → `once`; `allow_always` ("Allow for this session:
+  RULE") → `session` (a session rule in the raider, exactly as in the REPL; offered only when
+  a rule can name the call); `reject_once` ("Reject"). `reject_once`, `reject_always`, a
+  `cancelled` outcome, an unknown or missing `optionId`, an error response → `no`. The title
+  is `tool: command|path|url`, `kind` is `execute|edit|fetch|read|search|other`, `rawInput` the
+  arguments, the reason the text content.
+- **Deny by default.** No answer within `permission_timeout` of `.raider-hall.yml` (default
+  120 s), a closed client connection, an ended ACP session, `session/cancel` while a question
+  is open (the adapter answers `no`, then the hall cancels the run as before), a handler that
+  fails, an unreachable or closed channel, a channel answer that is not `once`/`session`, a
+  raider-side wait of 300 s, or a cancel of the run (the raider polls
+  `Application::run_cancelled` every 0.25 s) all give `no`: the model is told the user refused,
+  the run goes on. Nothing in the chain defaults to allow.
+- **Hang.** The hall has no hang detection for runs; a run waiting for an answer is never
+  killed for that. Cancel works as before (SIGINT, escalation) and also ends a blocked ask.
+- **Events.** `permission.asked/granted/denied` are emitted by the raider as before (and are
+  in the run's events file); the adapter forwards nothing extra.
+- **Capabilities.** `initialize` announces nothing new; asking is the agent's right in ACP.
+- **Client side.** `Langertha::Raider::ACP::Client` takes `on_permission`; without one, or
+  with one that picks no offered option, it rejects (`reject_once`, else `cancelled`). It
+  also no longer mistakes an agent request with the same `id` for the response to its own call.
+  `raider acp connect` asks at the terminal (a number picks, anything else rejects);
+  `raider acp prompt` rejects (a `--allow` flag was not built: it would be a standing
+  allow on a command line).
+- **Packing.** New modules loaded by `use` only; `IO::Socket::UNIX` and `IO::Select` are core
+  Perl. No new by-name loads, no new dependency.
 
 ## Source
 

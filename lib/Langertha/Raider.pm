@@ -2626,6 +2626,16 @@ async sub _dispatch_tool_call_f {
     && !$state->{tool_server_map}{$name};
   my $source = $self_tool ? 'raider' : $state->{tool_sources}{$name};
 
+  # Resolve (ADR 0005): a name no source offers ends here, before the hook,
+  # the gate and any approval -- "unknown tool", not a permission question
+  # about a tool that does not exist. _call_mcp_tool_f answers the error.
+  unless ( $self_tool || $state->{tool_server_map}{$name} ) {
+    my $result = await $self->_call_mcp_tool_f($state, $iter, $name, $input, $tool_t0);
+    push @$results, { tool_call => $tc, result => $result };
+    ${$state->{raid_tool_calls}}++;
+    return;
+  }
+
   # The tool hook (ADR 0022, PreToolUse): before the inputSchema check and
   # the gate, so arguments it replaces are checked and gated like the
   # model's. A deny does not run the call; its error result takes the

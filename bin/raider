@@ -206,7 +206,10 @@ Every tool call passes a permission policy as in Claude Code (ADR 0021,
 L<Langertha::Raider::Permissions>). Without a matching rule the mode
 decides: C<default> runs reading tools and asks before writing, C<bash>,
 the network and messages; C<acceptEdits> also writes files inside C<-r> and
-the additional directories; C<plan> reads only, refuses changes even with an
+the additional directories; C<auto> (Claude Code's C<defaultMode: "auto">)
+is that plus bash commands from a fixed read-only list (C<ls>, C<git status>,
+C<grep>, ... where every part of the command is on it, no substitution, no
+redirection into a file); C<plan> reads only, refuses changes even with an
 allow rule, and offers C<exit_plan_mode>; C<bypassPermissions> runs
 everything a deny rule does not name. The mode comes from
 C<--permission-mode> (or C<--dangerously-skip-permissions>), else
@@ -376,9 +379,19 @@ loads one with the C<skill> tool. Saved like C<--openai>.
 
 =opt --permission-mode MODE
 
-The permission mode of the run: C<default>, C<acceptEdits>, C<plan> or
+The permission mode of the run: C<default>, C<acceptEdits>, C<auto>, C<plan> or
 C<bypassPermissions> (see L</PERMISSIONS>). It wins over the mode of the
 config files and the Claude settings. Any other name is a usage error.
+
+=opt --permission-channel PATH
+
+Not for people: the hall (C<raider hall>) sets it on a run that belongs to
+an ACP session. PATH is a Unix socket on which a tool call the permission
+policy asks about is put to the hall, which asks the ACP client with
+C<session/request_permission> (ADR 0021). No answer, a closed socket, a
+cancelled run or any error is I<no>; it never allows by itself. Without the
+option (and without a terminal) such a call is refused. Not shown by
+C<--help>; ignored in the REPL (C<-i>).
 
 =opt --dangerously-skip-permissions
 

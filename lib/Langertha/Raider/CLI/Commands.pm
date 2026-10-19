@@ -96,7 +96,7 @@ sub cmd_help {
     '  /skill-claude [PATH]  export Claude Code SKILL.md with frontmatter',
     '  /config               show each setting and where it came from',
     '  /permissions          show the permission mode, rules and session rules',
-    '  /permissions mode M   switch the mode: default, acceptEdits, plan, bypassPermissions',
+    '  /permissions mode M   switch the mode: default, acceptEdits, auto, plan, bypassPermissions',
     '  /model [NAME]         set+save model to the config file',
     '  /model list [FILTER]  list available models (optionally filtered)',
     '  /packs                list all available packs and their state',

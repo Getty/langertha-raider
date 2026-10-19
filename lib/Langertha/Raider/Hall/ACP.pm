@@ -6,6 +6,8 @@ use strict;
 use warnings;
 use Moose;
 use namespace::autoclean;
+use Future;
+use Scalar::Util qw( weaken );
 use IO::Async::Listener;
 use IO::Async::Stream;
 use IO::Socket::IP;
@@ -61,6 +63,29 @@ waiting are answered C<cancelled> and never run.
 
 =back
 
+=head2 Asking the client (C<session/request_permission>)
+
+A tool call the raider's permission policy asks about (ADR 0021: the mode
+C<default>, C<plan>, ... without a rule that decides) is put to the ACP
+client as the agent-to-client request C<session/request_permission> (ACP
+v1, L<https://agentclientprotocol.com/protocol/tool-calls>): C<sessionId>, a
+C<toolCall> update (C<toolCallId>, C<title>, C<kind>, C<status> C<pending>,
+C<rawInput>, the reason as C<content>) and the C<options> C<allow_once>
+("Allow once"), C<allow_always> ("Allow for this session: RULE", only when a
+rule can name the call) and C<reject_once>. C<allow_once> runs this call;
+C<allow_always> adds the rule as a session rule of the raider (as the REPL's
+"yes, for this session"); C<reject_once>, C<reject_always>, the outcome
+C<cancelled>, an unknown option, an error, a closed connection, a cancelled
+turn (C<session/cancel>) and no answer within the hall's
+L<Langertha::Raider::Hall/permission_timeout> (default 120 s) all refuse the
+call -- the model is told, the run goes on. Nothing allows by default.
+The raider asks over a per-run socket (L<Langertha::Raider::Hall::PermissionChannel>);
+the adapter registers itself per session with
+L<Langertha::Raider::Hall/register_permission_handler>. The responses of the
+client are matched to the question by C<id> in the dispatch loop.
+C<initialize> announces nothing for this: asking is the agent's right in
+ACP.
+
 Features intentionally omitted in this first cut: authentication,
 filesystem push-edits, embedded context resources, audio/image content
 blocks. Calls unknown to this adapter return JSON-RPC error
@@ -95,6 +120,10 @@ has _sessions => (
 has _listener => (
   is => 'rw',
 );
+
+# Questions sent to the client and not answered yet, by JSON-RPC id.
+has _outgoing => ( is => 'ro', default => sub { {} } );
+has _next_request_id => ( is => 'rw', isa => 'Int', default => 0 );
 
 our $PROTOCOL_VERSION = 1;
 
@@ -171,9 +200,8 @@ sub _dispatch {
   my $params = $msg->{params} // {};
 
   if (!defined $method) {
-    # It's a response to something we sent — ignore, we don't call out
-    # mid-stream in this minimal adapter.
-    return;
+    # A response to a request we sent (session/request_permission).
+    return $self->_on_response($msg);
   }
 
   if ($method eq 'initialize') {
@@ -224,6 +252,12 @@ sub _session_new {
     raider_name => $raider_name,
     current_raider_id => undef,
   };
+  # The runs of this session ask the client for permission (ADR 0021).
+  weaken(my $weak = $self);
+  $self->hall->register_permission_handler($self->_binding_of($session_id), sub {
+    return $weak ? $weak->_request_permission($session_id, $_[0])
+      : Future->done({ answer => 'no', reason => 'the ACP adapter is gone' });
+  });
 
   $self->_reply($stream, $id, { sessionId => $session_id });
 }
@@ -235,11 +269,13 @@ sub _binding_of { 'acp:'.$_[1] }
 sub _forget_session {
   my ($self, $session_id) = @_;
   my $session = delete $self->_sessions->{$session_id};
+  $self->_answer_pending($session_id, 'the ACP session ended');
   if ($session) {
     $self->_end_run_subscription($session);
     if (my $watch = delete $session->{_spawn_watch}) { $watch->close }
   }
   my $hall = $self->hall or return;
+  $hall->unregister_permission_handler($self->_binding_of($session_id));
   # Prompts still waiting for the session have no client left to answer.
   $hall->drop_queued($self->_binding_of($session_id));
   $hall->unbind_session($self->_binding_of($session_id));
@@ -438,10 +474,113 @@ sub _session_cancel {
   for my $rid (splice @{ $session->{waiting} // [] }) {
     $self->_reply($stream, $rid, { stopReason => 'cancelled' });
   }
+  # A question the client has not answered yet is answered "no" (the client
+  # should send the cancelled outcome itself).
+  $self->_answer_pending($session_id, 'the prompt turn was cancelled');
   if (my $rid = $session->{current_raider_id}) {
     $self->hall->cancel_raider($rid);
   }
   $self->_reply($stream, $id, {});
+}
+
+#### session/request_permission (agent -> client)
+
+# The kind of tool call ACP knows for a raider tool.
+my %TOOL_KIND = (
+  bash => 'execute', write_file => 'edit', edit_file => 'edit', web_fetch => 'fetch',
+  read_file => 'read', list_files => 'read', glob => 'search', grep => 'search', web_search => 'fetch',
+);
+
+# One line saying what the call does, for the title the client shows.
+sub _permission_title {
+  my ($self, $q) = @_;
+  my $args = ref $q->{arguments} eq 'HASH' ? $q->{arguments} : {};
+  my $what = $args->{command} // $args->{path} // $args->{url} // $args->{query};
+  $what = '' unless defined $what && !ref $what;
+  $what =~ s/\s+/ /g;
+  $what = substr($what, 0, 197).'...' if length $what > 200;
+  return ($q->{tool} // 'tool').( length $what ? ': '.$what : '' );
+}
+
+# Asks the client of an ACP session whether a tool call of its run may run.
+# Returns a Future of { answer => once|session|no, reason }; whatever goes
+# wrong is "no" (ADR 0021, Nachtrag P2). The hall's channel puts a timeout on
+# it and cancels the Future when that runs out.
+sub _request_permission {
+  my ($self, $session_id, $q) = @_;
+  my $future  = Future->new;
+  my $session = $self->_sessions->{$session_id};
+  return $future->done({ answer => 'no', reason => 'the ACP client is gone' })
+    unless $session && $session->{stream};
+
+  my $id = $self->_next_request_id($self->_next_request_id + 1);
+  my @options = ( { optionId => 'allow-once', name => 'Allow once', kind => 'allow_once' } );
+  push @options, { optionId => 'allow-always', name => 'Allow for this session: '.$q->{rule}, kind => 'allow_always' }
+    if defined $q->{rule} && length $q->{rule};
+  push @options, { optionId => 'reject-once', name => 'Reject', kind => 'reject_once' };
+
+  $self->_outgoing->{$id} = {
+    future  => $future,
+    session => $session_id,
+    options => { map { $_->{optionId} => $_->{kind} } @options },
+  };
+  weaken(my $weak = $self);
+  $future->on_ready(sub { delete $weak->_outgoing->{$id} if $weak });
+
+  my $call = {
+    toolCallId => 'perm-'.$id,
+    title      => $self->_permission_title($q),
+    kind       => $TOOL_KIND{ $q->{tool} // '' } // 'other',
+    status     => 'pending',
+    ( ref $q->{arguments} eq 'HASH' ? ( rawInput => $q->{arguments} ) : () ),
+    ( defined $q->{reason} && length $q->{reason}
+      ? ( content => [ { type => 'content', content => { type => 'text', text => $q->{reason} } } ] ) : () ),
+  };
+  my $msg = { jsonrpc => '2.0', id => $id, method => 'session/request_permission',
+    params => { sessionId => $session_id, toolCall => $call, options => \@options } };
+  $session->{stream}->write(JSON::MaybeXS->new->encode($msg) . "\n");
+  return $future;
+}
+
+# A response to session/request_permission. Only "selected" with one of the
+# options we offered, and not a reject, allows anything.
+sub _on_response {
+  my ($self, $msg) = @_;
+  my $id = $msg->{id};
+  my $entry = defined $id && !ref $id ? delete $self->_outgoing->{$id} : undef;
+  return unless $entry;    # unknown or already answered (timeout, cancel)
+  my $future = $entry->{future};
+  return if $future->is_ready;
+  my $outcome = ref $msg->{result} eq 'HASH' ? $msg->{result}{outcome} : undef;
+  my $answer = { answer => 'no', reason => 'the client rejected the call' };
+  if (ref $outcome eq 'HASH') {
+    if (($outcome->{outcome} // '') eq 'selected') {
+      my $kind = $entry->{options}{ $outcome->{optionId} // '' } // '';
+      $answer = { answer => 'once' }    if $kind eq 'allow_once';
+      $answer = { answer => 'session' } if $kind eq 'allow_always';
+    }
+    elsif (($outcome->{outcome} // '') eq 'cancelled') {
+      $answer = { answer => 'no', reason => 'the client cancelled the question' };
+    }
+  }
+  elsif ($msg->{error}) {
+    $answer = { answer => 'no', reason => 'the client could not answer the question' };
+  }
+  $future->done($answer);
+  return;
+}
+
+# Answers every open question of a session "no" (the session ended, the turn
+# was cancelled, the connection went away).
+sub _answer_pending {
+  my ($self, $session_id, $why) = @_;
+  for my $id (keys %{ $self->_outgoing }) {
+    my $entry = $self->_outgoing->{$id} or next;
+    next unless $entry->{session} eq $session_id;
+    delete $self->_outgoing->{$id};
+    $entry->{future}->done({ answer => 'no', reason => $why }) unless $entry->{future}->is_ready;
+  }
+  return;
 }
 
 sub _reply {

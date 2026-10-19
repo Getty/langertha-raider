@@ -2,6 +2,10 @@ Revision history for Langertha-Raider
 
 {{$NEXT}}
 
+    - A tool call naming a tool no source offers is answered "unknown tool"
+      at once, before the PreToolUse hook, the permission gate and any
+      approval; in default mode it used to read "needs approval" (ADR 0005:
+      resolve comes before policy).
     - A .raider/ directory makes a raider project only when it holds
       config.yml, instructions.md, skills/, agents/, raiders/ or packs/.
       raider's own .raider/sessions, .raider/lib and .gitignore turned a
@@ -296,6 +300,34 @@ Revision history for Langertha-Raider
       directories).
     - Hall: a raider entry may set permission_mode, passed as
       --permission-mode.
+    - /reload now reaches the additional directories of the mounted file and
+      search tools: they read the roots from the policy on every call
+      (`extra_roots` of build_file_tools_server and SearchTools may be a
+      CodeRef), so a directory added is reachable and one removed is refused
+      from the next call on. Symlink escapes stay refused. Scenario 100;
+      scenario format `between:`.
+    - New permission mode `auto`, the raider form of Claude Code's
+      `defaultMode: "auto"` (until now skipped as an unknown mode): acceptEdits
+      plus bash commands that only read, from a fixed list (ls, cat, grep, rg,
+      find without -exec/-delete, git status/diff/log/show/branch, ...) where
+      every part of the command must be on it and none may hold a
+      substitution or a redirection into a file; everything else asks. Deny
+      and ask rules hold, allow rules add. Also --permission-mode auto,
+      permissions.default_mode: auto and /permissions mode auto. config
+      explain and /permissions show "claude auto -> raider acceptEdits +
+      read-only bash allowlist". Scenario 101, t/171.
+    - ACP: a tool call the policy asks about, in a run of an ACP session, is
+      put to the client as `session/request_permission` (options allow_once,
+      allow_always with the suggested rule as a session rule, reject_once).
+      The hall opens a private Unix socket per such run (hidden option
+      `--permission-channel PATH` of raider, set only by the hall). Reject,
+      cancelled, an unknown option, an error, no answer within
+      `permission_timeout` (hall config, default 120 s), a closed connection
+      or session/cancel all refuse the call; nothing allows by default. Runs
+      without an ACP session are refused as before. `raider acp connect` asks
+      at the terminal, `raider acp prompt` rejects; the ACP client no longer
+      mistakes an agent request for the response of its own call. Hall
+      scenarios 109 to 113, t/172 to t/174; ADR 0021 Nachtrag P2.
 
   [CLI and REPL]
     - bin/raider is a thin wrapper around internal

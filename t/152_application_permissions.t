@@ -145,6 +145,20 @@ subtest 'config explain' => sub {
   like $buf, qr/additional directory .*docs \(\.raider\/config\.yml\)/, 'the directory';
 };
 
+subtest 'config explain: defaultMode auto of the Claude settings' => sub {
+  my $root = project( '.claude/settings.json' => '{ "permissions": { "defaultMode": "auto" } }' );
+  my $report = Langertha::Raider::CLI->new( root => "$root", engine => 'openai', api_key => 'x' )->explain_config;
+  like $report->{permissions}, {
+    mode => 'auto', mode_source => qr/settings\.json/,
+    mode_note => 'claude auto -> raider acceptEdits + read-only bash allowlist', ignored_modes => [],
+  }, 'the report maps it';
+  my $buf = '';
+  open my $fh, '>', \$buf or die $!;
+  Langertha::Raider::CLI::Output->new( out => $fh, color => 0 )->permissions_report( $report->{permissions} );
+  like $buf, qr/^permissions: mode auto \(from .*settings\.json\)$/m, 'mode line with the source';
+  like $buf, qr/^  claude auto -> raider acceptEdits \+ read-only bash allowlist$/m, 'and the mapping';
+};
+
 subtest 'command line flags' => sub {
   my $err = '';
   open my $efh, '>', \$err or die $!;
@@ -155,7 +169,7 @@ subtest 'command line flags' => sub {
   ( $opt ) = $main->parse_options( '--dangerously-skip-permissions', 'hi' );
   is { $main->app_args($opt) }->{skip_permissions}, 1, '--dangerously-skip-permissions too';
   is [ $main->parse_options( '--permission-mode', 'yolo', 'hi' ) ], [], 'an unknown mode is a usage error';
-  like $err, qr/--permission-mode: unknown mode 'yolo' \(one of default, acceptEdits, plan, bypassPermissions\)/, '... saying so';
+  like $err, qr/--permission-mode: unknown mode 'yolo' \(one of default, acceptEdits, auto, plan, bypassPermissions\)/, '... saying so';
   is [ $main->parse_options( '--permission-mode', 'plan', '--dangerously-skip-permissions' ) ], [], 'both: usage error';
   like $main->usage, qr/--permission-mode MODE/, 'usage names --permission-mode';
   like $main->usage, qr/--dangerously-skip-permissions/, 'and --dangerously-skip-permissions';

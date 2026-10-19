@@ -30,7 +30,7 @@ sub rules {
 sub verdict { $_[0]->decide( $_[1] )->{verdict} }
 
 subtest 'modes' => sub {
-  is [ $class->modes ], [qw( default acceptEdits plan bypassPermissions )], 'the four modes';
+  is [ $class->modes ], [qw( default acceptEdits auto plan bypassPermissions )], 'the modes';
   ok $class->is_mode('acceptEdits'), 'is_mode';
   ok !$class->is_mode('acceptedits'), 'case matters';
   ok !$class->is_mode(undef), 'undef is no mode';

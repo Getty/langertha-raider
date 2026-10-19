@@ -99,7 +99,7 @@ has max_file_size => (
 
 has extra_roots => (
   is      => 'ro',
-  isa     => 'ArrayRef[Str]',
+  isa     => 'ArrayRef[Str]|CodeRef',
   default => sub { [] },
 );
 
@@ -107,7 +107,9 @@ has extra_roots => (
 
 More directories a C<path> may name besides L</root> (the additional
 directories of ADR 0021). Results inside them are shown as absolute paths.
-One that does not exist is left out.
+One that does not exist is left out. A CodeRef returning the list (or an
+ArrayRef) is called on every call, so the roots can change while the tools
+are mounted (C</reload>).
 
 =cut
 
@@ -130,11 +132,13 @@ hider is in force C<grep> runs the Perl code, which applies it file by file.
 has _hide => ( is => 'rw', init_arg => undef );
 has _hidden => ( is => 'rw', default => 0, init_arg => undef );
 
-has _real_extra_roots => ( is => 'ro', lazy => 1, builder => '_build__real_extra_roots', init_arg => undef );
-
-sub _build__real_extra_roots {
+# The extra roots as real directories, read on every call.
+sub _real_extra_roots {
   my ( $self ) = @_;
-  return [ grep { defined && -d } map { realpath($_) } @{ $self->extra_roots } ];
+  my $extra = $self->extra_roots;
+  my @extra = ref $extra eq 'CODE' ? $extra->() : @{ $extra };
+  @extra = @{ $extra[0] } if @extra == 1 && ref $extra[0] eq 'ARRAY';
+  return [ grep { defined && -d } map { realpath($_) } grep { defined } @extra ];
 }
 
 has real_root => (

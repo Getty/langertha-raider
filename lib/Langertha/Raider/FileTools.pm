@@ -22,6 +22,8 @@ C<edit_file(path, old_string, new_string)>, confined to one directory.
     my $server = Langertha::Raider::FileTools::build_file_tools_server(
         root        => '/some/dir',     # optional confinement root
         extra_roots => [ '/other/dir' ], # optional: more directories allowed
+        # or a CodeRef returning the list, asked on every call:
+        # extra_roots => sub { [ '/other/dir' ] },
     );
 
 Returns an L<MCP::Server> instance with the tools C<list_files>, C<read_file>,
@@ -30,7 +32,9 @@ arguments are confined to that directory and the C<extra_roots> (the
 additional directories of ADR 0021); relative paths are read against
 C<root>. Existing paths and nearest existing parents are resolved with
 C<realpath>, so symlinks cannot be used to escape them. An extra root that
-does not exist is left out.
+does not exist is left out. C<extra_roots> may be a CodeRef that returns the
+list (or an ArrayRef); it is called on every tool call, so the application can
+change the additional directories while the server is mounted (C</reload>).
 
 =cut
 
@@ -40,12 +44,17 @@ sub build_file_tools_server {
   my $root_realpath = $root ? realpath($root) : undef;
   die "Root does not exist: $root\n" if $root && !defined $root_realpath;
   my $real_root = $root ? path($root_realpath)->absolute : undef;
-  my @real_roots = $real_root ? ( $real_root,
-    map { path($_)->absolute } grep { defined } map { realpath($_) } @{ $args{extra_roots} // [] } ) : ();
+  my $extra = $args{extra_roots};
+  my $real_roots = sub {
+    my @extra = ref $extra eq 'CODE' ? $extra->() : @{ $extra // [] };
+    @extra = @{ $extra[0] } if @extra == 1 && ref $extra[0] eq 'ARRAY';
+    return ( $real_root, map { path($_)->absolute } grep { defined } map { realpath($_) } grep { defined } @extra );
+  };
 
   my $assert_in_root = sub {
     my ($p) = @_;
     return unless $real_root;
+    my @real_roots = $real_roots->();
     die "Path escapes root: $p\n" unless grep { $_->subsumes($p) } @real_roots;
     return;
   };

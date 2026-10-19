@@ -25,7 +25,9 @@ and incomplete (`perl_*` and hall tools missing), pack fields like `add_allowed_
   that one set — no second hand-maintained list.
 - **One execution path for all surfaces** (CLI, Hall, Telegram, ACP, delegation):
   validate arguments → resolve target/scope → check policy → ask for approval if required →
-  execute with limits → normalise and record the result.
+  execute with limits → normalise and record the result. A call naming a tool that does not
+  resolve ends at resolve with an "unknown tool" error: no hook, policy check or approval
+  sees it.
 - **Permissions never come from prompts.** A skill, pack, persona, project file, provider
   manifest, model output or sub-agent may *request* capabilities (`add_allowed_commands`,
   `extra_mcp`, …) but never grant them. The limit is local policy. A model saying

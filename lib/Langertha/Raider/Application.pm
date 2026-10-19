@@ -594,7 +594,7 @@ has on_plan_review => (
 =attr permission_mode
 
 The permission mode chosen for this application (ADR 0021): C<default>,
-C<acceptEdits>, C<plan> or C<bypassPermissions>. It wins over
+C<acceptEdits>, C<auto>, C<plan> or C<bypassPermissions>. It wins over
 C<permissions.default_mode> of the config files and C<defaultMode> of the
 Claude settings. Croaks on construction with any other name. The command
 line sets it with C<--permission-mode>.
@@ -695,8 +695,9 @@ has _mode_set_at_runtime => (is => 'rw', isa => 'Bool', default => 0, init_arg =
 Reads the permission sources again (C</reload>): the rules, modes and
 additional directories of the config files and the Claude settings. The
 session rules stay, and so does a mode switched during the session
-(C</permissions mode>, C<exit_plan_mode>). The tools keep the additional
-directories they were mounted with.
+(C</permissions mode>, C<exit_plan_mode>). The mounted file and search tools
+read the additional directories from the policy on every call, so a directory
+added or removed in the sources is reachable or refused from the next call on.
 
 =cut
 
@@ -1744,8 +1745,10 @@ sub _build_skill_tool_server {
 sub _build_stock_tool_servers {
   my ($self) = @_;
 
-  my @extra = $self->permissions->additional_directory_paths;
-  my $files = build_file_tools_server(root => $self->root, extra_roots => \@extra);
+  # The roots are asked on every call, so /reload (reload_permissions) reaches the mounted tools.
+  weaken(my $app = $self);
+  my $extra = sub { $app ? [ $app->permissions->additional_directory_paths ] : [] };
+  my $files = build_file_tools_server(root => $self->root, extra_roots => $extra);
 
   my $bash = MCP::Run::Bash->new(
     tool_name         => 'bash',
@@ -1758,10 +1761,9 @@ sub _build_stock_tool_servers {
 
   my $web = build_web_tools_server(loop => $self->loop);
 
-  weaken(my $app = $self);
   my $search = Langertha::Raider::SearchTools->new(
     root        => $self->root,
-    extra_roots => \@extra,
+    extra_roots => $extra,
     hider       => sub { $app ? $app->_search_hider : undef },
   )->server;
   my $todo   = Langertha::Raider::TodoTools->new(on_update => sub { $app->_todos_updated(@_) if $app })->server;
@@ -2089,6 +2091,20 @@ sub cancel_run {
   $run->{cancelled} = 1;
   $self->_raider->cancel if $self->_has_raider;
   return 1;
+}
+
+=method run_cancelled
+
+True when the current run was cancelled (L</cancel_run>); false outside a
+run. A question put to somebody (the hall's permission channel) stops
+waiting when it turns true.
+
+=cut
+
+sub run_cancelled {
+  my ( $self ) = @_;
+  my $run = $self->_run;
+  return $run && $run->{cancelled} ? 1 : 0;
 }
 
 =method event

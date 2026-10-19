@@ -117,6 +117,8 @@ raider acp prompt HOST:PORT TEXT... [--raider NAME] [--json]
 
 One-shot ACP prompt. Connects, opens a session, sends TEXT, prints
 incoming session/update notifications, exits on the final stopReason.
+A session/request_permission of the agent is rejected (nobody to ask);
+use connect to answer it.
 EOF
   exit 0;
 }
@@ -131,7 +133,9 @@ sub run_connect {
   my $ep = shift @ARGV or die "Usage: raider acp connect HOST:PORT\n";
   my ($host, $port) = _parse_endpoint($ep);
 
-  my $c = Langertha::Raider::ACP::Client->new(host => $host, port => $port);
+  my $term;
+  my $c = Langertha::Raider::ACP::Client->new(host => $host, port => $port,
+    on_permission => sub { _ask_permission($term, @_) });
   my $init = $c->initialize;
   print _color_on('bright_blue', "connected to $host:$port\n");
   print _color_on('bright_black',
@@ -143,7 +147,7 @@ sub run_connect {
   my $sid = $sess->{sessionId};
 
   # Read loop: use Term::ReadLine if available, else bare STDIN.
-  my $term = Term::ReadLine->new('raider-acp');
+  $term = Term::ReadLine->new('raider-acp');
   eval { $term->ornaments(0) };
   my $prompt = _color_on('bright_black', "acp> ");
 
@@ -178,13 +182,34 @@ sub run_connect {
   return 0;
 }
 
+# The agent asks to run a tool call (session/request_permission). Shows it
+# and the options, returns the optionId the person picks; anything but a
+# listed number is a rejection (undef: the client then rejects).
+sub _ask_permission {
+  my ($term, $params) = @_;
+  my $call = $params->{toolCall} // {};
+  my @options = @{ $params->{options} // [] };
+  print "\n", _color_on(yellow => 'permission: ' . ($call->{title} // $call->{toolCallId} // 'tool call')), "\n";
+  for my $c (@{ $call->{content} // [] }) {
+    print '  ', $c->{content}{text}, "\n" if ref $c->{content} eq 'HASH' && defined $c->{content}{text};
+  }
+  my $i = 0;
+  print '  ', ++$i, ') ', $_->{name}, "\n" for @options;
+  return undef unless $term && -t STDIN;    # nobody to ask: the client rejects
+  my $answer = $term->readline(_color_on('bright_black', 'choose [1-' . scalar(@options) . '], anything else rejects> '));
+  return undef unless defined $answer && $answer =~ /^\s*(\d+)\s*$/ && $1 >= 1 && $1 <= @options;
+  return $options[$1 - 1]{optionId};
+}
+
 sub print_connect_help {
   print <<"EOF";
 raider acp connect HOST:PORT [--raider NAME] [--json]
 
 Open an interactive REPL backed by a remote ACP agent. Each input line
 is sent as a session/prompt; session/update notifications stream to
-the terminal. /cancel sends session/cancel; /quit exits.
+the terminal. /cancel sends session/cancel; /quit exits. A
+session/request_permission of the agent is put to you at the terminal
+(a number picks an option, anything else rejects).
 EOF
   exit 0;
 }

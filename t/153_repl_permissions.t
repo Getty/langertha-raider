@@ -132,7 +132,7 @@ subtest '/permissions' => sub {
   ok( ( grep { $_->name eq 'exit_plan_mode' } $app->_mounted_tools ), 'entering plan mode mounts exit_plan_mode' );
   $out = '';
   $c->dispatch('/permissions mode yolo');
-  like $out, qr/usage: \/permissions mode MODE \(default, acceptEdits, plan, bypassPermissions\)/, 'an unknown mode';
+  like $out, qr/usage: \/permissions mode MODE \(default, acceptEdits, auto, plan, bypassPermissions\)/, 'an unknown mode';
   is $app->permissions->mode, 'plan', 'unchanged';
 };
 

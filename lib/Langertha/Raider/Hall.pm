@@ -101,6 +101,7 @@ C<.raider-hall.yml> in the hall root:
     acp: { port: 38421, host: 127.0.0.1 }
     logs: { keep_events: 20, max_log_size: 1048576 }
     cancel_grace: 5
+    permission_timeout: 120
 
 C<persona> on a raider entry is a pack used as the raider's persona: the
 hall passes it as one more C<--pack>, after those in C<packs>, unless
@@ -112,9 +113,11 @@ adds F<longhouse/lib> of the hall root to every raider's C<PERL5LIB> as
 well.
 
 C<permission_mode> on a raider entry (C<default>, C<acceptEdits>,
-C<plan>, C<bypassPermissions>; ADR 0021) is passed as C<--permission-mode>.
-A hall raider has nobody to ask: a tool call its mode or rules ask about is
-refused with the reason. Without the key the raider takes the mode from
+C<auto>, C<plan>, C<bypassPermissions>; ADR 0021) is passed as C<--permission-mode>.
+A hall raider has nobody to ask, except a run of an ACP session whose client
+can be asked with C<session/request_permission> (see L</permission_timeout>):
+every other tool call its mode or rules ask about is refused with the
+reason. Without the key the raider takes the mode from
 its project (C<permissions.default_mode> of F<.raider/config.yml>, the
 Claude settings), else C<default> -- which refuses writing, C<bash> and the
 network unless a rule allows them.
@@ -192,6 +195,7 @@ use Langertha::Raider::Binary qw( packed_binary );
 use Langertha::Raider::Hall::ACP;
 use Langertha::Raider::Hall::Cron;
 use Langertha::Raider::Hall::MCP;
+use Langertha::Raider::Hall::PermissionChannel;
 use Langertha::Raider::Hall::Protocol;
 use Langertha::Raider::Hall::Raider;
 use Langertha::Raider::Hall::Telegram;
@@ -925,6 +929,7 @@ sub _reap_raider {
     $raider->has_binding ? ( binding => $raider->binding ) : (),
   });
 
+  if (my $channel = delete $self->_permission_channels->{$raider->id}) { $channel->close }
   delete $self->raiders->{$raider->id};
   $self->_prune_events($slot);
 
@@ -1194,6 +1199,22 @@ sub _spawn_raider {
   $id = $base_id.'.'.++$n while -e $log_dir->child("${id}.events.jsonl");
   my $events_path = $log_dir->child("${id}.events.jsonl");
   $events_path->touch;
+
+  # A run of an ACP session whose client can be asked gets a channel to the
+  # hall; the raider's --permission-channel puts its asks on it. Without a
+  # channel an ask is refused (ADR 0021).
+  if (defined $binding && (my $handler = $self->_permission_handlers->{$binding})) {
+    my $channel = Langertha::Raider::Hall::PermissionChannel->new(
+      loop    => $self->loop,
+      timeout => $self->permission_timeout,
+      handler => $handler,
+    );
+    my $path = eval { $channel->start };
+    if (defined $path) {
+      $self->_permission_channels->{$id} = $channel;
+      splice @cmd, -2, 0, '--permission-channel', $path;   # before the `--` and the mission
+    }
+  }
   $log_path->append_utf8($self->_start_line($id));
   $self->_note_ignored_keys($base_name, $raider_config, $log_path);
 
@@ -1419,6 +1440,53 @@ has cancel_grace => (
 );
 
 sub _build_cancel_grace { $_[0]->config->{cancel_grace} // 5 }
+
+=attr permission_timeout
+
+Seconds an ACP client has to answer a C<session/request_permission> the hall
+forwards for a raider's tool call (ADR 0021, Nachtrag P2). From
+C<permission_timeout: N> in F<.raider-hall.yml>, default 120. After it the
+answer is I<no>: the call is refused, the run goes on, and the hall does not
+treat a run that waits for an answer as hung.
+
+=cut
+
+has permission_timeout => (
+  is => 'ro',
+  lazy => 1,
+  builder => '_build_permission_timeout',
+);
+
+sub _build_permission_timeout { $_[0]->config->{permission_timeout} // 120 }
+
+has _permission_handlers => ( is => 'ro', default => sub { {} }, init_arg => undef );
+has _permission_channels => ( is => 'ro', default => sub { {} }, init_arg => undef );
+
+=method register_permission_handler
+
+    $hall->register_permission_handler( 'acp:acp-1234', sub { my ($question) = @_; return $future_of_answer } );
+    $hall->unregister_permission_handler('acp:acp-1234');
+
+A surface that can ask a person (the ACP adapter) registers, per session
+binding, the code that answers the questions of the runs of that binding. A
+run spawned for a registered binding gets a permission channel
+(L<Langertha::Raider::Hall::PermissionChannel>) and the hidden raider option
+C<--permission-channel>; every other run has none and is refused as before.
+The code returns a Future of C<< { answer => 'once' | 'session' | 'no', reason } >>.
+
+=cut
+
+sub register_permission_handler {
+  my ($self, $binding, $cb) = @_;
+  $self->_permission_handlers->{$binding} = $cb;
+  return;
+}
+
+sub unregister_permission_handler {
+  my ($self, $binding) = @_;
+  delete $self->_permission_handlers->{$binding};
+  return;
+}
 
 # After cancel_grace, sends the first of @signals to raider $id if that
 # process ($pid) still runs, and goes on with the rest.

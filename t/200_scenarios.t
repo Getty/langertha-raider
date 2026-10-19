@@ -55,6 +55,10 @@ use Langertha::Raider::Loadguard;
 #            exit_plan_mode, in order (without the key nobody reviews)
 #   prompt:  the user prompt (or `prompts:`, a list run one after the other on
 #            the same raider, so the conversation carries over)
+#   between: { N => { files => {...}, home => {...}, remove => [ path, ... ], remove_home => [...], reload => true } }
+#            done before prompt N (0-based): files written or removed in the
+#            root (or the home), then with reload the application reads its
+#            context and permissions again (/reload)
 #   script:  the model's answers, one per request:
 #              - tool_calls: [ [ tool_name, { arguments } ], ... ]
 #              - text: the final answer
@@ -141,7 +145,15 @@ for my $file (@files) {
     );
     my @prompts = $s->{prompts} ? @{ $s->{prompts} } : ( $s->{prompt} // 'go' );
     my ( $answer, $outcome );
-    for my $p (@prompts) {
+    for my $i ( 0 .. $#prompts ) {
+      if ( my $b = ( $s->{between} // {} )->{$i} ) {
+        $root->child($_)->touchpath->spew_utf8( $fill->( $b->{files}{$_} ) ) for keys %{ $b->{files} // {} };
+        $home->child($_)->touchpath->spew_utf8( $fill->( $b->{home}{$_} ) ) for keys %{ $b->{home} // {} };
+        $root->child($_)->remove for @{ $b->{remove} // [] };
+        $home->child($_)->remove for @{ $b->{remove_home} // [] };
+        $app->reload_context if $b->{reload};
+      }
+      my $p = $prompts[$i];
       $answer = eval {
         return '' . $app->run($p) unless $s->{run_prompt};
         $outcome = $app->run_prompt($p);

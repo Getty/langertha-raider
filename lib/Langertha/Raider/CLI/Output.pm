@@ -330,6 +330,7 @@ sub permissions_report {
   my ( $self, $p, %o ) = @_;
   $self->emit($self->c(meta => 'permissions: '), 'mode ', $self->c(title => $p->{mode}),
     $self->c(meta => ' (from '.$p->{mode_source}.')'), "\n");
+  $self->emit('  ', $self->c(meta => $p->{mode_note}), "\n") if defined $p->{mode_note};
   for my $m (@{ $p->{ignored_modes} }) {
     $self->emit('  ', $self->c(warn => 'ignored mode '.$m->{value}.' ('.$m->{source}.'): '.$m->{reason}), "\n");
   }

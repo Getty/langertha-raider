@@ -22,6 +22,7 @@ use Langertha::Raider::Config;
 use Langertha::Raider::Config::Migrate;
 use Langertha::Raider::Context::Layout;
 use Langertha::Raider::Hall::CLI;
+use Langertha::Raider::PermissionChannel;
 use Langertha::Raider::Permissions;
 use Langertha::Raider::Provider::Binding;
 use Langertha::Raider::SessionStore;
@@ -168,6 +169,7 @@ sub repl_class    { 'Langertha::Raider::CLI::REPL' }
 sub runner_class  { 'Langertha::Raider::CLI::Runner' }
 sub session_store_class { 'Langertha::Raider::SessionStore' }
 sub permissions_class { 'Langertha::Raider::Permissions' }
+sub permission_channel_class { 'Langertha::Raider::PermissionChannel' }
 sub sessions_class { 'Langertha::Raider::CLI::Sessions' }
 sub skill_class   { 'Langertha::Raider::Skill' }
 
@@ -276,13 +278,17 @@ Options:
       --permission-mode MODE
                            default (ask before writing, running code,
                            the network), acceptEdits (also write files in
-                           the project), plan (read only; exit_plan_mode
+                           the project), auto (that, and bash commands
+                           that only read), plan (read only; exit_plan_mode
                            to go on) or bypassPermissions (run everything
                            a deny rule allows). Wins over default_mode of
                            .raider/config.yml and defaultMode of the
                            Claude settings. Without anyone to ask (a
-                           one-shot run, --json, Hall, ACP) a call that
-                           asks is refused
+                           one-shot run, --json, Hall) a call that asks
+                           is refused
+      --permission-channel PATH
+                           Internal, set by the hall for a run of an
+                           ACP session: asks go to the ACP client
       --dangerously-skip-permissions
                            The same as --permission-mode bypassPermissions
       --claude             Read the Claude Code layout (CLAUDE.md memory,
@@ -376,6 +382,7 @@ sub parse_options {
       'detect!'               => \$opt{detect},
       'customize-prompt'      => \$opt{customize_prompt},
       'permission-mode=s'     => \$opt{permission_mode},
+      'permission-channel=s'  => \$opt{permission_channel},
       'dangerously-skip-permissions' => \$opt{skip_permissions},
       'claude'                => \$opt{profile_claude},
       'openai|codex'          => \$opt{profile_openai},
@@ -737,6 +744,13 @@ sub run {
   my $in = $self->in;
   my $interactive = $opt->{interactive} || (!$opt->{machine} && !@prompt && -t $in);
   $runner = $self->runner_class->new(app => $app, output => $self->output, err => $self->err);
+  # --permission-channel (set by the hall for a run of an ACP session): a call
+  # the policy asks about is put to the hall, never answered yes by default.
+  $app->on_permission_request(
+    $self->permission_channel_class->new(
+      path => $opt->{permission_channel}, cancelled => sub { $app->run_cancelled },
+    )->callback,
+  ) if defined $opt->{permission_channel} && !$interactive;
   my $store = $opt->{no_session} ? undef : $app->session_store;
 
   # --session ID, --continue, session resume ID: the session is locked
