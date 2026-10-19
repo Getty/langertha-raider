@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-10-19T06:51:36Z
+claimed_by: strom-h
+class: standard
+completed: 2026-10-19T06:51:36Z
+created: 2026-10-19T04:06:56Z
+id: 155
+priority: high
+started: 2026-10-19T05:53:29Z
+status: done
+tags:
+- claude-code-flow
+title: Hooks from Claude Code settings in Claude mode (PreToolUse, PostToolUse, UserPromptSubmit,
+  SessionStart, Stop, SubagentStart)
+updated: 2026-10-19T06:51:36Z
+---
+
+Strom H. Hängt an P. Plan: /home/getty/dev/perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md
+
+2026-10-19 05:57 H gestartet (Worktree .claude/worktrees/strom-h, Branch worktree-strom-h, Basis b6bb59d). Nummern laut Koordinator: ADR 0022, Szenarien 90+, Tests t/140+. Teil 1 (Hook-Runner Langertha::Raider::Hooks, ToolNames-Argumentübersetzung, Plugin-hooks.json) läuft bei raider-worker. Teil 2: Verdrahtung SessionStart/UserPromptSubmit/PostToolUse/Stop; PreToolUse-Entscheidung über Gate-Schnittstelle (nach P), SubagentStart + briefing-Doppelladen (nach A).
+
+2026-10-19 06:14 Teil 1 fertig + WIP-Commit (Hooks.pm, Hooks/Result.pm, ToolNames claude_input/raider_input, Plugins hooks/data_dir, Settings disableAllHooks; t/140, t/141 mit echten briefing/loadguard/skilletor-Skripten grün). Auf main f10f969 (P) rebased. Teil 2 läuft: Verdrahtung SessionStart/UserPromptSubmit/PostToolUse/Stop, PreToolUse mit P's Gate, Szenarien 90+, ADR 0022.
+
+2026-10-19 06:37 Teil 2 fertig (WIP 3f6cf4a, 04e5cf2): Hooks im Claude-Layout verdrahtet (SessionStart startup/resume/clear, UserPromptSubmit, PostToolUse via Plugin::ClaudeHooks, Stop-Schleife Limit 8), PreToolUse via Raider _tool_hook vor Schema-Check und P's Gate (deny/ask-Regeln + Plan-Modus gelten trotz Hook-allow; Hook-ask fragt immer), Journal hook.ran/hook.message, ADR 0022, Szenarien 90-99, t/142, t/143. Offen: SubagentStart/SubagentStop + native_briefing nach A (Schnittstelle ADR 0022 §7). Folgepunkte: (K) erste gespeicherte Session legt .raider/sessions/ an -> reines Claude-Projekt wird danach als raider-Projekt erkannt (keine CLAUDE.md/Skills/Hooks); (B) gepacktes Binary: Hook-Prozesse via IO::Async::Process prüfen; ADR 0017: Hooks, Hooks::Result, Plugin::ClaudeHooks nachtragen; nicht gebaut: compact, PostToolUseFailure, updatedToolOutput, http/prompt/agent-Hooks.
+
+2026-10-19 06:41 Auf main 24879d8 rebased (Konflikt ADR 0019: H-Nachtrag ist jetzt Addendum 3). Volle Suite grün: 139 Dateien, 1291 Tests, nur Live-Tests übersprungen. Commits f1f33df, 88c1182, f8db2c2. Karte bleibt in-progress bis SubagentStart/SubagentStop + native_briefing nach A-Merge verdrahtet sind.
+
+Koordinator 2026-10-19: Hauptteil gemerged (30a492b). SubagentStart/Stop + native_briefing übernimmt Strom A (#153) nach ADR 0022 §7; H-Sitzung beendet.
