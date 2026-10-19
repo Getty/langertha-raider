@@ -1,4 +1,5 @@
 title: the general-purpose agent reads a file in a context of its own and the caller answers with its text
+permission_mode: default
 files:
   notes.txt: "SECRET-NOTE-42\n"
 prompt: What is in notes.txt? Use an agent.

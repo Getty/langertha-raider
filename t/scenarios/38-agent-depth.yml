@@ -1,4 +1,5 @@
 title: with max_agent_depth 2 in the config a subagent starts a subagent of its own; that one gets no agent tool
+permission_mode: default
 files:
   .raider/config.yml: "max_agent_depth: 2\n"
 prompt: Delegate twice.

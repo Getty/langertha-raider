@@ -1,4 +1,5 @@
 title: Claude Code's own skills key briefs the agent too, before briefing.skills, with a skill the model may not invoke
+permission_mode: default
 files:
   CLAUDE.md: "Project.\n"
   .claude/skills/style/SKILL.md: "---\ndescription: House style.\ndisable-model-invocation: true\n---\nSTYLE-BODY\n"

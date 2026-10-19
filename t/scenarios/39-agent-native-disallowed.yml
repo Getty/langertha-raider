@@ -1,4 +1,5 @@
 title: a native .raider/agents file with disallowedTools Bash is listed in the agent tool and runs without bash
+permission_mode: bypassPermissions
 files:
   .raider/agents/careful.md: "---\ndescription: Works without a shell.\ndisallowedTools: Bash\n---\nCAREFUL-BODY-MARKER\n"
 prompt: Let the careful agent write a file.

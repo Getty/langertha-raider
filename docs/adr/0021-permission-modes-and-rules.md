@@ -39,8 +39,8 @@ new session rule invalidates approvals given before. Both carry the internal mar
 current mode and its rules, directories and source servers, sharing the *same* session
 rules array. A mode change stays with the policy that made it (a sub-agent leaving plan
 mode does not take the session along); a rule allowed for the session in either holds in
-both; nothing widens a sub-run beyond its parent. Wiring it into the agent tool is
-stream A's.
+both; nothing widens a sub-run beyond its parent. The agent tool uses it for every
+subagent (ADR 0020 §4).
 
 ### 2. Rule syntax: Claude Code's
 
@@ -232,9 +232,9 @@ additional directories.
   `bypassPermissions`, or `permission_mode` on a hall raider. Tests and scenarios that test
   tools, not approvals, run in `bypassPermissions` (scenario harness default).
 - Follow-ups (not built): no scenario for `mcp__` rules, because the harness cannot mount
-  a foreign MCP server; the inheritance of the policy into sub-agents (stream A, through
-  `for_subrun`). ACP's `session/request_permission` and live additional directories after
-  `/reload` are built, see Nachtrag P2.
+  a foreign MCP server. ACP's `session/request_permission` and live additional directories
+  after `/reload` are built, see Nachtrag P2. (The inheritance of the policy into sub-agents
+  through `for_subrun` is built: ADR 0020 §4.)
 
 ## Nachtrag P2 (k158)
 

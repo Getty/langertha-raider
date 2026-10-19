@@ -218,6 +218,7 @@ subtest 'cancelling the run cancels the subagent' => sub {
   my @events;
   my $app = Test::Raider::Subagent::CancelApp->new(
     root => ''.root(), engine_name => 'openai', api_key => 'mock',
+    permission_mode => 'bypassPermissions',   # only the cancel may stop the write
     on_event => sub { my ( $type, %p ) = @_; push @events, { type => $type, %p } },
     script => [
       { tool_calls => [ [ agent => { description => 'd', prompt => 'p' } ] ] },

@@ -66,8 +66,9 @@ matches the call; the files below it that a rule names are left out of the
 results by the search tools themselves (L<Langertha::Raider::SearchTools/hider>).
 
 =item C<Agent(name)> / C<Task(name)> -- an C<agent> call whose
-C<subagent_type> is C<name>; C<Skill(name)> -- a C<skill> call for the skill
-C<name>. Exact names.
+C<subagent_type> is C<name> (a call without one starts C<general-purpose>,
+so it counts as that, ADR 0020); C<Skill(name)> -- a C<skill> call for the
+skill C<name>. Exact names.
 
 =item C<WebFetch(domain:example.com)> -- the host of C<url>;
 C<domain:*.example.com> matches subdomains.
@@ -153,6 +154,9 @@ my %FAMILY = (
 
 # The argument a named rule (Agent(name), Skill(name)) is held against.
 my %NAME_ARG = ( agent => 'subagent_type', skill => 'skill' );
+# The value a named argument has when the call leaves it out: an agent call
+# without subagent_type starts general-purpose (ADR 0020 §3).
+my %NAME_DEFAULT = ( agent => 'general-purpose' );
 
 sub _build__parsed {
   my ( $self ) = @_;
@@ -299,6 +303,7 @@ sub matches {
   return $self->_matches_domain($args->{url})   if $p->{family} eq 'domain';
   if ( $p->{family} eq 'named' ) {
     my $value = $args->{ $NAME_ARG{$name} };
+    $value = $NAME_DEFAULT{$name} unless defined $value && length $value;
     return defined $value && !ref $value && $value eq $p->{specifier} ? 1 : 0;
   }
   return $self->_matches_path($name, $args, $ctx);

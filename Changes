@@ -280,6 +280,12 @@ Revision history for Langertha-Raider
       are put in front of the task in the briefing plugin's format; an
       unknown skill refuses the spawn, over 64 kB warns with agent.warning,
       and config explain flags agents whose skills do not resolve.
+    - A subagent runs under its caller's permission policy (ADR 0021): the
+      same mode, rules and additional directories, session rules shared both
+      ways; its own exit_plan_mode never switches the caller's mode. Starting
+      an agent needs no approval unless an Agent(name) / Task(name) rule says
+      so; a call without subagent_type counts as general-purpose. /reload
+      re-reads agent files.
 
   [Permissions]
     - INCOMPATIBLE: every tool call of raider now passes a permission policy

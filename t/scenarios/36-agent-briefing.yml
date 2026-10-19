@@ -1,4 +1,5 @@
 title: an agent with briefing.skills gets the skills in front of its task in the briefing format, and the caller gets its answer
+permission_mode: default
 files:
   CLAUDE.md: "Project.\n"
   .claude/skills/notes/SKILL.md: "---\nname: notes\ndescription: How notes are written.\n---\n\nNOTES-SKILL-BODY: one line per note.\n"

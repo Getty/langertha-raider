@@ -65,7 +65,8 @@ Code's `NotebookEdit`, `KillShell`, …, and permission patterns such as `Bash(g
 would grant more than they say if read as `bash`) is ignored and reported by `config explain`; refusing
 the whole agent would make most agents written for Claude Code unusable. Every other key
 (`color`, `permissionMode`, `hooks`, `mcpServers`, `maxTurns`, …) is kept and listed by
-`config explain` as not used by raider; `permissionMode` is for stream P.
+`config explain` as not used by raider. `permissionMode` too: a subagent runs in its caller's
+mode (§4), and nothing in a file may widen that (ADR 0021 §1, `for_subrun`).
 
 ### 3. The `agent` tool
 
@@ -79,6 +80,15 @@ result that names the available agents.
 The tool is mounted whenever the run is below the depth limit (§4); it is part of the one
 active tool set (ADR 0005). Effect class: none of its own — the subagent's tool calls carry
 their effects in the subagent's journal.
+
+An `agent` call passes the caller's gate like any other call (ADR 0021). Without a rule it
+is allowed in every mode — `ToolEffects` gives it no effects, so the modes treat it like a
+reading tool: starting a subagent changes nothing by itself, and every call the subagent
+makes goes through the policy it inherits (§4). Rules decide otherwise: `Agent(name)` /
+`Task(name)` as deny refuses starting that agent (an error result, no `agent.started`), as
+ask puts the spawn to the person (refused when nobody can be asked). A call without
+`subagent_type` counts as `general-purpose` for these rules, so leaving the argument out
+does not get around `Agent(general-purpose)`.
 
 ### 4. The subagent run
 
@@ -94,8 +104,22 @@ their effects in the subagent's journal.
 - **Own tool set.** The caller's active set filtered by §2, then: `ask_user` is removed (a
   subagent has nobody to ask, as in Claude Code), and `agent` is removed at the depth limit.
   Stateful tools (`todo_write`) get their own instance, so a subagent's list does not
-  overwrite the caller's. The subagent's prompt, catalogue and approval gate derive from
-  this set alone (ADR 0005); which permission mode it inherits is stream P's to wire.
+  overwrite the caller's. The subagent's prompt and catalogue derive from this set alone
+  (ADR 0005).
+- **Inherited permissions** (ADR 0021). The subagent's policy is the caller's
+  `for_subrun`: the mode the caller has when the `agent` call starts, the same rules and
+  additional directories, and the *same* session rules. Its raider gets the application's
+  gate with that policy, so each of its tool calls is decided as the caller's would be — a
+  write refused in a non-interactive `default` run is refused in its subagent, a deny rule
+  holds in both, `bypassPermissions` lets both write. A call the policy asks about goes to
+  the same person (`on_permission_request`: the subagent has no `ask_user`, but approving a
+  tool call is the surface's question, not the model's); "yes, for this session" adds a
+  session rule both policies see, "yes, once" is bound to the subagent's own session and
+  run. With nobody to ask it is refused, as in the caller. The subagent's `permission.*`
+  events go to its journal only. A mode change stays with the policy that made it: the
+  subagent gets its own `exit_plan_mode` (when the caller's set has one), which never
+  switches a mode and in plan mode tells the model to give its plan as its answer — the
+  caller gets it. A nested subagent inherits from its caller, not from the main run.
 - **Depth limit.** `max_agent_depth` (config key, default 1): the main run has depth 0, a
   subagent of it depth 1, and a run at depth `max_agent_depth` gets no `agent` tool. The
   default is Claude Code's behaviour (subagents cannot start subagents); a higher value
@@ -159,10 +183,13 @@ with the briefing plugin and under raider.
   until then the chain has only the catalogue).
 - **Unknown skill: no spawn.** If any declared skill does not resolve, the `agent` call is
   an error result `briefing: agent 'NAME' references unknown skill(s): a, b` and no
-  subagent starts — never a partial briefing (briefing's hard-fail policy). `config explain`
-  reports such agents up front, as `briefing doctor` does.
-- **Budget.** Above 64 KB of skill text the spawn goes ahead with a warning event (the
-  briefing size note); the parent's journal records it.
+  subagent starts — never a partial briefing (briefing's hard-fail policy): no child
+  request, no child session, no `agent.started`. `config explain` reports such agents up
+  front, as `briefing doctor` does (oversized briefings are not flagged there yet).
+- **Budget.** Above 64 KB of skill text the spawn goes ahead with an `agent.warning` event
+  (`call`, `agent`, `message` = the briefing size note) before `agent.started`; the parent's
+  journal records it.
+- The child's journal `message` is the briefed prompt — what the child was actually sent.
 
 ## Consequences
 

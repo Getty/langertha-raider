@@ -1,4 +1,8 @@
 title: a .claude/agents file with tools Read, Grep gets only read_file and grep; its bash call is an unknown tool
+# bypassPermissions: the gate runs before the tool is looked up, so in
+# default mode the unmounted bash would be refused as needing approval
+# instead of reaching "unknown tool" (ADR 0005 orders resolve before policy).
+permission_mode: bypassPermissions
 files:
   CLAUDE.md: "Project.\n"
   .claude/agents/reader.md: "---\nname: reader\ndescription: Reads and searches, changes nothing.\ntools: Read, Grep\n---\nREADER-BODY-MARKER: you only read.\n"

@@ -153,11 +153,8 @@ sub project {
   $root->child('.claude/agents/briefed.md')->touchpath->spew_utf8(
     "---\nname: briefed\ndescription: Briefed.\n$o{decl}---\nBRIEFED-BODY\n" );
   my @events;
-  # claude => 1: the session store writes .raider/sessions into the root,
-  # which would make a layout decided later a raider project.
   my $app = mock_app(
     root     => "$root",
-    claude   => 1,
     on_event => sub { my ( $type, %p ) = @_; push @events, { type => $type, %p } },
     script   => [
       { tool_calls => [ [ agent => { description => 'd', prompt => 'THE-TASK', subagent_type => 'briefed' } ] ] },

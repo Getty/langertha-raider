@@ -1,4 +1,5 @@
 title: an agent declaring an unknown skill is refused with briefing's message and never starts
+permission_mode: default
 files:
   CLAUDE.md: "Project.\n"
   .claude/skills/notes/SKILL.md: "---\ndescription: Notes.\n---\nnotes\n"

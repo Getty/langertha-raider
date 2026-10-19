@@ -11,6 +11,7 @@ use Time::HiRes ();
 use Langertha::Raider;
 use Langertha::Raider::AgentTools;
 use Langertha::Raider::Briefing;
+use Langertha::Raider::PlanTools;
 use Langertha::Raider::TodoTools;
 
 =synopsis
@@ -24,6 +25,7 @@ use Langertha::Raider::TodoTools;
         session => $session,                 # or undef
         call    => 'c3',                     # the agent call's id
         event   => sub { $app->event(@_) },  # the caller's event stream
+        policy  => $app->permissions,        # the caller's permission policy
       } },
     );
 
@@ -31,6 +33,7 @@ use Langertha::Raider::TodoTools;
     my $sub = Langertha::Raider::Subagent->new(
       app => $app, agent => $agent, depth => 1, prompt => 'Find ...',
       caller_servers => \@servers, on_caller_event => sub { ... },
+      caller_policy => $app->permissions,
     );
     my ( $text, $is_error ) = $sub->run;
 
@@ -71,6 +74,18 @@ a, b>, and nothing starts -- no session, no C<agent.started>, no request.
 Above 64 kB of skill text the run goes ahead, and the caller's stream and
 journal get C<agent.warning> (C<call>, C<agent>, C<message>: the size
 note) before C<agent.started>.
+
+=item * B<Permissions> (L</permissions>, ADR 0021). The caller's policy
+through L<Langertha::Raider::Permissions/for_subrun>: the mode the caller
+has when the call starts, the same rules and additional directories, and
+the B<same> session rules. Every tool call of the subagent passes the
+application's gate (L<Langertha::Raider::Application/tool_gate>) with this
+policy; a call it asks about goes to the same person
+(L<Langertha::Raider::Application/on_permission_request>) or, with nobody to
+ask, is refused as in the caller. Its C<permission.*> events go to the
+subagent's journal. C<exit_plan_mode> gets an instance of its own that never
+switches a mode: a subagent in plan mode gives its plan as its answer, to
+the caller.
 
 =item * B<Engine.> One engine of the caller's class and arguments, built by
 L<Langertha::Raider::Application/build_subagent_engine> over this set's
@@ -210,6 +225,42 @@ The caller's event stream, called as C<< ->($type, %payload) >> with
 C<agent.started> and C<agent.finished>. Required.
 
 =cut
+
+has caller_policy => (
+  is        => 'ro',
+  isa       => 'Langertha::Raider::Permissions',
+  predicate => 'has_caller_policy',
+);
+
+=attr caller_policy
+
+The caller's L<Langertha::Raider::Permissions>: the application's
+L<Langertha::Raider::Application/permissions> for a subagent of the main
+run, the calling subagent's L</permissions> for a nested one. Defaults to
+the application's.
+
+=cut
+
+has permissions => (
+  is       => 'ro',
+  isa      => 'Langertha::Raider::Permissions',
+  init_arg => undef,
+  lazy     => 1,
+  builder  => '_build_permissions',
+);
+
+=attr permissions
+
+The subagent's policy: L<Langertha::Raider::Permissions/for_subrun> of
+L</caller_policy>, built once.
+
+=cut
+
+sub _build_permissions {
+  my ( $self ) = @_;
+  my $caller = $self->has_caller_policy ? $self->caller_policy : $self->app->permissions;
+  return $caller->for_subrun;
+}
 
 has briefing => (
   is       => 'ro',
@@ -364,13 +415,14 @@ has _journal_failed => ( is => 'rw', init_arg => undef, default => 0 );
 =method agent_tool_server
 
     my $server = Langertha::Raider::Subagent->agent_tool_server(
-      app => $app, depth => $depth, caller => sub { { servers, session, call, event } });
+      app => $app, depth => $depth, caller => sub { { servers, session, call, event, policy } });
 
 The L<MCP::Server> with the C<agent> tool for a run at C<$depth>, over the
 agent catalogue of the application's context. Every call asks C<caller>
 for the state of the calling run at that moment -- its active tool set,
-session, the id of the call and its event stream -- and runs a new
-subagent of the invocant class at C<$depth + 1> (L</run>).
+session, the id of the call, its event stream and its permission policy
+-- and runs a new subagent of the invocant class at C<$depth + 1>
+(L</run>).
 
 =cut
 
@@ -393,6 +445,7 @@ sub agent_tool_server {
         on_caller_event => $c->{event},
         caller_call     => $c->{call},
         ( $c->{session} ? ( caller_session => $c->{session} ) : () ),
+        ( $c->{policy}  ? ( caller_policy  => $c->{policy} )  : () ),
       )->run;
     },
   )->server;
@@ -467,6 +520,22 @@ async sub _raid_f {
   }
   $raider->cancel if $self->cancel_requested;
   return await $raider->raid_f( $self->briefed_prompt );
+}
+
+=method approval_binding
+
+    my %binding = $sub->approval_binding;   # session_id, run_id
+
+What an approval of one of the subagent's calls is bound to: its own
+session and run, when it has a session; else nothing, and the
+application's stand-ins apply.
+
+=cut
+
+sub approval_binding {
+  my ( $self ) = @_;
+  my $session = $self->session or return;
+  return ( session_id => $session->id, ( defined $self->_run_id ? ( run_id => $self->_run_id ) : () ) );
 }
 
 =method cancel
@@ -611,8 +680,9 @@ sub _build_tool_servers {
   my %deny  = map { $_ => 1 } @{ $agent->{disallowed} // [] }, 'ask_user';
   my $all   = !defined $agent->{tools};
   my %own   = (
-    todo_write => sub { $self->_own_todo_tool },
-    agent      => sub { $self->depth < $self->app->max_agent_depth ? $self->_own_agent_tool : undef },
+    todo_write     => sub { $self->_own_todo_tool },
+    exit_plan_mode => sub { $self->_own_plan_tool },
+    agent          => sub { $self->depth < $self->app->max_agent_depth ? $self->_own_agent_tool : undef },
   );
   my @servers;
   for my $server ( @{ $self->caller_servers } ) {
@@ -649,8 +719,24 @@ sub _own_agent_tool {
       session => $weak->session,
       call    => $weak->_call,
       event   => sub { $weak->event(@_) if $weak },
+      policy  => $weak->permissions,
     } },
   )->tools->[0];
+}
+
+# exit_plan_mode of the subagent: nobody reviews a subagent's plan and its
+# mode never changes the caller's, so in plan mode the plan is its answer.
+sub _own_plan_tool {
+  my ( $self ) = @_;
+  weaken( my $weak = $self );
+  return Langertha::Raider::PlanTools->new( handler => sub {
+    my $sub = $weak or return ( 'the subagent is gone', 1 );
+    my $mode = $sub->permissions->mode;
+    return ( 'exit_plan_mode: not in plan mode (the permission mode is '.$mode.'); go on with the work.', 1 )
+      unless $mode eq 'plan';
+    return ( 'Nobody can approve the plan in a subagent. Stay in plan mode and give the plan as your final'
+      .' answer; the caller gets it.', 0 );
+  } )->server->tools->[0];
 }
 
 =method briefing_class
@@ -708,6 +794,11 @@ sub _build_raider {
   my $app = $self->app;
   weaken( my $weak = $self );
   return Langertha::Raider->new(
+    _tool_gate                 => $app->tool_gate(
+      policy   => $self->permissions,
+      on_event => sub { $weak->event(@_) if $weak },
+      binding  => sub { $weak ? $weak->approval_binding : () },
+    ),
     engine                     => $self->engine,
     mission                    => $self->mission,
     max_iterations             => $app->max_iterations,

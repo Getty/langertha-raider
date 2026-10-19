@@ -57,7 +57,8 @@ subtest 'default mode without rules' => sub {
   my $v = $p->decide( bash('ls') );
   is $v, { verdict => 'ask', by => 'mode', source => 'default', mode => 'default',
     reason => 'default mode asks before this call: bash runs code' }, 'the verdict hash';
-  is verdict( $p, tc('agent') ), 'ask', 'a tool without an effect entry asks';
+  is verdict( $p, tc('agent') ), 'allow', 'agent (no effects of its own; ADR 0020)';
+  is verdict( $p, tc('frobnicate') ), 'ask', 'a tool without an effect entry asks';
   my $f = $p->decide( tc( 'read_file', {}, 'catalog:github' ) );
   is $f->{verdict}, 'ask', 'a foreign tool asks, even named read_file';
   like $f->{reason}, qr/not a tool of raider \(MCP server 'github'\)/, '... and says why';

@@ -785,38 +785,56 @@ sub reload_permissions {
 
     my $raider = Langertha::Raider->new( ..., _tool_gate => $app->tool_gate );
 
+    # a sub-run (a subagent) with its own policy, journal and binding:
+    my $gate = $app->tool_gate(
+      policy   => $app->permissions->for_subrun,
+      on_event => sub { my ( $type, %payload ) = @_; ... },
+      binding  => sub { ( session_id => $id, run_id => $run ) },
+    );
+
 The gate every raider of the application gets (the C<_tool_gate> of
 L<Langertha::Raider>, ADR 0005): L</permissions> decides each tool call.
-A raider built on the application's engine -- the prompt builder, later a
-sub-agent -- takes it too, so no tool call passes without it.
+A raider built on the application's engine -- the prompt builder, a
+subagent -- takes it too, so no tool call passes without it.
+
+A sub-run passes its own C<policy> (a L<Langertha::Raider::Permissions>,
+usually L<Langertha::Raider::Permissions/for_subrun> of the caller's),
+C<on_event> for the C<permission.*> events (default L</event>) and
+C<binding>, the session and run ids an approval of a call is bound to
+(default the run in progress). A call the policy asks about goes to the
+same L</on_permission_request>: the person at the keyboard answers for the
+sub-run too, and "for this session" lands in the session rules the policies
+share.
 
 =cut
 
 sub tool_gate {
-  my ($self) = @_;
+  my ($self, %for) = @_;
   weaken(my $app = $self);
-  return sub { $app ? $app->_permission_gate($_[1]) : { verdict => 'deny', reason => 'the application is gone' } };
+  return sub { $app ? $app->_permission_gate($_[1], %for) : { verdict => 'deny', reason => 'the application is gone' } };
 }
 
 # The tool gate of the raider (ADR 0005, ADR 0021): the policy decides; an
 # ask without anyone to approve it is refused with a reason that says how to
-# allow it. Emits permission.denied for every call that does not run.
+# allow it. Emits permission.denied for every call that does not run. %for
+# is what tool_gate got: policy, on_event, binding.
 sub _permission_gate {
-  my ($self, $call) = @_;
-  my $verdict = $self->_with_hook_decision($call, $self->permissions->decide($call));
+  my ($self, $call, %for) = @_;
+  my $policy = $for{policy} // $self->permissions;
+  my $verdict = $self->_with_hook_decision($call, $policy->decide($call));
   return $verdict if $verdict->{verdict} eq 'allow';
   if ($verdict->{verdict} eq 'deny') {
-    $self->_permission_event('permission.denied', $call, $verdict, by => $verdict->{by});
+    $self->_permission_event(\%for, 'permission.denied', $call, $verdict, by => $verdict->{by});
     return $verdict;
   }
   if (my $ask = $self->on_permission_request) {
-    return $self->_ask_permission($ask, $call, $verdict);
+    return $self->_ask_permission($ask, $call, $verdict, \%for);
   }
   # A hook that asks is not lifted by a rule; there is nothing to configure.
   my $reason = $verdict->{reason}.'; nobody can approve it in this run. '
-    .( ( $verdict->{by} // '' ) eq 'hook' ? '' : $self->_how_to_allow($call).' ' )
+    .( ( $verdict->{by} // '' ) eq 'hook' ? '' : $self->_how_to_allow($call, $policy).' ' )
     .'Do not retry the same call; go on without it or say what you need.';
-  $self->_permission_event('permission.denied', $call, $verdict, by => 'noninteractive', reason => $reason);
+  $self->_permission_event(\%for, 'permission.denied', $call, $verdict, by => 'noninteractive', reason => $reason);
   return { %$verdict, verdict => 'deny', by => 'noninteractive', reason => $reason };
 }
 
@@ -824,10 +842,11 @@ sub _permission_gate {
 # once -> an approval of exactly this call; session -> the suggested rule as
 # a session rule; no -> refused with the person's reason.
 sub _ask_permission {
-  my ($self, $ask, $call, $verdict) = @_;
-  my $policy = $self->permissions;
+  my ($self, $ask, $call, $verdict, $for) = @_;
+  $for //= {};
+  my $policy = $for->{policy} // $self->permissions;
   my $rule   = $policy->suggest_rule($call);
-  $self->_permission_event('permission.asked', $call, $verdict, ( defined $rule ? ( suggested_rule => $rule ) : () ));
+  $self->_permission_event($for, 'permission.asked', $call, $verdict, ( defined $rule ? ( suggested_rule => $rule ) : () ));
   my $answer = $ask->({
     tool      => $call->{name},
     source    => $call->{source},
@@ -840,38 +859,42 @@ sub _ask_permission {
     $policy->add_session_rule($rule);
     my $again = $policy->decide($call);
     if ($again->{verdict} eq 'allow') {
-      $self->event('permission.granted', tool => $call->{name}, scope => 'session', rule => $rule, mode => $policy->mode);
+      $self->_gate_event($for, 'permission.granted', tool => $call->{name}, scope => 'session', rule => $rule, mode => $policy->mode);
       return $again;
     }
     $choice = 'once';   # the rule does not cover the call after all: this call only
   }
   if ($choice eq 'once' || $choice eq 'session') {
-    my %binding  = $self->_approval_binding;
+    my %binding  = $self->_approval_binding($for);
     my $approval = Langertha::Raider::Approval->for_call(%binding, call => $call);
     # The approval binds this exact call; held against it as it is about to run.
-    if ($approval->covers($self->_approval_binding, call => $call)) {
-      $self->event('permission.granted', tool => $call->{name}, scope => 'once', mode => $policy->mode);
+    if ($approval->covers($self->_approval_binding($for), call => $call)) {
+      $self->_gate_event($for, 'permission.granted', tool => $call->{name}, scope => 'once', mode => $policy->mode);
       return { verdict => 'allow', by => 'user', reason => 'approved once by the user', mode => $policy->mode };
     }
   }
   my $why = ref $answer eq 'HASH' ? $answer->{reason} : undef;
   my $text = 'The user refused this call'.( defined $why && length $why ? ': '.$why : '' )
     .'. Do not try the same call again; ask the user what they want or change your plan.';
-  $self->_permission_event('permission.denied', $call, $verdict, by => 'user', reason => $text);
+  $self->_permission_event($for, 'permission.denied', $call, $verdict, by => 'user', reason => $text);
   return { %$verdict, verdict => 'deny', by => 'user', reason => $text };
 }
 
 # Session, run and policy revision an approval is bound to. A run without a
 # session (a library run, --no-session) has a stable stand-in per
-# application, so Approval->for_call never lacks a field.
+# application, so Approval->for_call never lacks a field. A sub-run's
+# binding (tool_gate binding) names its own session and run.
 sub _approval_binding {
-  my ($self) = @_;
+  my ($self, $for) = @_;
+  $for //= {};
+  my $policy = $for->{policy} // $self->permissions;
+  my %own = $for->{binding} ? $for->{binding}->() : ();
   my $run = $self->_run;
   my $session = $run ? $run->{session} : undef;
   return (
-    session_id      => $session ? $session->id : $self->_local_session_id,
-    run_id          => $run && defined $run->{run} ? $run->{run} : 'run',
-    policy_revision => $self->permissions->policy_revision,
+    session_id      => $own{session_id} // ( $session ? $session->id : $self->_local_session_id ),
+    run_id          => $own{run_id} // ( $run && defined $run->{run} ? $run->{run} : 'run' ),
+    policy_revision => $policy->policy_revision,
   );
 }
 
@@ -882,8 +905,8 @@ sub _build__local_session_id { 'local-'.$$.'-'.refaddr($_[0]) }
 # How a person allows a call that asked: a rule (the suggested one) in a
 # config file, or a mode.
 sub _how_to_allow {
-  my ($self, $call) = @_;
-  my $rule = $self->permissions->suggest_rule($call);
+  my ($self, $call, $policy) = @_;
+  my $rule = ( $policy // $self->permissions )->suggest_rule($call);
   my @files = ( '.raider/config.yml (permissions: allow:)',
     ( $self->context->claude_layout ? '.claude/settings.json (permissions.allow)' : () ) );
   return 'To allow it, add '.( defined $rule ? "a rule such as '".$rule."'" : 'an allow rule' )
@@ -892,8 +915,8 @@ sub _how_to_allow {
 }
 
 sub _permission_event {
-  my ($self, $type, $call, $verdict, %more) = @_;
-  $self->event($type,
+  my ($self, $for, $type, $call, $verdict, %more) = @_;
+  $self->_gate_event($for, $type,
     tool => $call->{name},
     ( defined $call->{source} ? ( tool_source => $call->{source} ) : () ),
     mode => $verdict->{mode},
@@ -1192,6 +1215,15 @@ sub shutdown_hooks {
   my ($self) = @_;
   return unless $self->has_hooks && $self->hooks;
   $self->_await_hooks($self->hooks->shutdown);
+  return;
+}
+
+# A permission.* event of the gated run: to the sub-run's on_event, else to
+# the application's stream.
+sub _gate_event {
+  my ($self, $for, $type, %payload) = @_;
+  return $for->{on_event}->($type, %payload) if $for && $for->{on_event};
+  $self->event($type, %payload);
   return;
 }
 
@@ -1724,7 +1756,7 @@ has _stock_tool_servers => (is => 'ro', lazy => 1, builder => '_build_stock_tool
 has _perl_tool_server   => (is => 'ro', lazy => 1, builder => '_build_perl_tool_server');
 has _hall_tool_server   => (is => 'ro', lazy => 1, builder => '_build_hall_tool_server');
 has _skill_tool_server  => (is => 'ro', lazy => 1, builder => '_build_skill_tool_server', clearer => '_clear_skill_tool_server');
-has _agent_tool_server  => (is => 'ro', lazy => 1, builder => '_build_agent_tool_server');
+has _agent_tool_server  => (is => 'ro', lazy => 1, builder => '_build_agent_tool_server', clearer => '_clear_agent_tool_server');
 
 sub _build_api_key { $_[0]->engine_resolver->api_key }
 
@@ -1828,6 +1860,7 @@ sub _build_agent_tool_server {
       session => $app->has_run ? $app->_run->{session} : undef,
       call    => $app->_current_call,
       event   => sub { $app->event(@_) if $app },
+      policy  => $app->permissions,
     } },
   );
 }
@@ -2469,7 +2502,8 @@ sub remove_session {
 Reads the Claude memory, the settings (with their C<env>) and the skills
 again (L<Langertha::Raider::Context/reload>) and drops the skill tool, so
 the next L</reload_mission> mounts it again over the new catalogue -- or
-not at all when no skill is left. C</reload> does both. A pack decided at
+not at all when no skill is left. The C<agent> tool is dropped the same
+way and comes back over the agent files as they are now. C</reload> does both. A pack decided at
 the start (the default packs of Claude mode) is not decided again.
 
 =cut
@@ -2485,6 +2519,7 @@ sub reload_context {
     $self->clear_hooks;
     $self->_hook_config_reported(0);
   }
+  $self->_clear_agent_tool_server;
   return $self->context;
 }
 
