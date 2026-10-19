@@ -43,7 +43,10 @@ is C<message> and C<code>. C<raider_wait_for> is C<code>: the host runs a
 callback of its own for the condition and raider cannot say what it does, so
 the table takes the cautious reading. C<raider_manage_mcps> is C<code>
 (activating starts a tool server) and C<raider_switch_engine> is C<network>
-(later prompts go to another provider).
+(later prompts go to another provider). C<glob> and C<grep> only read (they do not
+follow symbolic links out of the root). C<todo_write> keeps a list in the state of
+the run and has no effect outside it. C<ask_user> is C<message>, like
+C<raider_ask_user>: it puts a question to a person.
 
 =cut
 
@@ -51,8 +54,13 @@ my %EFFECTS = (
   # files
   list_files             => [qw( read )],
   read_file              => [qw( read )],
+  glob                   => [qw( read )],
+  grep                   => [qw( read )],
   write_file             => [qw( write )],
   edit_file              => [qw( write )],
+  # run state
+  todo_write             => [],
+  ask_user               => [qw( message )],
   # shell
   bash                   => [qw( code )],
   # web

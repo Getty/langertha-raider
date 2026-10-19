@@ -7,6 +7,7 @@ use Config;
 use Encode qw( decode encode FB_QUIET );
 use POSIX ();
 use Path::Tiny;
+use Scalar::Util qw( weaken );
 use Term::ANSIColor qw( color );
 use Term::ReadLine;                   # Core; upgrades to Gnu if installed
 use IO::Prompt::Tiny qw( prompt );    # Fallback when Gnu is not available
@@ -61,6 +62,12 @@ The L<Langertha::Raider::CLI::Output> to print to. Required.
 Filehandle lines are read from when it is not a terminal. Defaults to
 C<STDIN>.
 
+=attr can_ask
+
+Whether a person answers the model's questions (the C<ask_user> tool,
+L</ask_user>). Defaults to whether L</in> is a terminal; without one the
+tool refuses and the model decides itself.
+
 =attr active_profiles
 
 Agent profiles to show in the banner (C<claude>, C<openai>).
@@ -90,6 +97,13 @@ has output => (
 has in => (
   is      => 'ro',
   default => sub { \*STDIN },
+);
+
+has can_ask => (
+  is      => 'ro',
+  isa     => 'Bool',
+  lazy    => 1,
+  default => sub { -t $_[0]->in ? 1 : 0 },
 );
 
 has active_profiles => (
@@ -265,6 +279,11 @@ sub run {
   my $out = $self->output;
   my $in  = $self->in;
 
+  if ( $self->can_ask ) {
+    weaken( my $repl = $self );
+    $self->app->on_ask_user( sub { $repl ? $repl->ask_user(@_) : undef } );
+  }
+
   my $rl = -t $in ? $self->_terminal_reader : {
     read => sub { my $l = <$in>; $l },
     impl => 'none (input is not a terminal)',
@@ -332,6 +351,35 @@ sub run {
 
   $call->('save');
   return;
+}
+
+=method ask_user
+
+    my $answer = $repl->ask_user($question, \@options);
+
+Puts the model's question to the person: the question, the options
+numbered, then a line read from L</in>. A number that names an option
+answers with that option's text, any other line is the answer as typed.
+Returns undef when the input is closed or the line is empty. The REPL
+registers this as the application's
+L<on_ask_user|Langertha::Raider::Application/on_ask_user> when it can ask.
+
+=cut
+
+sub ask_user {
+  my ( $self, $question, $options ) = @_;
+  $options //= [];
+  my $out = $self->output;
+  my $in  = $self->in;
+  $out->emit( $out->c( title => '? '.$question ), "\n" );
+  $out->emit( $out->c( meta => '  '.( $_ + 1 ).') '.$options->[$_] ), "\n" ) for 0 .. $#$options;
+  $out->emit( $out->c( meta => ( @$options ? 'answer (a number picks an option)' : 'answer' ).'> ' ) );
+  my $line = <$in>;
+  return unless defined $line;
+  $line =~ s/^\s+|\s+\z//g;
+  return unless length $line;
+  return $options->[ $line - 1 ] if $line =~ /\A\d+\z/ && $line >= 1 && $line <= @$options;
+  return $line;
 }
 
 =method run_prompt

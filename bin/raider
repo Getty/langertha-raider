@@ -8,6 +8,18 @@ use warnings;
 our $VERSION = '0.504';
 
 use Langertha::Raider::CLI::Main;
+use Langertha::Raider::Loadguard;
+
+# LOADGUARD_CONFINE=1: start again inside a memory-limited systemd user scope
+# (Langertha::Raider::Loadguard/confine_command). Off by default; a failed
+# exec goes on unconfined.
+{
+  my $guard = Langertha::Raider::Loadguard->new;
+  if ( my @confined = $guard->confine_command( command => [ $guard->self_command ] ) ) {
+    $ENV{LOADGUARD_CONFINED} = 1;
+    exec @confined;
+  }
+}
 
 binmode STDOUT, ':encoding(UTF-8)';
 binmode STDIN,  ':encoding(UTF-8)';

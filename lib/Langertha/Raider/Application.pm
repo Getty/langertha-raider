@@ -15,6 +15,10 @@ use Langertha::Raider::HallTools qw( build_hall_tools_server );
 use Langertha::Raider::FileTools qw( build_file_tools_server );
 use Langertha::Raider::WebTools  qw( build_web_tools_server );
 use Langertha::Raider::PerlTools qw( build_perl_tools_server );
+use Langertha::Raider::SearchTools;
+use Langertha::Raider::TodoTools;
+use Langertha::Raider::AskTools;
+use Langertha::Raider::Loadguard;
 use Langertha::Raider::Packs     qw( build_packs );
 use Langertha::Raider::Config;
 use Langertha::Raider::Instructions;
@@ -407,6 +411,43 @@ has on_journal_error => (
   isa       => 'CodeRef',
   predicate => 'has_on_journal_error',
 );
+
+=attr on_ask_user
+
+Optional code reference a surface sets when a person can answer the model
+during a run: called as C<< $on_ask_user->($question, \@options) >>, it puts
+the question to the person and returns the answer as text (undef: none). It
+makes the C<ask_user> tool work (L<Langertha::Raider::AskTools>); the REPL
+sets it. Without it -- a one-shot run, the Hall, a cron job, ACP -- the
+tool refuses with a plain error result and the model decides itself. Read
+when the tool is called, so a surface may set it after the application is
+built.
+
+=cut
+
+has on_ask_user => (
+  is        => 'rw',
+  isa       => 'Maybe[CodeRef]',
+  predicate => 'has_on_ask_user',
+);
+
+=attr loadguard
+
+The L<Langertha::Raider::Loadguard> that gates C<bash>: a heavy command
+(C<prove>, C<dzil test>, C<cpanm>, C<podman run> ...) is refused with the
+reason while the host is out of memory or the heavy slots are taken. Built
+from the environment (C<LOADGUARD_*>) unless given.
+
+=cut
+
+has loadguard => (
+  is      => 'ro',
+  isa     => 'Langertha::Raider::Loadguard',
+  lazy    => 1,
+  builder => '_build_loadguard',
+);
+
+sub _build_loadguard { Langertha::Raider::Loadguard->new }
 
 =attr perl
 
@@ -980,12 +1021,48 @@ sub _build_stock_tool_servers {
     tool_description  => 'Run a shell command with bash -c. Returns exit code, stdout, and stderr. Use this for ls, grep, find, git, cat, running tests, any shell pipeline — anything you would type at a terminal.',
     working_directory => $self->root,
     ($self->has_allowed_commands ? (allowed_commands => $self->allowed_commands) : ()),
-    timeout => 120,
+    validator => $self->loadguard->validator,
+    timeout   => 120,
   );
 
   my $web = build_web_tools_server(loop => $self->loop);
 
-  return [ $files, $bash, $web ];
+  weaken(my $app = $self);
+  my $search = Langertha::Raider::SearchTools->new(root => $self->root)->server;
+  my $todo   = Langertha::Raider::TodoTools->new(on_update => sub { $app->_todos_updated(@_) if $app })->server;
+  my $ask    = Langertha::Raider::AskTools->new(
+    answerer => sub { $app && $app->has_on_ask_user ? $app->on_ask_user : undef },
+  )->server;
+
+  return [ $files, $bash, $web, $search, $todo, $ask ];
+}
+
+=method todos
+
+    my $list = $app->todos;     # [ { content, status, activeForm }, ... ]
+
+The task list of the run in progress, as the model last sent it with
+C<todo_write> (L<Langertha::Raider::TodoTools>): a copy; empty when the model
+sent none. It is state of the run: L</begin_run> empties it. Every change
+is the event C<todo.updated> with the whole list as C<todos>, which the
+session journal records.
+
+=cut
+
+has _todos => (
+  is       => 'rw',
+  isa      => 'ArrayRef',
+  default  => sub { [] },
+  init_arg => undef,
+);
+
+sub todos { [ map { { %$_ } } @{ $_[0]->_todos } ] }
+
+sub _todos_updated {
+  my ($self, $list) = @_;
+  $self->_todos($list);
+  $self->event('todo.updated', todos => $self->todos);
+  return;
 }
 
 sub _build_perl_tool_server {
@@ -1135,7 +1212,7 @@ one. An empty C<$text> runs nothing and returns nothing.
 
 # The ADR 0015 event types the journal records from the events of a run;
 # run.finished is written by end_run.
-my %JOURNAL_TYPE = map { $_ => 1 } qw( run.started message tool.call tool.result );
+my %JOURNAL_TYPE = map { $_ => 1 } qw( run.started message tool.call tool.result todo.updated );
 
 # The run in progress: { session, run, on_event, t0 }.
 has _run => (
@@ -1179,6 +1256,7 @@ and model) and C<run.state> C<running>. L</end_run> ends it.
 sub begin_run {
   my ( $self, %o ) = @_;
   my $session = $o{session};
+  $self->_todos([]);
   $self->_run({
     session  => $session,
     run      => $session ? $session->next_run : undef,
