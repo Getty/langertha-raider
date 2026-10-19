@@ -1,0 +1,64 @@
+---
+claimed_at: 2026-10-19T08:45:47Z
+claimed_by: strom-l
+class: standard
+completed: 2026-10-19T08:45:47Z
+created: 2026-10-19T04:06:57Z
+id: 156
+priority: high
+started: 2026-10-19T06:52:09Z
+status: done
+tags:
+- claude-code-flow
+title: 'Scenarios from Claude Code logs: converter plus curated cases per feature'
+updated: 2026-10-19T08:45:47Z
+---
+
+Strom L. Zum Schluss. Plan: /home/getty/dev/perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md
+
+Strom L gestartet (Worktree .claude/worktrees/strom-l, Branch worktree-strom-l von main 30a492b). Plan: Harness nach t/lib/Test/Raider/Scenario.pm, t/181 fuer t/scenarios/claude-logs/, Konverter maint/claude-log-to-scenario + t/180, kuratierte log-NN-Szenarien; Agent-Faelle nach A-Merge.
+
+2026-10-19 06:55 Harness ausgelagert: t/lib/Test/Raider/Scenario.pm (run_scenario_files(@paths), je Datei ein subtest; Schlüssel-Doku dort). t/200 dünn, Ausgabe identisch (73 Tests). t/181_claude_log_scenarios.t läuft über t/scenarios/claude-logs/*.yml (ok(@files) schlägt fehl, solange das Verzeichnis leer ist).
+
+Strom L: 13 Szenarien in t/scenarios/claude-logs log-01 bis log-13, t/181 gruen. Abweichungen als Abweichung-Kommentare in log-06, 08, 09, 12, 13.
+
+2026-10-19 07:19 Konverter fertig: maint/claude-log-to-scenario (--list, --from, --turns, --project, --root, --home, -o; ToolNames für Namen+Argumente, MultiEdit→je Edit ein edit_file, files/home aus ganzen Reads bzw. originalFile, Redaction, Rundlauf-Prüfung des YAML). t/180 mit synthetischer Fixture t/data/claude-log/session.jsonl, das erzeugte Szenario läuft grün durch run_scenario_files. 60 echte Sitzungen konvertieren ohne Fehler. dist.ini: ^maint/ ausgeschlossen. Kleiner Fix separat: edit_file kann replace_all (wie Claude Codes Edit; in echten Logs benutzt), t/10_filetools.t erweitert. Achtung: Kommentar in log-08 ('edit_file has no replace_all') ist damit veraltet, Anker passt weiter.
+
+Abweichungen raider <-> Claude Code (Strom L, aus Logs und kuratierten Szenarien):
+GEFIXT: edit_file kennt replace_all wie Edit (echte Logs nutzen replace_all: true; scheiterte vorher).
+OFFEN:
+1. edit_file-Fehlertexte: raider "Error: old_string not found" / "matches N times, must be unique (or set replace_all)"; Claude "String to replace not found in file." / "Found N matches ... replace_all is false". Angleichen? (bricht t/scenarios/07, log-08)
+2. Read vor Write/Edit: Claude verweigert Write/Edit auf ungelesene Dateien ("File has not been read yet"); raider nicht. Entscheidung fuer ADR (log-12 prueft heutiges Verhalten).
+3. read_file: kein offset/limit, keine Zeilennummern (cat -n), kein 2000-Zeilen-Schnitt, keine Bilder/PDF/Notebooks; Fehlertext "Error: not a file: P" statt "File does not exist. Note: your current working directory is ...".
+4. write/edit-Ergebnistexte: "Wrote N bytes to P"/"Edited P" vs "File created successfully at: P"/"The file P has been updated successfully.".
+5. bash: raider immer "Exit code: N" (auch 0); Claude nur bei Fehler "Exit code N". run_in_background ignoriert (laeuft vorne); kein BashOutput/KillShell/Monitor/TaskStop.
+6. MultiEdit: ToolNames bildet Namen ab, aber edits-Liste geht unveraendert durch -> edit_file scheitert (Hooks updatedInput, Regeln). Konverter zerlegt MultiEdit in einzelne edit_file.
+7. Neuere Claude-Code-Versionen nutzen TaskCreate/TaskUpdate statt TodoWrite; ToolNames kennt sie nicht, ebenso EnterPlanMode.
+8. web_fetch ignoriert Claudes prompt (Frage an die Seite); web_search ohne allowed_domains/blocked_domains.
+9. skill: Claude liefert als Tool-Ergebnis nur "Launching skill: X" und den Body als eigene User-Nachricht; raider den Body im Tool-Ergebnis.
+10. Plan-Ablehnung: raider normales Ergebnis (kein isError), Claude Fehlerergebnis; Tool-Ablehnung durch Person beide Fehler, Text verschieden ("The user doesn't want to proceed with this tool use").
+11. Pfade ausserhalb der Wurzel: Claude liest /tmp, Scratchpad, eigene ausgelagerte Grossausgaben; raider nur mit additionalDirectories.
+12. Fehlende Tools nach Haeufigkeit (alle lokalen Logs): SendMessage 1393, SubagentHandback 753, ToolSearch 737, Monitor 713, EnterWorktree 400, ListAgents 296, TaskStop 142, StructuredOutput 82, ExitWorktree 66, TaskCreate/Update ~44, ScheduleWakeup 22, Cron* 17, mcp__* 582. Glob/Grep kommen in echten Logs kaum vor (Bash dominiert).
+13. Unbestaetigt: Strings als Booleans ("-n": "true") weist raiders Argumentpruefung ab; Claude-Verhalten nicht belegt.
+14. loadguard: Claude via PreToolUse-Hook-Text, raider eingebautes Gate mit eigenem Text -- sinngemaess gleich, kein Handlungsbedarf.
+
+Stand L (Branch worktree-strom-l, auf main 1e6d583 rebased, WIP a4d5c85 ea69110 e1b6f86): Harness in t/lib/Test/Raider/Scenario.pm (P2-between uebernommen), t/181 + 13 Szenarien t/scenarios/claude-logs/log-01..13, maint/claude-log-to-scenario + t/180 (60 echte Sitzungen fehlerfrei konvertiert), edit_file replace_all (+ t/10, t/64), dist.ini schliesst maint/ aus. Volle Suite: 147 Dateien gruen ausser t/53_repl_interrupt_tools (unter Last, einzeln gruen -- bekannt, Strom B). Offen: Agent-Faelle (briefing.skills-Dispatch, read-only mit disallowedTools) nach A-Merge.
+
+Konverter + Subagenten: Claude Code schreibt Unterlaeufe in <session>/subagents/agent-<agentId>.jsonl (isSidechain, agentId) + agent-<id>.meta.json (toolUseId, agentType, requestShape foreground|background, parentAgentId, spawnDepth); Zuordnung ueber toolUseId, sonst toolUseResult.agentId. Keine Inline-Sidechains in lokalen Hauptlogs (bleiben uebersprungen). Mock bedient in Aufrufreihenfolge: Elternantwort, ganzer Unterlauf je agent-Call, naechste Elternantwort; results: Unterlauf-Ergebnisse vor denen der ausloesenden Antwort -- so bildet der Konverter script/expect ab (verschachtelt rekursiv, app: max_agent_depth N bei Tiefe>1). SubagentHandback -> Text-Antwort (danach abgeschnitten, notiert); SendMessage-Folgeturns notiert, nicht abgespielt. Agent-Dateien aus .claude/agents des Projekts (via Context::Agents) nach files:, redigiert, ohne skills/briefing (sonst verweigert raider den Spawn); andere Typen (Explore, Plan, User/Plugin) -> general-purpose + Kommentar. Hintergrund-Agent mit Log: laeuft in raider am Aufruf zu Ende (notiert); ohne Log: weggelassen. Vordergrund ohne Log: Unterlauf antwortet mit Claude Codes Ergebnistext (ohne agentId/usage). t/180 gruen (7 Subtests, 2 erzeugte Szenarien laufen durch run_scenario_files). Probelaeufe echter Abschnitte (skeid k91, dbio 116 Unter-Antworten, io-k8s verschachtelt+Hintergrund+Explore): Reihenfolge, Anzahl, alle agent-Anker gruen; Ausfaelle nur bekannte (Teil-Reads, bash ohne Repo).
+
+Konverter-Subagenten fertig (nicht committet): maint/claude-log-to-scenario, t/180 (7 Subtests gruen, t/181 weiter gruen), Fixture t/data/claude-log/session.jsonl + session/subagents/ (synthetisch). Rauchtest: 241 Agent-Abschnitte aus 40 echten Sitzungen konvertieren fehlerfrei. Neue Abweichungen raider vs Claude Code: (a) keine Hintergrund-Subagenten: Claude liefert 'Async agent launched' und spaeter eine task-notification, raider laeuft am Aufruf zu Ende; (b) SubagentHandback (Bericht per Tool) fehlt in raider, Subagent antwortet mit letztem Text; (c) eingebaute Typen Explore/Plan/claude/claude-code-guide/statusline-setup fehlen in raider (nur general-purpose); (d) Claude haengt agentId/usage-Zeilen ans Agent-Ergebnis, raider nur den Text; (e) SendMessage zum Fortsetzen eines Subagenten fehlt; (f) Subagenten in eigenem Worktree (spawnedWithWorktree, 257 Metas lokal) laufen in raider im Root; (g) verschachtelte Subagenten bei Claude erlaubt (spawnDepth 2), raider braucht max_agent_depth 2.
+
+Abschluss L Teil 2 (Branch worktree-strom-l auf main c828f0d, WIP d0b0c26 + 6d6bf60): log-14 (Agent mit briefing.skills: Skill-Body vor dem Auftrag, letzter Text beim Aufrufer) und log-15 (Read-only-Explore-Agent mit disallowedTools); Konverter spielt Subagenten aus <session>/subagents/agent-<id>.jsonl (+ meta.json) direkt nach dem Agent-Aufruf ein, Projekt-Agent-Dateien nach files: (ohne skills), andere Typen -> general-purpose, Verschachtelung -> max_agent_depth; 241 Agent-Abschnitte aus 40 Sitzungen fehlerfrei konvertiert, 3 grosse Laeufe gruen im Harness. Suite: 157 Dateien, gruen ausser t/53 und t/202 nur unter -j4-Last (einzeln gruen).
+Weitere Abweichungen (Agenten):
+15. Keine Hintergrund-Subagenten: Claude "Async agent launched" + spaetere Benachrichtigung; raider laeuft bis zum Ende im Aufruf.
+16. Kein SubagentHandback; raider-Subagent antwortet mit letztem Text. Kein SendMessage zum Fortsetzen.
+17. Eingebaute Typen Explore, Plan, claude, claude-code-guide, statusline-setup fehlen; nur general-purpose.
+18. Claude haengt agentId/usage an das Agent-Ergebnis; raider nur Text.
+19. Subagent mit eigenem Worktree (isolation) laeuft in raider in der Projektwurzel.
+20. Verschachtelte Subagenten: Claude erlaubt sie per Default, raider braucht max_agent_depth 2.
+21. Gesperrtes Tool: beide bieten es nicht an; raider beantwortet einen Aufruf mit "unknown tool X" und laeuft weiter. Tool-Zeile im Agententext mit raider- statt Claude-Namen.
+22. NotebookEdit hat keine Entsprechung (in disallowedTools ignoriert, config explain meldet es).
+
+Strom L fertig: Konverter inkl. Subagenten, 15 Log-Szenarien, Abweichungsliste (22 Punkte) in den Notizen. Branch worktree-strom-l, WIP d0b0c26 + 6d6bf60 auf main c828f0d.
+
+Koordinator 2026-10-19: Agent-Teil geprüft (t/180/181/200 grün; nur t/ und maint/ geändert), gemerged. Abweichungsliste Punkte 1–11 -> Strom D (#159); Agent-Abweichungen (Hintergrund-Subagenten, SendMessage, Explore/Plan-Typen, agentId/usage, Worktree-Isolation, Tiefe) als nächster Kandidat.
