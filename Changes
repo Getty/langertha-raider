@@ -698,6 +698,12 @@ Revision history for Langertha-Raider
       on {}.
 
   [Raid engine]
+    - A Langertha::Raider that goes away while session-history embeddings
+      are still in flight lets them finish instead of dropping them. Every
+      subagent run printed "Suspended async sub
+      Langertha::Role::Embedding::simple_embedding_f lost its returning
+      future". Cancelling them instead would leave a half-open
+      Net::Async::HTTP connection on the loop.
     - Inline MCP tools and raider_wait run on the engine's event loop, so an
       engine on its own loop no longer hangs a raid. A raider whose engines
       (engine, compression_engine, engine_catalog, embedding_engine) sit on

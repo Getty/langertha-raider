@@ -559,10 +559,16 @@ sub _build_cancel_wake {
 }
 
 # The cancel pipe leaves the loop with the raider; at global destruction
-# the process ends anyway.
+# the process ends anyway. The embeddings still in flight are retained until
+# they are ready: dropped with the raider, each would wake up on the loop
+# without its future ("lost its returning future"). Their vectors find no
+# raider any more and are let go. Not cancelled: a cancelled Net::Async::HTTP
+# request can leave its connection open and idle on the loop.
 sub DEMOLISH {
   my ( $self, $in_global_destruction ) = @_;
-  return if $in_global_destruction || !$self->_has_cancel_wake;
+  return if $in_global_destruction;
+  $_->retain for grep { !$_->is_ready } values %{ $self->_pending_embeddings };
+  return unless $self->_has_cancel_wake;
   my $wake = $self->_cancel_wake;
   my $handle = $wake->{handle} or return;
   $handle->loop->remove($handle) if $handle->loop;
@@ -791,7 +797,8 @@ When not set, auto-detects if the main C<engine> supports embeddings.
 Set L</no_session_embeddings> to disable auto-detection.
 
 Each C<session_history> entry is embedded in the background through
-C<simple_embedding_f>, so the raid never waits for it. Like every engine of
+C<simple_embedding_f>, so the raid never waits for it; a raider that goes
+away lets the requests still in flight finish. Like every engine of
 the raider, the embedding engine must run on the same event loop as
 C<engine> (see L</raid_f>).
 
@@ -820,7 +827,8 @@ has _session_embeddings => (
 
 # The in-flight simple_embedding_f futures of _embed_session_slot, keyed by
 # refaddr. Held here so none is lost to GC mid-request; each removes itself
-# when ready, clear_session_history cancels the rest.
+# when ready, clear_session_history cancels the rest, and when the raider
+# goes away they are retained until ready (DEMOLISH).
 has _pending_embeddings => (
   is => 'ro',
   isa => 'HashRef',
