@@ -215,4 +215,46 @@ subtest 'an agent of an earlier process is found in the child sessions and resum
   is( [ map { $_->{run} } @{ $app->session_store->read( $child->{id} )->runs } ], [qw( r1 r2 )], 'a second run in its session' );
 };
 
+subtest 'an agent with the caller\'s MCP tools: views of the same connection, resumed and ended without touching it (ADR 0029 §11)' => sub {
+  my $home = path( $ENV{HOME} );
+  my $server = path(__FILE__)->absolute->parent->child( 'lib', 'mcp-test-server.pl' )->stringify;
+  $home->child('.raider')->mkpath;
+  $home->child( '.raider', 'config.yml' )->spew_utf8("mcp:\n  t:\n    command: \"$^X\"\n    args: [ \"$server\", \"normal\" ]\n");
+  my $root = root();
+  $root->child('.raider/agents/reader.md')->touchpath->spew_utf8("---\nname: reader\ndescription: Reads\ntools: Read, mcp__t__echo_env\n---\nYou read.\n");
+  my $app = slow_app(
+    root            => "$root",
+    permission_mode => 'bypassPermissions',
+    delay           => 0.2,
+    script          => [
+      { tool_calls => [ [ agent => { description => 'Look', prompt => 'Ask the server.', subagent_type => 'reader' } ] ] },
+      { tool_calls => [ [ mcp__t__echo_env => { name => 'HOME' } ] ] },
+      { text => 'first look' },
+      { tool_calls => [ [ send_message => { to => 'agent_1', message => 'Again.' } ] ] },
+      { tool_calls => [ [ mcp__t__echo_env => { name => 'HOME' } ] ] },
+      { text => 'second look' },
+      { text => 'sent' },
+      { tool_calls => [ [ mcp__t__echo_env => { name => 'HOME' } ] ] },
+      { text => 'done' },
+    ],
+  );
+  my $out = $app->run_prompt( 'go', wait_background => 1 );
+  is( $out->{status}, 'completed', 'completed' ) or diag $out->{error};
+  is( $out->{response}, 'done', 'the main run answers last' );
+  my $echo = results_of( $app, 'mcp__t__echo_env' );
+  is( scalar @$echo, 3, 'three calls: the agent, the resumed agent, the main run' );
+  ok( !( grep { $_->{isError} } @$echo ), 'none failed' ) or diag explain $echo;
+  like( [ map { $_->{content}[0]{text} } @$echo ], [ qr/\AHOME=/, qr/\AHOME=/, qr/\AHOME=/ ], 'each answered by the server' );
+  my ($client) = @{ $app->configured_mcp->clients };
+  is( $client->status, 'connected', 'the application\'s connection is still up after the agent ended twice' );
+  ok( $client->pid, 'one server process, still running' );
+  like( $app->tasks->get('agent_1'), { status => 'completed', report => 'second look' }, 'the agent ended' );
+  my $sub = $app->tasks->get('agent_1')->{subagent};
+  my @views = grep { $_->isa('Langertha::Raider::MCP::View') } @{ $sub->_mcps };
+  is( scalar @views, 1, 'the agent has a view of it' );
+  my %offered = map { ( $_->{function}{name} // $_->{name} // '' ) => 1 } @{ $app->mock_engine->requests->[1]{tools} // [] };
+  ok( $offered{mcp__t__echo_env} && !$offered{mcp__t__with_dot}, 'the agent is offered the MCP tool its file names, not the others' );
+  $app->shutdown_mcp if $app->can('shutdown_mcp');
+};
+
 done_testing;

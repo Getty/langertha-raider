@@ -1138,13 +1138,15 @@ async sub _resume_raid_f {
   return await $self->_until_done_f($result);
 }
 
-# The clients of the tool set on the loop (again, for a continued run) and
-# initialized.
+# The subagent's own clients of the tool set on the loop (again, for a
+# continued run) and initialized. A view of a configured MCP server (ADR
+# 0029) is no notifier: it rides on the application's connection, which
+# stays where it is.
 async sub _initialize_mcps_f {
   my ( $self ) = @_;
   my $loop = $self->app->loop;
   for my $mcp ( @{ $self->_mcps } ) {
-    $loop->add($mcp) unless $mcp->loop;
+    $loop->add($mcp) if blessed $mcp && $mcp->isa('IO::Async::Notifier') && !$mcp->loop;
     await $mcp->initialize;
   }
   return;
@@ -1589,8 +1591,10 @@ sub _finish {
     ) );
     $session->release;
   }
+  # Its own clients leave the loop; the application's MCP connections (the
+  # views' servers) are not its to stop.
   if ( $self->_has_mcps && $app ) {
-    $_->loop && $_->loop->remove($_) for @{ $self->_mcps };
+    $_->loop->remove($_) for grep { blessed $_ && $_->isa('IO::Async::Notifier') && $_->loop } @{ $self->_mcps };
   }
   $self->on_caller_event->( 'agent.finished', $self->_defined(
     call     => $self->caller_call,
