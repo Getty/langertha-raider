@@ -702,6 +702,12 @@ Revision history for Langertha-Raider
       on {}.
 
   [Raid engine]
+    - The application no longer sends an embedding request per session-history
+      entry: it mounts no tool that reads them, and a provider without an
+      embeddings endpoint answered every one with a 404. Embeddings run only
+      when a history tool is mounted and the engine can embed (ADR 0028);
+      `raider config explain` shows `session embeddings`. Langertha::Raider
+      used directly is unchanged.
     - A Langertha::Raider that goes away while session-history embeddings
       are still in flight lets them finish instead of dropping them. Every
       subagent run printed "Suspended async sub

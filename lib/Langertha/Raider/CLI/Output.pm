@@ -238,6 +238,10 @@ sub config_report {
     $self->emit($self->c(meta => 'perl tools: '), $perl->{enabled} ? 'on' : 'off',
       '  ', $self->c(meta => '('.$perl->{reason}.')'), "\n");
   }
+  if (my $se = $report->{session_embeddings}) {
+    $self->emit($self->c(meta => 'session embeddings: '), $se->{enabled} ? 'on' : 'off',
+      $se->{reason} ? ( '  ', $self->c(meta => '('.$se->{reason}.')') ) : (), "\n");
+  }
   if (my $tools = $report->{tools}) {
     $self->emit($self->c(meta => 'tools:  '), $self->c(meta => '(what a tool can do: information only)'), "\n");
     for my $t (@$tools) {

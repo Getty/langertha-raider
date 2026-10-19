@@ -2091,6 +2091,7 @@ sub _build_raider {
   my ($self) = @_;
   my @plugins = $self->_raider_plugins;
   return Langertha::Raider->new(
+    no_session_embeddings      => $self->session_embeddings->{enabled} ? 0 : 1,
     _tool_gate                 => $self->tool_gate,
     ( $self->context->claude_layout ? ( _tool_hook => $self->tool_hook ) : () ),
     engine                     => $self->_engine,
@@ -2100,6 +2101,26 @@ sub _build_raider {
     context_compress_threshold => $self->context_compress_threshold,
     (@plugins ? (plugins => \@plugins) : ()),
   );
+}
+
+=method session_embeddings
+
+    my $grant = $app->session_embeddings;    # { enabled => 0, reason => ... }
+
+Whether the raider embeds its session history (L<Langertha::Raider/no_session_embeddings>,
+ADR 0028): only when a tool that reads the vectors, C<session_history> or
+C<raider_session_history>, is mounted. The application mounts none, so each
+message would cost an embedding request nothing uses -- noise, cost and, with a
+provider without an embeddings endpoint, a 404. C<reason> says why it is off.
+Whether the engine can embed is decided by the raider.
+
+=cut
+
+sub session_embeddings {
+  my ($self) = @_;
+  return { enabled => 1 }
+    if grep { $_->name =~ /^(?:raider_)?session_history\z/ } $self->_mounted_tools;
+  return { enabled => 0, reason => 'no session history tool is mounted' };
 }
 
 =method raid_f
@@ -2653,6 +2674,8 @@ C<origin> (C<project>, C<home>, C<shipped>, C<env>) and, for detection
 rules, the clause that matched or failed. C<skipped_packs> is
 L<Langertha::Raider::Packs::Collection/skipped_packs>. C<perl_tools> is
 L</perl_tools_grant>: whether the Perl tools are mounted, and why.
+C<session_embeddings> is L</session_embeddings>: whether the session history is
+embedded, and why not (ADR 0028).
 
 C<instructions> is L</mission_source> and C<bare> is L</bare>.
 C<ignored_instructions_files> are the instructions files that are present
@@ -2808,6 +2831,7 @@ sub explain_config {
     packs         => $self->packs->activation_report,
     skipped_packs => $self->packs->skipped_packs,
     perl_tools    => $self->perl_tools_grant,
+    session_embeddings => $self->session_embeddings,
     tools         => $self->_tool_effects_report,
     permissions   => $self->permissions->report,
     ignored_instructions_files => [ $self->instructions->ignored_files ],
