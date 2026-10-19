@@ -147,6 +147,10 @@ mods+=(-M Langertha)
 #   Type::Tiny & co.      Types::Standard loads its parametrised types
 #                         (Types::Standard::Tuple, ...) on first use, by name.
 #   YAML::PP::**          its schema and loader classes, by name.
+#   IO::Socket::SSL, Net::SSLeay, Mozilla::CA  also HTTP::Tiny's by name, for
+#                         an https:// source of Skilletor (the briefing's
+#                         skilletor.json resolver); Skilletor itself is
+#                         reached through its use lines.
 # -X Term::ReadLine::Gnu: left out on purpose. It links libreadline, which a
 #   bare target need not have; the REPL falls back to IO::Prompt::Tiny.
 # -X the Brotli codecs and Net::LibIDN: optional extras that HTTP::Message and

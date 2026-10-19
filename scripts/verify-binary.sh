@@ -5,9 +5,10 @@
 # Everything here compares against the checkout this script lives in, so run
 # the copy from the checkout the binary was built from, right after the
 # build: step 3 loads the packed modules with the perl that built them. Needs
-# perl (core modules only), unzip and bash -- present wherever the build ran.
-# Nothing reaches the network: the model is a fake OpenAI endpoint on
-# 127.0.0.1, and no *_API_KEY is visible to the binary.
+# perl (core modules only), unzip, git and bash -- present wherever the build
+# ran. Nothing reaches the network: the model is a fake OpenAI endpoint on
+# 127.0.0.1, the one skill source a file:// git repository, and no *_API_KEY
+# is visible to the binary.
 set -euo pipefail
 BIN=$(realpath "${1:?usage: verify-binary.sh <raider-binary>}")
 [ -x "$BIN" ] || { echo "FAIL: not an executable: $BIN" >&2; exit 1; }
@@ -132,14 +133,44 @@ PLIB="$plib" BIN_LANGERTHA="$bin_langertha" RAIDER_SHARE="$root/share" perl -e '
     push @mods, join "::", split m{/}, $f;
   }
   $load->($_) for sort @mods;
+  # Skilletor (the briefing resolver over skilletor.json sources): every
+  # module of it the archive carries; step 7 runs it against a git source.
+  my @skilletor = ( "Skilletor" );
+  open $find, "-|", "find", "$ENV{PLIB}/Skilletor", "-name", "*.pm" or die $!;
+  while ( my $f = <$find> ) {
+    chomp $f;
+    $f =~ s{\A\Q$ENV{PLIB}\E/}{};
+    $f =~ s{\.pm\z}{};
+    push @skilletor, join "::", split m{/}, $f;
+  }
+  $load->($_) for sort @skilletor;
   $load->($_) for qw(
     IO::Async::Loop IO::Async::SSL IO::Socket::SSL Net::SSLeay Mozilla::CA
     Net::Async::HTTP LWP::UserAgent LWP::Protocol::https
     Net::Async::MCP MCP::Server MCP::Run::Bash
     Langertha JSON::MaybeXS YAML::PP YAML::XS Data::MessagePack
     File::ShareDir File::ShareDir::ProjectDistDir
+    Skilletor::Source::Git Skilletor::Source::Url Skilletor::Source::Local
+    HTTP::Tiny Compress::Raw::Zlib Unicode::Normalize
   );
   die join( "\n", "modules that do not load from the archive:", @fail )."\n" if @fail;
+  # What Skilletor loads by name or from data at runtime: HTTP::Tiny requires
+  # IO::Socket::SSL, Net::SSLeay and Mozilla::CA when a source is https://;
+  # a tarball goes through Compress::Raw::Zlib; a host name through
+  # Unicode::Normalize, whose tables (unicore) are data files.
+  my ( $ssl, $why ) = HTTP::Tiny->can_ssl;
+  die "HTTP::Tiny cannot do https from the archive: $why\n" unless $ssl;
+  my ( $z ) = Compress::Raw::Zlib::Deflate->new( -WindowBits => Compress::Raw::Zlib::WANT_GZIP(), -AppendOutput => 1 );
+  my ( $plain, $gz ) = ( "skilletor-gzip", "" );
+  $z->deflate( $plain, $gz );
+  $z->flush($gz);
+  die "Skilletor::Gzip: no round trip from the archive\n"
+    unless Skilletor::Gzip::gunzip_sync($gz) eq "skilletor-gzip";
+  die "Unicode::Normalize: NFC broken in the archive\n"
+    unless Unicode::Normalize::NFC("e\x{301}") eq "\x{e9}";
+  my $url = Skilletor::URL::parse_url("https://B\x{fc}cher.example/skills");
+  die "Skilletor::URL: no punycode host from the archive\n"
+    unless ref $url && ( $url->{hostname} // "" ) eq "xn--bcher-kva.example";
   my $v = Langertha::Raider->VERSION;
   my $core = Langertha->VERSION;
   die "--version reports Langertha $ENV{BIN_LANGERTHA}, the archive packs $core\n"
@@ -156,8 +187,9 @@ PLIB="$plib" BIN_LANGERTHA="$bin_langertha" RAIDER_SHARE="$root/share" perl -e '
   my ( undef, $spec ) = Langertha::Engine::OpenAI->openapi_file;
   die "Langertha::Engine::OpenAI spec is $spec, not inside the archive\n"
     unless -s $spec && index($spec, $ENV{PLIB}) == 0;
-  printf "modules (%d Langertha::*, Langertha::Raider %s, Langertha %s, loop %s, JSON %s): OK\n",
-    scalar @mods, $v, $core, $loop, $json;
+  printf "modules (%d Langertha::*, %d Skilletor*, Langertha::Raider %s, Langertha %s, loop %s, JSON %s): OK\n",
+    scalar @mods, scalar @skilletor, $v, $core, $loop, $json;
+  print "skilletor runtime (HTTP::Tiny https, gunzip, NFC + punycode): OK\n";
   print "share (Langertha-Raider = checkout share/, Langertha openai.yaml via the engine, Mozilla::CA): OK\n";
 ' || fail "packed module set"
 
@@ -178,14 +210,19 @@ echo "packs (${packs[*]}): OK"
 # A real run end to end: engine resolution and loading by name, Net::Async::HTTP,
 # the Langertha tool loop, the in-process MCP tool servers (read_file and
 # MCP::Run::Bash), the session journal and --json output. The model is a
-# fake OpenAI endpoint that asks for the two tool calls, then answers with
-# what they returned.
+# fake OpenAI endpoint that asks for tool calls one by one, then answers
+# "SMOKE-DONE " with what they returned. Which calls: a prompt (any user
+# message) naming scenario=NAME gets those of $work/scenarios/NAME.json, a
+# list of [ tool, arguments ]; any other prompt read_file, bash, web_fetch.
+# The answer ends in CTX[...] when the system or user messages carry
+# VERIFY-* markers: what reached the model's context, not a tool result.
+mkdir "$work/scenarios"
 cat > "$work/fake-openai.pl" <<'FAKE'
 use strict;
 use warnings;
 use IO::Socket::INET;
 use JSON::PP;
-my ( $portfile ) = @ARGV;
+my ( $portfile, $scenarios ) = @ARGV;
 my $srv = IO::Socket::INET->new( LocalAddr => '127.0.0.1', LocalPort => 0, Listen => 5, ReuseAddr => 1 )
   or die "listen: $!";
 open my $pf, '>', $portfile.'.tmp' or die $!;
@@ -193,11 +230,22 @@ print $pf $srv->sockport;
 close $pf;
 rename $portfile.'.tmp', $portfile or die $!;
 my $json  = JSON::PP->new->canonical;
-my @calls = (
+my @default = (
   [ read_file => { path => 'smoke.txt' } ],
   [ bash      => { command => 'echo raider-bash-$((6*7))' } ],
   [ web_fetch => { url => 'http://127.0.0.1:'.$srv->sockport.'/page' } ],
 );
+my $text = sub { my ( $c ) = @_; return ref $c ? $json->encode($c) : $c // '' };
+my $calls_for = sub {
+  my ( $messages ) = @_;
+  for my $m ( grep { ( $_->{role} // '' ) eq 'user' } @$messages ) {
+    next unless $text->( $m->{content} ) =~ /\bscenario=([\w-]+)/;
+    open my $fh, '<', "$scenarios/$1.json" or die "scenario $1: $!";
+    local $/;
+    return $json->decode(<$fh>);
+  }
+  return \@default;
+};
 while ( my $c = $srv->accept ) {
   local $/ = "\r\n";
   my $line = <$c> // next;
@@ -222,13 +270,17 @@ while ( my $c = $srv->accept ) {
       embedding => [ 0.1, 0.2, 0.3 ] } ], usage => { prompt_tokens => 1, total_tokens => 1 } };
   }
   else {
-    my @tool = grep { ( $_->{role} // '' ) eq 'tool' } @{ $in->{messages} || [] };
+    my @messages = @{ $in->{messages} || [] };
+    my @calls = @{ $calls_for->( \@messages ) };
+    my @tool = grep { ( $_->{role} // '' ) eq 'tool' } @messages;
+    my %ctx = map { $_ => 1 } map { $text->( $_->{content} ) =~ /\b(VERIFY-[A-Z0-9-]+)/g }
+      grep { ( $_->{role} // '' ) =~ /\A(?:system|developer|user)\z/ } @messages;
     my $msg = @tool < @calls
       ? { role => 'assistant', content => undef, tool_calls => [ { id => 'call_'.scalar @tool,
           type => 'function', function => { name => $calls[@tool][0],
           arguments => $json->encode( $calls[@tool][1] ) } } ] }
-      : { role => 'assistant', content => 'SMOKE-DONE '.join ' | ',
-          map { ref $_->{content} ? $json->encode( $_->{content} ) : $_->{content} } @tool };
+      : { role => 'assistant', content => 'SMOKE-DONE '.join( ' | ', map { $text->( $_->{content} ) } @tool )
+          .( %ctx ? ' CTX['.join( ' ', sort keys %ctx ).']' : '' ) };
     $out = { id => 'fake', object => 'chat.completion', created => time, model => 'fake',
       choices => [ { index => 0, message => $msg, finish_reason => $msg->{tool_calls} ? 'tool_calls' : 'stop' } ],
       usage => { prompt_tokens => 1, completion_tokens => 1, total_tokens => 2 } };
@@ -239,15 +291,17 @@ while ( my $c = $srv->accept ) {
   close $c;
 }
 FAKE
-perl "$work/fake-openai.pl" "$work/port" &
+perl "$work/fake-openai.pl" "$work/port" "$work/scenarios" &
 pids+=($!)
 for _ in $(seq 50); do [ -s "$work/port" ] && break; sleep 0.1; done
 [ -s "$work/port" ] || fail "fake OpenAI endpoint did not start"
 port=$(cat "$work/port")
 mkdir "$work/project"
 echo "raider-smoke-marker-$$" > "$work/project/smoke.txt"
+# bypassPermissions: in the default mode a run with nobody to ask refuses
+# bash and web_fetch (ADR 0021; step 7 checks that refusal).
 out=$(run -r "$work/project" -e openai -k fake -m fake -o "url=http://127.0.0.1:$port/v1" \
-        --bare --json "read smoke.txt, run the bash check, fetch the page") \
+        --bare --permission-mode bypassPermissions --json "read smoke.txt, run the bash check, fetch the page") \
   || fail "offline raid exited $?: $out"
 grep -q "SMOKE-DONE" <<< "$out" || fail "offline raid: no final answer in: $out"
 grep -q "raider-smoke-marker-$$" <<< "$out" || fail "offline raid: read_file result missing: $out"
@@ -260,7 +314,7 @@ echo "offline raid (fake OpenAI endpoint, read_file + bash + web_fetch tools, se
 # slash commands, one raid.
 repl=$(printf '/help\n/packs\ngo\n/quit\n' \
   | timeout "$tmo" "$BIN" -r "$work/project" -e openai -k fake -m fake \
-      -o "url=http://127.0.0.1:$port/v1" --bare --no-session -i 2>&1) \
+      -o "url=http://127.0.0.1:$port/v1" --bare --no-session --dangerously-skip-permissions -i 2>&1) \
   || fail "REPL exited $?: $repl"
 grep -q "SMOKE-DONE" <<< "$repl" || fail "REPL: no raid answer in: $repl"
 echo "REPL (piped: /help, /packs, a raid, /quit): OK"
@@ -274,8 +328,13 @@ mkdir "$work/hall"
   cd "$work/hall"
   run hall init --name bjorn >/dev/null
   run hall add-raider astrid >/dev/null
+  run hall add-raider sigrid >/dev/null
   grep -q astrid .raider-hall.yml || fail "hall add-raider"
-  expect "hall install --stdout" '^ExecStart=.* hall start' "$BIN" hall install --host --stdout
+  # astrid runs everything (the hall passes --permission-mode); sigrid keeps
+  # the default mode and asks.
+  perl -0pi -e 's/^  astrid:\n/  astrid:\n    permission_mode: bypassPermissions\n/m' .raider-hall.yml
+  grep -q 'permission_mode: bypassPermissions' .raider-hall.yml || fail "cannot set astrid's permission_mode"
+  expect "hall install --stdout" "^ExecStart=$BIN hall start" "$BIN" hall install --host --stdout
   if run hall status >/dev/null 2>&1; then fail "hall status without a hall"; fi
   acp_port=$(perl -MIO::Socket::INET -e 'print IO::Socket::INET->new(Listen => 1, LocalAddr => "127.0.0.1", LocalPort => 0)->sockport')
   run hall start --daemon --acp-port "$acp_port" --acp-host 127.0.0.1 >/dev/null
@@ -299,10 +358,182 @@ mkdir "$work/hall"
     <<< "$spawned" \
     || fail "hall spawn --attach: no completed run in: $spawned
 slot log: $(tail -n 20 .raider-hall/logs/astrid.log 2>&1)"
+  # A run of an ACP session asks its client (ADR 0021): the hall hands the
+  # raider a socket in a directory of its own under the temp dir
+  # (--permission-channel), the raider asks there before write_file, the hall
+  # forwards it as session/request_permission, and acp prompt -- nobody to
+  # ask -- rejects. The reason reaching the model proves the whole way; a
+  # broken channel would say "permission channel: ..." instead.
+  printf '[["write_file",{"path":"acp-out.txt","content":"x"}]]' > "$work/scenarios/acp.json"
+  asked=$(run acp prompt "127.0.0.1:$acp_port" --raider sigrid "scenario=acp" 2>&1) \
+    || fail "acp prompt (exit $?): $asked"
+  grep -q 'SMOKE-DONE .*the client rejected the call' <<< "$asked" \
+    || fail "acp prompt: write_file not refused by the ACP client in: $asked
+slot log: $(tail -n 20 .raider-hall/logs/sigrid.log 2>&1)"
+  [ ! -e acp-out.txt ] || fail "acp prompt: write_file ran although the client rejected it"
   run hall stop >/dev/null
   for _ in $(seq 100); do kill -0 "$hall_pid" 2>/dev/null || break; sleep 0.1; done
   if kill -0 "$hall_pid" 2>/dev/null; then fail "hall stop: PID $hall_pid still running"; fi
 ) || exit 1
-echo "hall + acp (init, add-raider, install, start --daemon, status, ps, acp ping, spawn --attach, stop): OK"
+echo "hall + acp (init, add-raider, install, start --daemon, status, ps, acp ping, spawn --attach, acp prompt with a permission request, stop): OK"
+
+# --- 7. the Claude Code flow ----------------------------------------------------------
+# One Claude project (CLAUDE.md, .claude/) under a home of its own, run
+# against the fake endpoint of step 5: Claude mode and its memory, settings,
+# project and plugin skills (ADR 0019), glob/grep/todo_write and the loadguard
+# gate (ADR 0018), permission modes and plan mode (ADR 0021), hooks (ADR 0022),
+# agent files, the agent tool and the briefing preload, also from a
+# skilletor.json source over git (ADR 0020). Each check names the marker it
+# looks for: a VERIFY-* string placed in one file of the project.
+cc="$work/cc"
+cchome="$work/cchome"
+mkdir -p "$cc/.claude/skills/proj-skill" "$cc/.claude/agents" "$cc/sub" "$cc/hooks" \
+  "$cchome/.claude/skilletor"
+echo "Project memory: VERIFY-CLAUDEMD" > "$cc/CLAUDE.md"
+echo "Nested memory: VERIFY-NESTED" > "$cc/sub/CLAUDE.md"
+echo "grep-needle-$$" > "$cc/sub/file.txt"
+printf -- '---\nname: proj-skill\ndescription: A project skill.\n---\nVERIFY-PROJ-SKILL-BODY\n' \
+  > "$cc/.claude/skills/proj-skill/SKILL.md"
+# A user-scoped plugin, enabled in the home's settings: its skills are
+# vplug:<dir> (Langertha::Raider::Context::Plugins).
+plug="$cchome/.claude/plugins/cache/vm/vplug/1.0"
+mkdir -p "$plug/skills/plug-skill" "$plug/.claude-plugin"
+printf -- '---\nname: plug-skill\ndescription: A plugin skill.\n---\nVERIFY-PLUGIN-SKILL-BODY\n' \
+  > "$plug/skills/plug-skill/SKILL.md"
+printf '{"name":"vplug"}' > "$plug/.claude-plugin/plugin.json"
+printf '{"version":2,"plugins":{"vplug@vm":[{"scope":"user","installPath":"%s","version":"1.0"}]}}' \
+  "$plug" > "$cchome/.claude/plugins/installed_plugins.json"
+printf '{"enabledPlugins":{"vplug@vm":true}}' > "$cchome/.claude/settings.json"
+# A skill only a skilletor.json source has: a git repository, cloned by
+# Skilletor (git on PATH) into the home's cache when the briefing needs it.
+command -v git >/dev/null || fail "git is not on PATH (the skilletor source of step 7 is a git repository)"
+src="$work/skillsrc"
+mkdir -p "$src/skills/brief-skill"
+printf -- '---\nname: brief-skill\ndescription: From skilletor.\n---\nVERIFY-SKILLETOR-SKILL-BODY\n' \
+  > "$src/skills/brief-skill/SKILL.md"
+git -C "$src" init -q
+git -C "$src" add -A
+git -C "$src" -c user.name=verify -c user.email=verify@localhost commit -qm skills
+printf '{"sources":{"vsrc":{"git":"file://%s"}},"install":{"skills":["brief-skill@vsrc"]}}' \
+  "$src" > "$cc/.claude/skilletor.json"
+printf '{"vsrc":{"kind":"git","address":"file://%s"}}' "$src" > "$cchome/.claude/skilletor/trust.json"
+printf -- '---\nname: briefed\ndescription: Verify agent.\nbriefing:\n  skills: [ proj-skill, brief-skill ]\n---\nVERIFY-AGENT-BODY\n' \
+  > "$cc/.claude/agents/briefed.md"
+# Hooks: SessionStart and UserPromptSubmit add context, PreToolUse refuses a
+# bash command that names hook-deny-me, PostToolUse logs what it got.
+printf '#!/bin/sh\nin=$(cat)\ncase "$in" in *hook-deny-me*) echo VERIFY-HOOK-DENY >&2; exit 2;; esac\nexit 0\n' \
+  > "$cc/hooks/pre"
+printf '#!/bin/sh\ncat >> "$CLAUDE_PROJECT_DIR/post-tool.jsonl"\necho >> "$CLAUDE_PROJECT_DIR/post-tool.jsonl"\n' \
+  > "$cc/hooks/post"
+chmod +x "$cc/hooks/pre" "$cc/hooks/post"
+cat > "$cc/.claude/settings.json" <<'JSON'
+{"hooks":{
+  "SessionStart":[{"hooks":[{"type":"command","command":"cat >/dev/null; echo VERIFY-SESSIONSTART"}]}],
+  "UserPromptSubmit":[{"hooks":[{"type":"command","command":"cat >/dev/null; echo VERIFY-PROMPTSUBMIT"}]}],
+  "PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"\"$CLAUDE_PROJECT_DIR\"/hooks/pre"}]}],
+  "PostToolUse":[{"hooks":[{"type":"command","command":"\"$CLAUDE_PROJECT_DIR\"/hooks/post"}]}]
+}}
+JSON
+# grep without ripgrep: the Perl search. A PATH of links to everything on
+# PATH but rg.
+nopath=$PATH
+if command -v rg >/dev/null; then
+  mkdir "$work/norg"
+  IFS=: read -r -a pathdirs <<< "$PATH"
+  for d in "${pathdirs[@]}"; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+      b=${f##*/}
+      [ "$b" != rg ] && [ -x "$f" ] && [ ! -d "$f" ] && [ ! -e "$work/norg/$b" ] && ln -s "$f" "$work/norg/$b"
+    done
+  done
+  nopath="$work/norg"
+fi
+ccrun() { ( cd "$cc" && HOME="$cchome" PATH="$nopath" timeout "$tmo" "$BIN" "$@" ); }
+
+explain=$(ccrun config explain -e openai -k none 2>&1) || fail "claude: config explain (exit $?): $explain"
+for want in 'layout: claude' 'memory CLAUDE\.md \(project\)' 'proj-skill +listed +\.claude/skills' \
+            'vplug:plug-skill +listed +plugin vplug' 'briefed +\.claude/agents' \
+            'skills proj-skill, brief-skill \(skilletor:vsrc\)' \
+            'hooks: PostToolUse \(1\), PreToolUse \(1\), SessionStart \(1\), UserPromptSubmit \(1\)' \
+            'enabled plugins: vplug@vm'; do
+  grep -qE -- "$want" <<< "$explain" || fail "claude: config explain: no /$want/ in: $explain"
+done
+echo "claude: config explain (CLAUDE.md, settings, hooks, project + plugin skills, agent with a skilletor skill): OK"
+
+# The tools, in Claude mode with bypassPermissions (the hooks still decide):
+# the two skills, a read that pulls in sub/CLAUDE.md (Plugin::NestedMemory),
+# glob, grep, todo_write, bash refused by the PreToolUse hook, a heavy bash
+# command refused by loadguard -- one heavy slot (LOADGUARD_HEAVY_SLOTS=1),
+# held by a "prove" below a process that calls itself raider -- and the
+# agent tool starting "briefed", whose child run (scenario=child) sees the
+# agent's body and both briefed skills in its context.
+cat > "$work/scenarios/claude.json" <<'JSON'
+[ ["skill", {"skill": "vplug:plug-skill"}],
+  ["skill", {"skill": "proj-skill"}],
+  ["read_file", {"path": "sub/file.txt"}],
+  ["glob", {"pattern": "**/*.txt"}],
+  ["grep", {"pattern": "grep-needle", "output_mode": "content"}],
+  ["todo_write", {"todos": [{"content": "Verify the binary", "status": "in_progress", "activeForm": "Verifying"}]}],
+  ["bash", {"command": "echo hook-deny-me"}],
+  ["bash", {"command": "prove -l t"}],
+  ["agent", {"description": "verify", "prompt": "scenario=child", "subagent_type": "briefed"}] ]
+JSON
+printf '[["glob",{"pattern":"sub/*.txt"}]]' > "$work/scenarios/child.json"
+perl -e '$0 = "raider"; my $pid = fork // die "fork: $!"; exec { "sleep" } "prove", 300 unless $pid;
+  $SIG{TERM} = sub { kill TERM => $pid; exit 0 }; waitpid $pid, 0' &
+pids+=($!)
+holder=$!
+sleep 0.5
+out=$(LOADGUARD_HEAVY_SLOTS=1 ccrun -e openai -k fake -m fake -o "url=http://127.0.0.1:$port/v1" \
+        --permission-mode bypassPermissions --json "scenario=claude") \
+  || fail "claude raid exited $?: $out"
+kill "$holder" 2>/dev/null || true
+for want in 'SMOKE-DONE' 'VERIFY-PLUGIN-SKILL-BODY' 'VERIFY-PROJ-SKILL-BODY' 'grep-needle-'"$$" \
+            'VERIFY-NESTED' 'sub/file\.txt' 'Verify the binary' 'VERIFY-HOOK-DENY' 'refused by loadguard' \
+            'CTX\[[^]]*VERIFY-AGENT-BODY[^]]*VERIFY-PROJ-SKILL-BODY[^]]*VERIFY-SKILLETOR-SKILL-BODY' \
+            'CTX\[[^]]*VERIFY-CLAUDEMD[^]]*VERIFY-PROMPTSUBMIT[^]]*VERIFY-SESSIONSTART'; do
+  grep -qE -- "$want" <<< "$out" || fail "claude raid: no /$want/ in: $out"
+done
+grep -q '"tool_name":"Glob"' "$cc/post-tool.jsonl" 2>/dev/null \
+  || fail "claude raid: PostToolUse hook did not log the glob call: $(cat "$cc/post-tool.jsonl" 2>&1)"
+echo "claude: raid (skill tool on a plugin and a project skill, nested CLAUDE.md, glob, grep without rg, todo_write, hooks, loadguard gate, agent tool with skilletor briefing): OK"
+
+# Permissions without anyone to ask: plan mode refuses a write and cannot
+# leave plan mode; default mode refuses bash.
+cat > "$work/scenarios/plan.json" <<'JSON'
+[ ["write_file", {"path": "plan-out.txt", "content": "x"}],
+  ["exit_plan_mode", {"plan": "write plan-out.txt"}] ]
+JSON
+printf '[["bash",{"command":"touch default-out.txt"}]]' > "$work/scenarios/default.json"
+out=$(ccrun -e openai -k fake -m fake -o "url=http://127.0.0.1:$port/v1" --no-session \
+        --permission-mode plan --json "scenario=plan") || fail "plan-mode raid exited $?: $out"
+grep -qE "SMOKE-DONE Tool call 'write_file' was denied: plan mode: .*Nobody can approve the plan" <<< "$out" \
+  || fail "plan-mode raid: write_file and exit_plan_mode not refused in: $out"
+[ ! -e "$cc/plan-out.txt" ] || fail "plan mode: write_file ran"
+out=$(ccrun -e openai -k fake -m fake -o "url=http://127.0.0.1:$port/v1" --no-session \
+        --json "scenario=default") || fail "default-mode raid exited $?: $out"
+grep -q "SMOKE-DONE Tool call 'bash' was denied: default mode asks .*nobody can approve it" <<< "$out" \
+  || fail "default-mode raid: bash not refused in: $out"
+[ ! -e "$cc/default-out.txt" ] || fail "default mode, nobody to ask: bash ran"
+echo "claude: permissions (plan mode refuses write_file and exit_plan_mode, default mode refuses bash): OK"
+
+# LOADGUARD_CONFINE=1: the raider starts itself again in a systemd user scope
+# -- the binary itself, never "perl <binary>" -- and its bash runs in there.
+# Needs a user manager with the memory controller; a build container has
+# none, then the check is skipped and says so.
+ctl="/sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/cgroup.controllers"
+if command -v systemd-run >/dev/null && [ -S "${XDG_RUNTIME_DIR:-/nonexistent}/bus" ] \
+   && grep -qw memory "$ctl" 2>/dev/null; then
+  printf '[["bash",{"command":"cat /proc/self/cgroup"}]]' > "$work/scenarios/confine.json"
+  out=$(LOADGUARD_CONFINE=1 run -r "$work/project" -e openai -k fake -m fake \
+          -o "url=http://127.0.0.1:$port/v1" --bare --no-session --permission-mode bypassPermissions \
+          --json "scenario=confine") \
+    || fail "confined raid exited $?: $out"
+  grep -q 'loadguard-raider-' <<< "$out" || fail "LOADGUARD_CONFINE=1: bash did not run in the scope: $out"
+  echo "loadguard confine (restart in a systemd user scope): OK"
+else
+  echo "loadguard confine: SKIPPED (no systemd user manager with the memory controller here)"
+fi
 
 echo "verify: OK"

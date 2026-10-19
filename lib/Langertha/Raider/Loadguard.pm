@@ -597,7 +597,7 @@ sub validator {
 
 =method confine_command
 
-    exec @cmd if @cmd = $guard->confine_command( command => [ $^X, $0, @ARGV ] );
+    exec @cmd if @cmd = $guard->confine_command( command => [ $guard->self_command ] );
 
 The command line that runs C<command> inside a transient systemd user
 scope with memory limits, or nothing: when C<LOADGUARD_CONFINE> is not
@@ -605,8 +605,10 @@ C<1>, the process already is confined (C<LOADGUARD_CONFINED> set), there is
 no C<systemd-run> or no user manager (F<$XDG_RUNTIME_DIR/bus>), or the memory
 controller is not delegated to the user manager. The caller sets
 C<LOADGUARD_CONFINED=1> and execs it; if the exec fails it goes on
-unconfined. Options given to perl itself on the command line (C<-I>) are not
-carried over; C<PERL5LIB> is.
+unconfined. For the raider itself the command is L</self_command>. Run
+from a script, options given to perl itself on the command line (C<-I>) are
+not carried over; C<PERL5LIB> is. The standalone binary carries its modules
+and starts as it is.
 
 =cut
 

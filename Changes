@@ -32,17 +32,6 @@ Revision history for Langertha-Raider
       to it in the release audit; knarr's floor moves to the same Langertha.
     - Then this release; the standalone binaries are built from it.
 
-    - A tool call naming a tool no source offers is answered "unknown tool"
-      at once, before the PreToolUse hook, the permission gate and any
-      approval; in default mode it used to read "needs approval" (ADR 0005:
-      resolve comes before policy).
-    - A .raider/ directory makes a raider project only when it holds
-      config.yml, instructions.md, skills/, agents/ or packs/. raider's own
-      .raider/sessions, .raider/lib and .gitignore turned a Claude Code
-      project native from its second run on (ADR 0019 addendum 2).
-      raiders/ is no marker: ADR 0020 replaced raiders/<name>.yml by
-      agents/<name>.md.
-
   [Status]
     - Marked as in development (POD and README): a developer release, not yet
       covered end to end. Release it with `dzil release --trial`.
@@ -190,8 +179,25 @@ Revision history for Langertha-Raider
       binary, whose $^X is no usable interpreter, and return a tool error
       saying so when there is none. The lib's perl-version marker records
       the version of the perl that uses the lib, not the packed one.
+    - scripts/verify-binary.sh checks the Claude Code flow in the packed
+      binary: Claude mode with project and plugin skills, the skill tool,
+      nested CLAUDE.md, glob and grep without rg, todo_write, hooks, the
+      loadguard gate and its restart in a systemd scope, the plan and
+      default permission modes, ACP permission requests through the hall,
+      the agent tool with briefing from a skilletor git source, and the
+      packed Skilletor (https through HTTP::Tiny, gzip, punycode). It now
+      needs git.
+    - scripts/verify-binary.sh runs its offline raid, the REPL and the hall
+      raider with bypassPermissions: since the permission modes, a run with
+      nobody to ask refused their bash and web_fetch calls.
 
   [Claude Code layout and skills]
+    - A .raider/ directory makes a raider project only when it holds
+      config.yml, instructions.md, skills/, agents/ or packs/. raider's own
+      .raider/sessions, .raider/lib and .gitignore turned a Claude Code
+      project native from its second run on (ADR 0019 addendum 2).
+      raiders/ is no marker: ADR 0020 replaced raiders/<name>.yml by
+      agents/<name>.md.
     - Raider decides once per run which layout it reads (ADR 0019): a project
       with .raider/ (or a legacy .raider.yml / .raider.md) is a raider
       project; one with only CLAUDE.md, CLAUDE.local.md or .claude/ (in it or
@@ -422,6 +428,10 @@ Revision history for Langertha-Raider
       at the terminal, `raider acp prompt` rejects; the ACP client no longer
       mistakes an agent request for the response of its own call. Hall
       scenarios 109 to 113, t/172 to t/174; ADR 0021 Nachtrag P2.
+    - A tool call naming a tool no source offers is answered "unknown tool"
+      at once, before the PreToolUse hook, the permission gate and any
+      approval; in default mode it used to read "needs approval" (ADR 0005:
+      resolve comes before policy).
 
   [CLI and REPL]
     - bin/raider is a thin wrapper around internal
@@ -618,20 +628,20 @@ Revision history for Langertha-Raider
       confined to the root like the file tools. Effect classes: glob and
       grep read, todo_write none, ask_user message.
     - INCOMPATIBLE: bash is gated by a port of the loadguard plugin, on by
-      default. A heavy
-      command (prove, make test, dzil test|build|release, cpanm, perlbench,
-      docker|podman build|run, cargo build|test, npm test, claude -p|--bg,
-      codex exec|review), found in command position, is refused with the
-      measured figures and the advice that fits while the host is under
-      memory pressure (PSI memory full avg10 >= LOADGUARD_PSI_FULL, default
-      10 %; swap used >= LOADGUARD_SWAP_USED, default 90 %) or all heavy
-      slots (LOADGUARD_HEAVY_SLOTS, default max(1, nproc/2)) are held by
-      running commands of raider processes. Light commands are never
-      refused; without /proc/pressure or swap the signal is "no pressure";
-      LOADGUARD_THROTTLE=0 turns the gate off. LOADGUARD_CONFINE=1 (off by
-      default) makes raider start itself again in a transient systemd user
-      scope with memory limits (LOADGUARD_MEMORY_HIGH/MAX/SWAP_MAX in percent
-      of RAM, LOADGUARD_CPU_WEIGHT). New Langertha::Raider::Loadguard.
+      default. A heavy command (prove, make test, dzil test|build|release,
+      cpanm, perlbench, docker|podman build|run, cargo build|test, npm test,
+      claude -p|--bg, codex exec|review), found in command position, is
+      refused with the measured figures and the advice that fits while the
+      host is under memory pressure (PSI memory full avg10 >=
+      LOADGUARD_PSI_FULL, default 10 %; swap used >= LOADGUARD_SWAP_USED,
+      default 90 %) or all heavy slots (LOADGUARD_HEAVY_SLOTS, default max(1,
+      nproc/2)) are held by running commands of raider processes. Light
+      commands are never refused; without /proc/pressure or swap the signal is
+      "no pressure"; LOADGUARD_THROTTLE=0 turns the gate off.
+      LOADGUARD_CONFINE=1 (off by default) makes raider start itself again in
+      a transient systemd user scope with memory limits
+      (LOADGUARD_MEMORY_HIGH/MAX/SWAP_MAX in percent of RAM,
+      LOADGUARD_CPU_WEIGHT). New Langertha::Raider::Loadguard.
     - New Langertha::Raider::ToolNames: the table of Claude Code tool names
       and the raider tools they stand for (Read -> read_file, Edit and
       MultiEdit -> edit_file, Glob -> glob, Task and Agent -> agent, ...;
