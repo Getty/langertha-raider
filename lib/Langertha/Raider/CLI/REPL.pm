@@ -340,7 +340,7 @@ sub run {
   $self->banner($rl->{impl});
   $out->say_meta($_) for @{ $self->notes };
   $self->commands->cmd_prompt if $self->customize_prompt;
-  $self->run_prompt(join ' ', @first) if @first;
+  if (@first) { my $first = join ' ', @first; $first =~ m{^/} ? $self->run_slash($first) : $self->run_prompt($first) }
 
   while (defined(my $line = $rl->{read}->())) {
     $line =~ s/^\s+|\s+$//g;
@@ -352,10 +352,7 @@ sub run {
     }
     $call->(add => $line);
     if ($line =~ m{^/}) {
-      $self->commands->dispatch($line);
-      # A resume must not bring back what /clear removed (ADR 0015).
-      $self->runner->record($self->session, 'history.cleared')
-        if $self->has_session && $line =~ m{\A/clear(?:\s|\z)};
+      $self->run_slash($line);
       next;
     }
     if ($line =~ m{\A([!?])\s*(\S.*)\z}s) {
@@ -506,6 +503,28 @@ prompt with a L</session_store> starts the session and names it.
 sub run_prompt {
   my ( $self, $text ) = @_;
   return $self->runner->run_prompt($text, session => scalar $self->_session_for_run);
+}
+
+=method run_slash
+
+    $repl->run_slash('/review src/App.pm');
+
+A C</...> line (also the first prompt from the command line): resolved by
+L<Langertha::Raider::CLI::Commands/dispatch>. A run request it returns (a
+catalogue entry, C</init>, a path such as C</etc/hosts is broken>) runs as
+the next prompt with its run options, recorded in L</session>. A C</clear>,
+C</reset> or C</new> is recorded there as C<history.cleared>.
+
+=cut
+
+sub run_slash {
+  my ( $self, $line ) = @_;
+  my $r = $self->commands->dispatch($line, session => sub { scalar $self->_session_for_run });
+  return $self->runner->run_prompt($r->{prompt}, %$r, session => scalar $self->_session_for_run) if ref $r eq 'HASH';
+  # A resume must not bring back what /clear removed (ADR 0015).
+  $self->runner->record($self->session, 'history.cleared')
+    if $r && $self->has_session && $line =~ m{\A/(?:clear|reset|new)(?:\s|\z)};
+  return $r;
 }
 
 =method run_shell

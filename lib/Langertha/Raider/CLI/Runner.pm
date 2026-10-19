@@ -89,7 +89,20 @@ written as always, and then the process dies of C<SIGINT>
 before the application started the run, and a C<SIGTERM> end it as
 C<interrupted>: see L</interrupt>.
 
+The options of one run (L</run_options>: C<allow_rules>, C<allow_source>,
+C<model>, C<attach_reads> -- a C</name> run request,
+L<Langertha::Raider::Application/slash_run_request>) go to the
+application's run as they are; they hold for that run only
+(L<Langertha::Raider::Application/begin_run>).
+
+=method run_options
+
+The keys of a run request that L</run_prompt> hands on:
+C<allow_rules allow_source model attach_reads>.
+
 =cut
+
+sub run_options { qw( allow_rules allow_source model attach_reads ) }
 
 sub run_prompt {
   my ( $self, $text, %o ) = @_;
@@ -112,6 +125,7 @@ sub run_prompt {
 
   my $end = $app->run_prompt($text,
     ( $o{session} ? ( session => $o{session} ) : () ),
+    ( map { defined $o{$_} ? ( $_ => $o{$_} ) : () } $self->run_options ),
     on_event => sub { $self->event(@_) },
   );
   # The run has ended: no signal may cut its outcome short any more.

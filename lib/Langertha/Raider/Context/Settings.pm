@@ -42,7 +42,7 @@ is not a JSON object is recorded in L</files> and contributes nothing; it is
 never fatal. Every entry keeps the label of the file it came from as
 C<source>.
 
-Raider uses C<permissions>, C<hooks>, C<disableAllHooks>, C<env> and
+Raider uses C<permissions>, C<hooks>, C<disableAllHooks>, C<disableSkillShellExecution>, C<env> and
 C<enabledPlugins>. Every
 other top-level key is listed by L</ignored>. Here they are only read;
 evaluating permissions (stream P), running hooks (stream H) and applying the
@@ -85,7 +85,7 @@ sub _build_claude_home {
 }
 
 # The settings keys raider uses; everything else is listed by ignored().
-my %USED = map { $_ => 1 } qw( permissions hooks disableAllHooks env enabledPlugins );
+my %USED = map { $_ => 1 } qw( permissions hooks disableAllHooks disableSkillShellExecution env enabledPlugins );
 
 # The three files with their data, in read order. Each entry is
 # { file, label, scope, exists, error, data }; data is the decoded object,
@@ -342,6 +342,34 @@ sub _build_disable_all_hooks {
   my $off = 0;
   for my $src ($self->_sources) {
     my $value = $src->[0]{disableAllHooks};
+    $off = $value ? 1 : 0 if is_bool($value);
+  }
+  return $off;
+}
+
+=method disable_skill_shell_execution
+
+    disable_shell => $settings->disable_skill_shell_execution,
+
+C<1> when the C<disableSkillShellExecution> of the last file that sets it
+as a JSON boolean is true, else C<0>, a later file winning: the C<!`cmd`>
+of skills and commands is then not run (ADR 0030 E<sect>2,
+L<Langertha::Raider::SlashCommand/disable_shell>).
+
+=cut
+
+has disable_skill_shell_execution => (
+  is         => 'ro',
+  isa        => 'Bool',
+  init_arg   => undef,
+  lazy_build => 1,
+);
+
+sub _build_disable_skill_shell_execution {
+  my ( $self ) = @_;
+  my $off = 0;
+  for my $src ($self->_sources) {
+    my $value = $src->[0]{disableSkillShellExecution};
     $off = $value ? 1 : 0 if is_bool($value);
   }
   return $off;

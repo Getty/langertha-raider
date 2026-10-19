@@ -71,12 +71,14 @@ subtest 'a skill' => sub {
   my $s = $cat->find('pdf');
   is($s, {
     name            => 'pdf',
+    kind            => 'skill',
     description     => 'Work with PDF files.',
     dir             => "$w/explicit/pdf",
     file            => "$w/explicit/pdf/SKILL.md",
     source          => '--skills explicit',
     frontmatter     => { name => 'pdf', description => 'Work with PDF files.', license => 'MIT' },
     model_invocable => 1,
+    user_invocable  => 1,
   }, 'all fields');
   my $r = $cat->find('renamed');
   is($r->{frontmatter}{name}, 'other-name', 'frontmatter name kept ...');

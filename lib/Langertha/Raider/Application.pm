@@ -26,6 +26,7 @@ use Langertha::Raider::Approval;
 use Langertha::Raider::Loadguard;
 use Langertha::Raider::BashTools;
 use Langertha::Raider::SkillTools qw( build_skill_tools_server );
+use Langertha::Raider::SlashCommand;
 use Langertha::Raider::Packs     qw( build_packs );
 use Langertha::Raider::Config;
 use Langertha::Raider::Instructions;
@@ -359,6 +360,19 @@ sub _instructions_text {
   return $base;
 }
 
+sub instructions_text { $_[0]->_instructions_text }
+
+=method instructions_text
+
+    my $text = $app->instructions_text;
+
+The instructions item of the L</mission>: the C<-M> text, or else the
+default persona with the project instructions file
+(C<.raider/instructions.md>, else C<.raider.md>) appended -- the persona
+alone under C<bare>.
+
+=cut
+
 # The tool description item, derived from the tool servers mounted for
 # this raider (ADR 0005) -- the same servers the catalogue comes from; -M
 # never replaces it (ADR 0014). A subagent passes its own servers.
@@ -374,6 +388,18 @@ sub _tools_text {
 # what the prompt describes, the engine offers and Langertha::Raider::Skill
 # documents.
 sub _mounted_tools { map { @{ $_->tools } } @{ $_[0]->_tool_servers } }
+
+sub mounted_tools { $_[0]->_mounted_tools }
+
+=method mounted_tools
+
+    my @tools = $app->mounted_tools;
+
+The L<MCP::Tool> objects of the mounted tool servers, in mount order --
+what the prompt describes, the engine offers and L<Langertha::Raider::Skill>
+documents.
+
+=cut
 
 # name(required, ..., [optional], ...) from the tool's input schema: the
 # required parameters in their schema order, then the optional ones sorted.
@@ -2058,11 +2084,152 @@ sub _build_web_fetch_engine {
   return $resolver->meta->clone_object($resolver, model => $model)->build_engine;
 }
 
-# The skill tool (ADR 0019 §4), when the context lists a skill.
+# The skill tool (ADR 0019 §4), when the context lists a skill; it renders
+# through slash_renderer (ADR 0030 §2).
 sub _build_skill_tool_server {
   my ($self) = @_;
   return unless $self->context->skill_tool_wanted;
-  return build_skill_tools_server(skills => $self->context->skill_catalog);
+  weaken(my $app = $self);
+  return build_skill_tools_server(
+    skills => $self->context->skill_catalog,
+    render => sub { $app ? $app->skill_tool_text(@_) : { error => 'the application is gone' } },
+  );
+}
+
+=method slash_command_class
+
+L<Langertha::Raider::SlashCommand>, the renderer of C</name> and the
+C<skill> tool.
+
+=method slash_renderer
+
+    my $renderer = $app->slash_renderer( session => $session );
+
+A L<Langertha::Raider::SlashCommand> over L</root> with the application's
+L</permissions>, the loadguard gate (L</loadguard>) and the session's id
+for C<${CLAUDE_SESSION_ID}>; C<disable_shell> is the Claude settings'
+C<disableSkillShellExecution>
+(L<Langertha::Raider::Context::Settings/disable_skill_shell_execution>). The
+additional directories come from the policy.
+
+=cut
+
+sub slash_command_class { 'Langertha::Raider::SlashCommand' }
+
+sub slash_renderer {
+  my ( $self, %o ) = @_;
+  my $session  = $o{session};
+  my $settings = $self->context->settings;
+  return $self->slash_command_class->new(
+    root          => $self->root,
+    permissions   => $self->permissions,
+    validator     => $self->loadguard->validator,
+    session_id    => $session ? $session->id : undef,
+    disable_shell => $settings && $settings->disable_skill_shell_execution ? 1 : 0,
+  );
+}
+
+=method slash_run_request
+
+    my $request = $app->slash_run_request( 'review', 'src/App.pm', session => $session );
+    # { prompt => ..., allow_rules => [...], allow_source => '/review allowed-tools',
+    #   model => 'sonnet', attach_reads => [...] }   or   { error => '...' }
+    $app->run_prompt( $request->{prompt}, %$request, session => $session ) unless $request->{error};
+
+A C</NAME REST> run of a user-invocable catalogue entry (ADR 0030
+E<sect>3): the entry (a name, or the entry hash) rendered with the
+arguments and C<@file> attachments (L</slash_renderer>), then framed as
+Claude Code frames it (the C<...> is one character, U+2026):
+
+    <command-message>NAME is running...</command-message>
+    <command-name>/NAME</command-name>
+    <command-args>REST</command-args>
+
+    RENDERED TEXT
+
+The rest is what L</run_prompt> takes for that run: the entry's
+C<allowed-tools> as C<allow_rules> with their C<allow_source>, its C<model>
+frontmatter (when set) and the attached files as C<attach_reads>. A render
+that aborts gives C<< { error => $reason } >>; nothing is to be sent then.
+C<session> may be a code reference, called only when an entry is rendered.
+Returns nothing for a name that is no user-invocable entry.
+
+=cut
+
+sub slash_run_request {
+  my ( $self, $name, $arguments, %o ) = @_;
+  my $catalog = $self->context->skill_catalog;
+  my $entry = ref $name eq 'HASH' ? $name : $catalog->find_user_invocable($name);
+  return unless $entry;
+  my $session = ref $o{session} eq 'CODE' ? $o{session}->() : $o{session};
+  my $renderer = $self->slash_renderer( session => $session );
+  my $r = $renderer->render(
+    entry        => $entry,
+    body         => $catalog->body( $entry->{name} ),
+    arguments    => $arguments,
+    attach_files => 1,
+  );
+  return { error => $r->{error} } if defined $r->{error};
+  my $model = ref $entry->{frontmatter} eq 'HASH' ? $entry->{frontmatter}{model} : undef;
+  ( my $text = $r->{text} ) =~ s/\s+\z//;
+  return {
+    prompt => '<command-message>'.$entry->{name}." is running\x{2026}</command-message>\n"
+      .'<command-name>/'.$entry->{name}."</command-name>\n"
+      .'<command-args>'.( $arguments // '' )."</command-args>\n\n"
+      .$text,
+    allow_rules  => [ $renderer->allowed_tool_rules($entry) ],
+    allow_source => $renderer->grant_source($entry),
+    ( defined $model && !ref $model && length $model ? ( model => $model ) : () ),
+    attach_reads => $r->{files_read},
+  };
+}
+
+=method skill_tool_text
+
+    my $loaded = $app->skill_tool_text( $entry, $args );   # { text } or { error }
+
+What the C<skill> tool loads for a model-invoked entry (ADR 0030 E<sect>2):
+the body rendered with the arguments and its C<!`cmd`> (through the
+permission policy, nobody asked), without C<@file> attachments. When it
+renders and a run is in progress, the entry's C<allowed-tools> hold for the
+rest of that run (L<Langertha::Raider::Permissions/add_run_rules>). Its
+C<model> is ignored: the engine is not switched inside a run.
+
+=cut
+
+sub skill_tool_text {
+  my ( $self, $entry, $arguments ) = @_;
+  my $run = $self->_run;
+  my $renderer = $self->slash_renderer( session => $run ? $run->{session} : undef );
+  my $r = $renderer->render(
+    entry     => $entry,
+    body      => $self->context->skill_catalog->body( $entry->{name} ),
+    arguments => $arguments,
+  );
+  return { error => $r->{error} } if defined $r->{error};
+  $self->permissions->add_run_rules( [ $renderer->allowed_tool_rules($entry) ], $renderer->grant_source($entry) )
+    if $run;
+  return { text => $r->{text} };
+}
+
+=method resolve_run_model
+
+    my $resolved = $app->resolve_run_model('sonnet');   # { model => '...' } or { inherit => 1, reason => ... }
+
+The C<model> of a C</name> run as a subagent's is resolved (ADR 0020
+E<sect>5, L<Langertha::Raider::Context::Agents/resolve_model>): an alias or a
+C<claude-*> id under the Anthropic API, L</agent_models> applied;
+C<inherit>, empty or anything else keeps the engine's model.
+
+=cut
+
+sub resolve_run_model {
+  my ( $self, $model ) = @_;
+  return $self->context->agent_catalog->resolve_model( $model,
+    engine_class => scalar eval { $self->_engine_class },
+    engine_name  => $self->engine_name,
+    agent_models => $self->agent_models,
+  );
 }
 
 sub _build_stock_tool_servers {
@@ -2477,10 +2644,14 @@ sub run {
     my $outcome = $app->run_prompt($text,
       session  => $session,                                   # optional
       on_event => sub { my ( $type, %payload ) = @_; ... },   # optional
+      # optional, for one run only (see begin_run):
+      allow_rules => \@rules, allow_source => $source, model => $model, attach_reads => \@files,
     );
 
 Runs C<$text> as one run (L</run>) and records it, whichever surface
-asks: in the journal of the L<Langertha::Raider::Session> as the
+asks; the run options of L</begin_run> (a C</name> run's allowed-tools,
+model and attached files, L</slash_run_request>) hold for this run only.
+It is recorded: in the journal of the L<Langertha::Raider::Session> as the
 session's next run (ADR 0015) -- C<run.started>, the user input as
 C<message>, every C<tool.call> and C<tool.result> with the whole result
 text (and after it a user C<message> a result hands the raid, such as a
@@ -2546,7 +2717,12 @@ has _run => (
 sub run_prompt {
   my ( $self, $text, %o ) = @_;
   return unless defined $text && length $text;
-  $self->begin_run(%o);
+  unless (eval { $self->begin_run(%o); 1 }) {
+    my $error = $@;
+    die $error unless $self->_run;
+    chomp $error;
+    return $self->end_run(failed => error => $error);
+  }
   $self->event('message', role => 'user', content => $text);
 
   # The Claude layout's hooks (ADR 0022): SessionStart, UserPromptSubmit
@@ -2582,9 +2758,36 @@ sub run_prompt {
 
     $app->begin_run(session => $session, on_event => $consumer);
 
+    # a /name run (L</slash_run_request>):
+    $app->begin_run(session => $session, allow_rules => [ 'Bash(git diff:*)' ],
+      allow_source => '/review allowed-tools', model => 'sonnet', attach_reads => \@files_read);
+
 Starts a run as L</run_prompt> does, for a surface that drives L</run>
 itself: the run gets the next run id of C<session>, C<run.started> (engine
 and model) and C<run.state> C<running>. L</end_run> ends it.
+
+The options of one run (ADR 0030 E<sect>3), all undone by L</end_run>:
+
+=over
+
+=item C<allow_rules>, C<allow_source> -- allow rules for this run only
+(L<Langertha::Raider::Permissions/add_run_rules>; source default C<run>).
+Deny and ask rules still win. L</end_run> clears every run rule, also those
+the C<skill> tool added during the run.
+
+=item C<model> -- the model of this run, resolved by L</resolve_run_model>:
+when it names one, the raider runs on an engine with that model
+(L</build_subagent_engine> over the application's MCP clients) and
+C<run.started> names it; L</end_run> puts the engine back. Never saved.
+
+=item C<attach_reads> -- the C<files_read> of a render
+(L<Langertha::Raider::SlashCommand/render>): counted as read for
+read-before-write, after the read state was emptied for the run.
+
+=back
+
+Croaks when the engine for C<model> cannot be built; the run is begun by
+then, so L</run_prompt> ends it C<failed>.
 
 =cut
 
@@ -2594,14 +2797,34 @@ sub begin_run {
   $self->_todos([]) unless $self->task_tools;
   $self->file_read_state->clear;
   $self->_seed_read_state;
-  $self->_run({
+  $self->slash_command_class->record_reads({ files_read => $o{attach_reads} }, $self->file_read_state)
+    if ref $o{attach_reads} eq 'ARRAY';
+  my $resolved = defined $o{model} && !ref $o{model} && length $o{model}
+    ? $self->resolve_run_model($o{model}) : {};
+  my $run_model = $resolved->{model};
+  my $run = {
     session  => $session,
     run      => $session ? $session->next_run : undef,
     on_event => $o{on_event},
     t0       => Time::HiRes::time(),
-  });
-  $self->event('run.started', engine => $self->engine_name, $self->has_model ? ( model => $self->model ) : ());
+  };
+  $self->_run($run);
+  $self->permissions->add_run_rules($o{allow_rules}, $o{allow_source} // 'run')
+    if ref $o{allow_rules} eq 'ARRAY';
+  $self->event('run.started', engine => $self->engine_name,
+    defined $run_model ? ( model => $run_model ) : $self->has_model ? ( model => $self->model ) : ());
   $self->event('run.state', state => 'running');
+  $self->_use_run_model($run, $run_model) if defined $run_model;
+  return;
+}
+
+# Puts the raider on an engine with $model for this run; end_run puts the
+# engine it had back.
+sub _use_run_model {
+  my ( $self, $run, $model ) = @_;
+  my $raider = $self->raider;
+  my $engine = $self->build_subagent_engine( mcp_servers => $self->_mcps, model => $model );
+  $run->{restore_engine} = $raider->override_engine($engine);
   return;
 }
 
@@ -2624,7 +2847,8 @@ sub _seed_read_state {
 Ends the run in progress, if there is one: C<run.finished> with
 C<$status> and the given C<error> and C<signal> into the journal, with the
 given C<metrics> or else the raider's, then C<run.state> with C<$status>.
-Returns C<status>, C<elapsed>, the C<error> and C<signal> given and, with a
+It clears the run rules of the policy and puts back the engine a run
+C<model> replaced (L</begin_run>), whatever the status. Returns C<status>, C<elapsed>, the C<error> and C<signal> given and, with a
 session, C<session> (C<id>, C<path>) -- or nothing outside a run. A
 surface calls it for a run it ends itself, as the command line does for a
 signal.
@@ -2646,6 +2870,9 @@ sub end_run {
     $end{session} = { id => $session->id, path => ''.$session->path };
   }
   $self->event('run.state', state => $status);
+  # What begin_run set up for this run only (ADR 0030 §3).
+  $self->permissions->clear_run_rules;
+  $run->{restore_engine}->() if $run->{restore_engine};
   $self->_clear_run;
   # A cancel that came too late for the raid must not hit the next run.
   $self->_raider->clear_cancel if $self->_has_raider;

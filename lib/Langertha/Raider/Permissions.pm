@@ -192,6 +192,19 @@ the session and the other way round. Lives in memory only.
 
 =cut
 
+has run_rules => ( is => 'ro', isa => 'ArrayRef', default => sub { [] } );
+
+=attr run_rules
+
+The allow rules of the run in progress (L</add_run_rules>): the
+C<allowed-tools> of a C</name> run or of an entry the model loaded with the
+C<skill> tool (ADR 0030 E<sect>3), as L<Langertha::Raider::Permissions::Rule>
+objects with their source (C</NAME allowed-tools>). Shared with every policy
+L</for_subrun> derives, like L</session_rules>, and emptied in place by
+L</clear_run_rules> when the run ends.
+
+=cut
+
 has ask_outside_roots => ( is => 'ro', isa => 'Bool', default => 0 );
 
 =attr ask_outside_roots
@@ -268,6 +281,7 @@ sub from_sources {
     ignored_modes          => \@ignored,
     ( $arg{source_servers} ? ( source_servers => $arg{source_servers} ) : () ),
     ( $arg{session_rules}  ? ( session_rules  => $arg{session_rules} )  : () ),
+    ( $arg{run_rules}      ? ( run_rules      => $arg{run_rules} )      : () ),
     ( $arg{ask_outside_roots} ? ( ask_outside_roots => 1 ) : () ),
   );
 }
@@ -285,7 +299,7 @@ L<Langertha::Raider::Context::Settings/permissions>. The rules and
 additional directories of all sources are concatenated. The mode is the
 first of C<cli_mode> and the sources' C<default_mode> in the order given
 that is a mode; a C<default_mode> that is none is skipped and kept in
-L</ignored_modes>. Without any, C<default>. C<session_rules>, C<source_servers>
+L</ignored_modes>. Without any, C<default>. C<session_rules>, C<run_rules>, C<source_servers>
 and C<ask_outside_roots> are passed on as they are (a policy read again keeps the
 session's rules). Croaks on an invalid C<cli_mode> -- the command line
 refuses it before.
@@ -353,13 +367,13 @@ True for a valid mode name (exactly as Claude Code writes it).
 
 sub rule_list {
   my ( $self ) = @_;
-  return ( ( grep { $_->is_valid } @{ $self->_file_rules } ), @{ $self->session_rules } );
+  return ( ( grep { $_->is_valid } @{ $self->_file_rules } ), @{ $self->session_rules }, @{ $self->run_rules } );
 }
 
 =method rule_list
 
-Every valid rule: the configured ones (deny, ask, allow) and then the
-session rules.
+Every valid rule: the configured ones (deny, ask, allow), then the
+session rules, then the run rules.
 
 =cut
 
@@ -389,6 +403,56 @@ sub add_session_rule {
 Allows what the rule names for the rest of the session (source C<session>).
 Croaks on an invalid rule. Returns the rule; adding the same text again
 changes nothing.
+
+=cut
+
+sub add_run_rules {
+  my ( $self, $texts, $source ) = @_;
+  my @added;
+  for my $text ( grep { defined && !ref } @{ $texts // [] } ) {
+    my $rule = Langertha::Raider::Permissions::Rule->new(
+      text => $text, source => $source // 'run', kind => 'allow',
+    );
+    next unless $rule->is_valid;
+    next if first { $_->text eq $rule->text && $_->source eq $rule->source } @{ $self->run_rules };
+    push @{ $self->run_rules }, $rule;
+    push @added, $rule;
+  }
+  return @added;
+}
+
+=method add_run_rules
+
+    my @added = $policy->add_run_rules( [ 'Bash(git status:*)', 'Read' ], '/review allowed-tools' );
+
+Allows what the rules name for the run in progress only (L</run_rules>),
+with C<$source> as their source (default C<run>). Deny and ask rules, and
+plan mode, still win. A text that is no valid rule is skipped, as an
+invalid rule never widens anything; one already there with the same source
+is not added twice. Returns the rules that were added.
+
+=cut
+
+sub clear_run_rules {
+  my ( $self, @rules ) = @_;
+  my $list = $self->run_rules;
+  if (@rules) {
+    my %drop = map { refaddr($_) => 1 } @rules;
+    @$list = grep { !$drop{ refaddr $_ } } @$list;
+  }
+  else {
+    @$list = ();
+  }
+  return;
+}
+
+=method clear_run_rules
+
+    $policy->clear_run_rules;            # all of them: the run ended
+    $policy->clear_run_rules(@added);    # only these
+
+Takes run rules out again, in place, so every policy sharing them
+(L</for_subrun>) loses them too.
 
 =cut
 
@@ -454,6 +518,7 @@ sub policy_revision {
     mode    => $self->mode,
     rules   => [ map { [ $_->kind, $_->text, $_->source ] } @{ $self->_file_rules } ],
     session => [ map { $_->text } @{ $self->session_rules } ],
+    ( @{ $self->run_rules } ? ( run => [ map { [ $_->text, $_->source ] } @{ $self->run_rules } ] ) : () ),
     dirs    => [ $self->additional_directory_paths ],
     ( $self->ask_outside_roots ? ( outside => 1 ) : () ),
   }) );
@@ -462,7 +527,7 @@ sub policy_revision {
 =method policy_revision
 
 The SHA-256 (hex) over the mode, every rule with its source, the session
-rules and the additional directories. An approval
+rules, the run rules and the additional directories. An approval
 (L<Langertha::Raider::Approval>) is bound to it: switching the mode or
 allowing a session rule invalidates approvals given before.
 
@@ -479,6 +544,7 @@ sub for_subrun {
     additional_directories => $self->additional_directories,
     source_servers         => $self->source_servers,
     session_rules          => $self->session_rules,
+    run_rules              => $self->run_rules,
     ask_outside_roots      => $self->ask_outside_roots,
   );
 }
@@ -489,7 +555,8 @@ sub for_subrun {
 
 The policy a sub-run (a sub-agent, a delegated task) uses: a new object with
 the mode this policy has now, the same configured rules, additional
-directories and source servers, and the B<same> session rules array. A mode
+directories and source servers, and the B<same> session rules and run
+rules arrays. A mode
 change of either afterwards stays with that one (a sub-agent leaving plan
 mode does not take the session with it); a session rule allowed in either
 holds in both. A sub-run never gets more than its parent had: there is no

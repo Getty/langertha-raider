@@ -12,6 +12,7 @@ use Langertha;
 use Langertha::Raider;
 use Langertha::Raider::ACP::CLI;
 use Langertha::Raider::CLI;
+use Langertha::Raider::CLI::Commands;
 use Langertha::Raider::CLI::Machine;
 use Langertha::Raider::CLI::Output;
 use Langertha::Raider::CLI::Provider;
@@ -43,6 +44,12 @@ C<provider add>, C<provider list>, C<provider show> and C<provider remove> subco
 then either the REPL (L<Langertha::Raider::CLI::REPL>) or one prompt
 (L<Langertha::Raider::CLI::Runner>). L</run> returns the exit status.
 
+C<-p> / C<--print> (ADR 0030 E<sect>4, as Claude Code) makes it one prompt
+even on a terminal: from the words given, else read from standard input to
+its end. A one-shot prompt -- with C<-p> or not -- that starts with C</>
+goes through L</oneshot_command>: a skill or custom command runs, a
+reporting built-in prints and exits C<0>, a REPL-only one is a usage error.
+
 =head2 Exit status
 
 =over
@@ -54,7 +61,9 @@ binding, C<provider list>, C<provider show> and C<provider remove> that
 removed the alias, and leaving the REPL.
 
 =item C<1> -- the run failed: the engine, a tool or the network raised an
-error (with a machine format, the output is the C<failed> document); for
+error (with a machine format, the output is the C<failed> document); a
+one-shot C</NAME> whose render aborted (a C<!`cmd`> refused or failed, ADR
+0030 E<sect>2), with nothing sent; for
 C<config migrate>: the migration was refused (a new file or a backup
 already exists, F<.raider> is no directory, the home directory) or a step
 failed; for C<provider inspect>: the manifest was refused (address, redirect), could
@@ -69,8 +78,9 @@ format a failed C<--provider> is also the C<refused> or C<failed> document.
 
 =item C<2> -- usage error: unknown option, a C<-o> that is not
 C<KEY=VALUE>, an unknown C<config> subcommand, no prompt, more than one
-machine format, a machine format with C<-i>, or an unknown machine format
-version; for C<config migrate>: a word after it or a machine format;
+machine format, a machine format with C<-i>, C<-p> with C<-i>, or an unknown machine format
+version; a one-shot C</NAME> that is no command, or a REPL-only built-in
+(L</oneshot_command>); for C<config migrate>: a word after it or a machine format;
 for sessions: a C<--session> value that is no session id,
 more than one of C<--session>, C<--continue> and C<--no-session>, an unknown
 or ambiguous session, or C<--continue> without any session; for
@@ -248,6 +258,13 @@ Options:
                            and /pack NAME still work)
   -i, --interactive        REPL mode (default when stdin is a TTY with no
                            prompt argv and no pipe; forces it otherwise)
+  -p, --print              One-shot run, also on a terminal: the prompt
+                           from argv, else from stdin. Not with -i.
+                           A prompt /NAME runs a skill or custom command;
+                           /help, /context, /skills, /agents, /hooks,
+                           /memory, /permissions, /config, /stats,
+                           /metrics, /packs print, /init and /compact run;
+                           other REPL commands are a usage error
       --json[=N]           Print one JSON document for the run and exit
                            (format version N; 1 is the only one)
       --msgpack[=N]        The same document as MessagePack
@@ -372,6 +389,7 @@ sub parse_options {
       'k|api-key=s'           => \$opt{api_key},
       'o|option=s@'           => \@raw_engine_opts,
       'i|interactive'         => \$opt{interactive},
+      'p|print'               => \$opt{print},
       ( map { $_ => \$machine_flag{$_} } sort keys %MACHINE_FLAG ),
       'max-iterations=i'      => \$opt{max_iterations},
       'no-color'              => \$opt{no_color},
@@ -422,6 +440,11 @@ sub parse_options {
       $self->_warn("--permission-mode, --dangerously-skip-permissions: only one of them at a time\n");
       return;
     }
+  }
+
+  if ($opt{print} && $opt{interactive}) {
+    $self->_warn("-p/--print, -i/--interactive: only one of them at a time\n");
+    return;
   }
 
   my @machine = grep { $machine_flag{$_} } sort keys %MACHINE_FLAG;
@@ -587,7 +610,7 @@ sub run {
   }
   if ($session_cmd) {
     # resume ID is the REPL on that session.
-    for my $flag (grep { $opt->{$_->[0]} } [ machine => 'a machine output format' ],
+    for my $flag (grep { $opt->{$_->[0]} } [ machine => 'a machine output format' ], [ print => '-p/--print' ],
         [ session => '--session' ], [ continue => '--continue' ], [ no_session => '--no-session' ]) {
       $self->_warn('raider session resume: not with '.$flag->[1]."\n");
       return EXIT_USAGE;
@@ -742,7 +765,7 @@ sub run {
   # Default to interactive REPL when stdin is a terminal and no prompt was
   # given on argv / piped in / requested as one-shot machine output.
   my $in = $self->in;
-  my $interactive = $opt->{interactive} || (!$opt->{machine} && !@prompt && -t $in);
+  my $interactive = $opt->{interactive} || (!$opt->{print} && !$opt->{machine} && !@prompt && -t $in);
   $runner = $self->runner_class->new(app => $app, output => $self->output, err => $self->err);
   # --permission-channel (set by the hall for a run of an ACP session): a call
   # the policy asks about is put to the hall, never answered yes by default.
@@ -783,7 +806,7 @@ sub run {
   if (@prompt) {
     $text = join ' ', @prompt;
   }
-  elsif (-t $in) {
+  elsif (-t $in && !$opt->{print}) {
     # Interactive terminal but no -i and no argv: ask once.
     $text = prompt($self->output->c(prompt => 'raider>'));
   }
@@ -795,15 +818,98 @@ sub run {
     $self->_warn("No prompt given.\n");
     return EXIT_USAGE;
   }
-  if ($session) {
-    $self->_warn($_."\n") for @notes;
+  $self->_warn($_."\n") for $session ? @notes : ();
+  # A new session starts with the run -- not for a /command that only reports.
+  my $session_tried;
+  my $session_for = sub {
+    return $session if $session || $session_tried++ || !$store;
+    return $session = $self->new_session($app, $machine);
+  };
+  my %run;
+  if ($text =~ m{\A\s*/}) {
+    my ( $exit, $request ) = $self->oneshot_command($app, $text, session => $session_for);
+    return $exit if defined $exit;
+    ( $text, %run ) = ( $request->{prompt}, map { $_ => $request->{$_} } $runner->run_options );
   }
-  elsif ($store) {
-    $session = $self->new_session($app, $machine);
-  }
-  my $ok = $runner->run_prompt($text, machine => $machine, session => $session, catch_signals => 1);
+  my $ok = $runner->run_prompt($text, %run, machine => $machine, session => scalar $session_for->(), catch_signals => 1);
   $app->shutdown_hooks;   # async hooks end with the run, as with claude -p
   return $ok ? EXIT_OK : EXIT_RUN_ERROR;
+}
+
+=method oneshot_command
+
+    my ( $exit, $request ) = $main->oneshot_command($app, '/review src/App.pm', session => $session_for);
+
+A one-shot prompt that starts with C</> (ADR 0030 E<sect>4), resolved by
+L<Langertha::Raider::CLI::Commands/resolve>. Returns the run request to send
+(L<Langertha::Raider::CLI::Commands/dispatch>) -- or, when nothing is to be
+sent, the exit status:
+
+=over
+
+=item * a path such as C</etc/hosts is broken>: the line as an ordinary prompt;
+
+=item * a user-invocable catalogue entry: its run request; a render that
+aborts is printed on L</err> and gives C<1>;
+
+=item * a built-in that only reports (L</oneshot_report_commands>): its
+report on L</output>, then C<0> -- also with a machine format, where the
+report is the plain text and there is no document;
+
+=item * C</init> (its run request) and C</compact> (acts, then C<0>):
+L</oneshot_run_commands>;
+
+=item * any other built-in: C<2>, it needs the REPL;
+
+=item * an unknown command: C<2>.
+
+=back
+
+C<session> (a code reference) gives the session for
+C<${CLAUDE_SESSION_ID}>, asked only when an entry is rendered.
+
+=method oneshot_report_commands
+
+C<help context skills agents hooks memory permissions config stats metrics
+packs>: the built-ins a one-shot run prints and leaves.
+
+=method oneshot_run_commands
+
+C<init compact>: the built-ins a one-shot run runs.
+
+=cut
+
+sub commands_class { 'Langertha::Raider::CLI::Commands' }
+
+sub oneshot_report_commands { qw( help context skills agents hooks memory permissions config stats metrics packs ) }
+sub oneshot_run_commands    { qw( init compact ) }
+
+sub oneshot_command {
+  my ( $self, $app, $line, %o ) = @_;
+  my $commands = $self->commands_class->new(app => $app, output => $self->output, in => $self->in);
+  my $r = $commands->resolve($line);
+  return ( undef, { prompt => $line } ) if $r->{kind} eq 'prompt';
+  if ($r->{kind} eq 'entry') {
+    my $request = $app->slash_run_request($r->{entry}, $r->{arguments}, session => $o{session});
+    if (defined $request->{error}) {
+      $self->_warn('error: '.$request->{error}."\n");
+      return EXIT_RUN_ERROR;
+    }
+    return ( undef, $request );
+  }
+  if ($r->{kind} eq 'unknown') {
+    $self->_warn('unknown command: /'.$r->{name}."\n");
+    $self->_warn('skills and custom commands not read: '.$r->{catalog_error}."\n") if defined $r->{catalog_error};
+    return EXIT_USAGE;
+  }
+  my $name = $r->{name};
+  unless (grep { $_ eq $name } $self->oneshot_report_commands, $self->oneshot_run_commands) {
+    $self->_warn('/'.$name.": not in a one-shot run, only in the REPL\n");
+    return EXIT_USAGE;
+  }
+  my $result = $commands->dispatch($line);
+  return ( undef, $result ) if ref $result eq 'HASH';
+  return EXIT_OK;
 }
 
 =method resume_session

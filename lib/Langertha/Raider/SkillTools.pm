@@ -31,6 +31,7 @@ tool loads one. Mount it only when the catalogue lists at least one skill.
 
     my $server = Langertha::Raider::SkillTools::build_skill_tools_server(
         skills => $catalogue,   # Langertha::Raider::Context::Skills
+        render => sub { my ( $entry, $args ) = @_; ...; return { text => $text } },  # optional
     );
 
 Returns an L<MCP::Server> with the tool C<skill>. A name the catalogue does
@@ -40,12 +41,21 @@ C<< <tool_use_error>Unknown skill: NAME. Available skills: ...</tool_use_error> 
 -- Claude Code's words and frame, then the listed skills.
 Croaks without C<skills>.
 
+C<render> loads the entry's text: called with the catalogue entry and the
+C<args>, it returns C<< { text => ... } >>, or C<< { error => ... } >> --
+then the tool result is that error and nothing is loaded. The application
+passes L<Langertha::Raider::Application/skill_tool_text>, which renders
+through L<Langertha::Raider::SlashCommand> (ADR 0030 E<sect>2: placeholders
+and C<!`cmd`>). Without it the text is
+L<Langertha::Raider::Context::Skills/tool_text>.
+
 =cut
 
 sub build_skill_tools_server {
   my %args = @_;
   my $skills = $args{skills}
     or croak __PACKAGE__.'::build_skill_tools_server needs skills';
+  my $render = $args{render};
 
   my $server = MCP::Server->new(name => 'raider-skills', version => '1.0');
 
@@ -85,10 +95,12 @@ sub build_skill_tools_server {
       }
       my $args = $in->{args};
       $args = undef if ref $args;
+      my $loaded = $render ? $render->($skill, $args) : { text => $skills->tool_text($skill->{name}, $args) };
+      return $tool->text_result($loaded->{error}, 1) if defined $loaded->{error};
       # As Claude Code: the result only says so, the body is a user message
       # of its own after the tool results (Langertha::Raider, ADR 0026).
       my $result = $tool->text_result('Launching skill: '.$skill->{name});
-      $result->{_meta} = { 'raider/messages' => [ $skills->tool_text($skill->{name}, $args) ] };
+      $result->{_meta} = { 'raider/messages' => [ $loaded->{text} ] };
       return $result;
     },
   );

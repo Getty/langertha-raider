@@ -17,6 +17,7 @@ use Langertha::Raider::Home;
     for my $p (@{ $plugins->plugins }) {
       my @dirs = $plugins->skill_dirs($p);   # each dir holds a SKILL.md
       my @agents = $plugins->agent_dirs($p); # agent dirs and *.md files
+      my @commands = $plugins->command_dirs($p);   # command dirs and *.md files
     }
 
 =head1 DESCRIPTION
@@ -324,10 +325,38 @@ leaves the plugin root is skipped; a path reached twice is returned once.
 
 sub agent_dirs {
   my ( $self, $plugin ) = @_;
+  return $self->_md_paths($plugin, 'agents');
+}
+
+=method command_dirs
+
+    my @paths = $plugins->command_dirs($plugin);   # absolute paths as strings
+
+Where Claude Code finds the commands of one entry of L</plugins> (ADR 0030
+E<sect>1), as L</agent_dirs> for agents: the plugin's F<commands/>, then
+each path of the manifest's C<commands> (a string or a list; the custom
+paths add to F<commands/>, they do not replace it), resolved against the
+plugin root. Each returned path exists and is either a directory, searched
+recursively for F<*.md> (L<Langertha::Raider::Context::Skills>), or one
+F<*.md> file. A path that leaves the plugin root is skipped; a path
+reached twice is returned once. A manifest C<commands> of another shape
+(an object) adds nothing.
+
+=cut
+
+sub command_dirs {
+  my ( $self, $plugin ) = @_;
+  return $self->_md_paths($plugin, 'commands');
+}
+
+# The default directory $key/ of a plugin, then the manifest's $key paths:
+# those that exist inside the plugin root as a directory or an *.md file.
+sub _md_paths {
+  my ( $self, $plugin, $key ) = @_;
   my $root = $self->_normpath($plugin->{root});
-  my $extra = $plugin->{manifest}{agents};
+  my $extra = $plugin->{manifest}{$key};
   $extra = [ $extra ] if defined $extra && !ref $extra;
-  my @paths = ( $root.'/agents' );
+  my @paths = ( $root.'/'.$key );
   push @paths, map { $self->_normpath( m{\A/} ? $_ : $root.'/'.$_ ) }
     grep { defined && !ref } @$extra
     if ref $extra eq 'ARRAY';

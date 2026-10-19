@@ -82,6 +82,11 @@ loaded progressively. **Persona**: tone and working style. **Pack**: a named bun
 skills, persona defaults and *requested* capabilities (called "packs" in code, "persona" in
 Hall/README today).
 
+**Command** (custom command): a Markdown file in a `commands/` directory, run by the person
+as `/name` (ADR 0030). Since Claude Code merged them, commands are skills of kind `command`
+in one catalogue; a skill wins a shared name. **Built-in command**: a `/name` raider itself
+implements (`/help`, `/clear`, …).
+
 **Layout mode**: which project files raider reads — `raider` (a `.raider/` project; the
 Claude layout only with `claude: true`), `claude` (no `.raider/`, but `CLAUDE.md` or
 `.claude/`: read like Claude Code), `native`, or `bare` (ADR 0019). _Avoid_: profile.

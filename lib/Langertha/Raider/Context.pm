@@ -65,6 +65,10 @@ F<.claude/skills> and F<.agents/skills> of the project directory
 (L<Langertha::Raider::Context::Layout/project_dir>), then the skills of
 every installed and enabled plugin as C<plugin:skill>.
 
+=item 4. The command roots (L</command_roots>, ADR 0030 E<sect>1), and in
+the Claude layout the commands of every plugin as C<plugin:name>. A skill
+beats a command of its name, wherever the command stands.
+
 =back
 
 Skills can also arrive during a session: the F<.claude/skills> of a subtree
@@ -302,8 +306,8 @@ sub _build_plugins {
 
 The skill roots in precedence order (see L</DESCRIPTION>), each
 C<< { dir, source, layout } >> as L<Langertha::Raider::Context::Skills/roots>
-takes them. Roots that do not exist are listed too; the catalogue skips
-them.
+takes them, closed by the L</command_roots>. Roots that do not exist are
+listed too; the catalogue skips them.
 
 =cut
 
@@ -359,14 +363,56 @@ sub _build_skill_roots {
     # Nested .claude/skills met while working below root (nested_reminders_for).
     push @roots, @{ $self->_nested_skill_roots };
   }
+  push @roots, $self->command_roots;
   my %seen;
   return [ grep { !$seen{ $self->_real($_->{file} // $_->{dir}).' '.$_->{layout} }++ } @roots ];
+}
+
+=method command_roots
+
+    my @roots = $context->command_roots;
+
+The command roots (ADR 0030 E<sect>1), layout C<commands>, in precedence
+order: F<.raider/commands> of L</root>, then F<~/.raider/commands>; only
+in the Claude layout F<< <claude_home>/commands >>, then
+F<.claude/commands> of the project directory (personal before project, as
+for the Claude skill roots). They close L</skill_roots>: a skill beats a
+command of its name anyway, so only their order among themselves matters.
+None with L</bare>.
+
+=cut
+
+sub command_roots {
+  my ( $self ) = @_;
+  return if $self->bare;
+  my $home_class = $self->home_class;
+  my @roots = ( {
+    dir    => $home_class->project_base(path($self->root)->absolute)->child('commands')->stringify,
+    source => $home_class->dir_name.'/commands',
+    layout => 'commands',
+  } );
+  push @roots, {
+    dir    => $home_class->home_base($self->home)->child('commands')->stringify,
+    source => '~/'.$home_class->dir_name.'/commands',
+    layout => 'commands',
+  } if defined $self->home;
+  if ($self->claude_layout) {
+    if (defined( my $ch = $self->claude_home )) {
+      my $dir = path($ch)->child('commands');
+      push @roots, { dir => $dir->stringify, source => $self->_home_label($dir), layout => 'commands' };
+    }
+    my $project = $self->layout->project_dir;
+    my $dir = $project->child('.claude', 'commands');
+    push @roots, { dir => $dir->stringify, source => $self->_root_label($dir), layout => 'commands', base => $project->stringify };
+  }
+  return @roots;
 }
 
 =attr skill_catalog
 
 The L<Langertha::Raider::Context::Skills> over L</skill_roots> and, in the
-Claude layout, the skill directories of L</plugins>.
+Claude layout, the skill directories and command paths of L</plugins>
+(L<Langertha::Raider::Context::Plugins/command_dirs>).
 
 =method has_listed_skills
 
@@ -396,7 +442,12 @@ sub _build_skill_catalog {
     base      => $self->root,
     activated => $self->_activated_skills,
     plugins   => $plugins
-      ? [ map { { name => $_->{name}, dirs => [ $plugins->skill_dirs($_) ] } } @{ $plugins->plugins } ]
+      ? [ map { {
+          name     => $_->{name},
+          root     => $_->{root},
+          dirs     => [ $plugins->skill_dirs($_) ],
+          commands => [ $plugins->command_dirs($_) ],
+        } } @{ $plugins->plugins } ]
       : [],
   );
 }
@@ -819,7 +870,9 @@ What C<config explain> shows of the context, plain data (JSON-safe):
         hooks       => { PreToolUse => N, ... },         # matcher groups per event
         ignored     => [ { key, source }, ... ],
       },
-      skills          => [ { name, source, listed => 0|1 }, ... ],
+      skills          => [ { name, source, listed => 0|1,
+                             paths => [ ... ],        # only with paths:
+                             kind => 'command' }, ... ],   # only for commands
       shadowed_skills => [ { name, source, by }, ... ],
       skill_problems  => [ { file, reason }, ... ],
       plugins         => [ { name, key, scope }, ... ],
@@ -864,7 +917,7 @@ sub report {
       imports => [ @{ $_->{imports} } ],
     } } $self->instruction_items ],
     ( $self->settings ? ( settings => $self->_settings_report ) : () ),
-    skills          => [ map { my $s = $_; my @paths = $catalog->paths_of($s); +{ name => $s->{name}, source => $s->{source}, listed => $catalog->is_listed($s) ? 1 : 0, ( @paths ? ( paths => [ @paths ] ) : () ) } } $catalog->skills ],
+    skills          => [ map { my $s = $_; my @paths = $catalog->paths_of($s); +{ name => $s->{name}, source => $s->{source}, listed => $catalog->is_listed($s) ? 1 : 0, ( @paths ? ( paths => [ @paths ] ) : () ), ( $s->{kind} eq 'command' ? ( kind => 'command' ) : () ) } } $catalog->skills ],
     shadowed_skills => [ map { { name => $_->{name}, source => $_->{source}, by => $_->{by} } } $catalog->shadowed ],
     skill_problems  => [ map { { file => $_->{file}, reason => $_->{reason} } } $catalog->problems ],
     plugins         => $plugins ? [ map { { name => $_->{name}, key => $_->{key}, scope => $_->{scope} } } @{ $plugins->plugins } ] : [],

@@ -20,6 +20,12 @@ Revision history for Langertha-Raider
       longer glued into the system prompt in full: the prompt lists them,
       the model loads one with the skill tool. See [Claude Code layout and
       skills].
+    - INCOMPATIBLE: a prompt that starts with /NAME is a slash command, also
+      in a one-shot run (ADR 0030): `raider "/foo"` with no command or skill
+      foo is "unknown command" with exit 2 instead of a prompt to the model;
+      a path such as `/etc/hosts is broken` stays a prompt. In command
+      bodies $N counts from 0 as in Claude Code ($0 is the first argument).
+      See [Slash commands like Claude Code].
 
   [Release order]
     - Skilletor 0.001 (the perl/ dist of the skilletor repository) goes to
@@ -205,6 +211,54 @@ Revision history for Langertha-Raider
     - Tests: t/203-t/206, scenarios t/scenarios/130-135;
       Test::Raider::LocalHTTP serves web pages to scenarios (http:), and
       scenario requests check their last messages (tail:).
+
+  [Slash commands like Claude Code]
+    - Custom commands (ADR 0030): .raider/commands and ~/.raider/commands;
+      in the Claude layout also ~/.claude/commands, .claude/commands and
+      the commands of enabled plugins (commands/ and the manifest's
+      "commands"). They join the skill catalogue: subdirectories make
+      namespaces (frontend/component.md is /frontend:component), plugin
+      entries are /plugin:name, a skill beats a command of the same name.
+      The model sees the commands it may invoke in the skill listing and
+      loads them with the skill tool, as skills.
+    - /NAME [ARGS] runs a skill or custom command in the REPL and in a
+      one-shot run; an entry of the catalogue replaces a built-in of the
+      same name, as in Claude Code. Frontmatter: description,
+      argument-hint, allowed-tools (extra allow rules for that run only;
+      deny and ask rules still win), model (that run only, not saved),
+      disable-model-invocation, user-invocable: false (not runnable as
+      /NAME); booleans take yes/no/on/off/1/0.
+    - Rendering like Claude Code (Langertha::Raider::SlashCommand, also
+      for the skill tool): $ARGUMENTS, $ARGUMENTS[N] and $N (0-based,
+      shell-style quoting), named `arguments`, ${CLAUDE_SKILL_DIR},
+      ${CLAUDE_PROJECT_DIR}, ${CLAUDE_SESSION_ID}, ${CLAUDE_PLUGIN_ROOT},
+      \$ for a literal dollar, "ARGUMENTS: ..." appended when no
+      placeholder takes them. !`cmd` and ```! blocks run before the text
+      goes to the model -- only when the permission policy allows them
+      (allowed-tools counts), never asked; deny, ask or a failing command
+      aborts the invocation and nothing is sent. The loadguard gate
+      applies; disableSkillShellExecution in the Claude settings turns it
+      off. @path in a /NAME command attaches the file (counted as read) or
+      directory listing.
+    - New -p / --print: a one-shot run even on a terminal, as claude -p.
+      Report commands (/help, /context, /skills, /agents, /hooks, /memory,
+      /permissions, /config, /stats, /metrics, /packs) print and exit 0,
+      /init and /compact run; the rest is a usage error in a one-shot run.
+    - New built-in commands: /skills, /compact [INSTRUCTIONS], /context,
+      /memory [N] (opens a memory file in $VISUAL / $EDITOR), /agents,
+      /hooks, /init (asks the model to write CLAUDE.md, or the native
+      instructions file), /reset and /new (aliases of /clear). /help lists
+      the skills and custom commands with their argument hints.
+    - Langertha::Raider compress_history(_f) takes focus instructions, and
+      forgets the last prompt size afterwards, so the next raid does not
+      compress the summary again. New Langertha::Raider override_engine:
+      an engine for one run, returns the code that puts the previous one
+      back (the `model:` of a /NAME run).
+    - Langertha::Raider::Permissions has run rules (add_run_rules,
+      clear_run_rules): allow rules for the current run, cleared when it
+      ends.
+    - Tests t/260-t/266, scenarios 190-194; the scenario harness sends
+      /NAME prompts as slash commands.
 
   [Status]
     - Marked as in development (POD and README): a developer release, not yet

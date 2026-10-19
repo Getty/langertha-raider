@@ -23,22 +23,26 @@ use Langertha::Raider::Context::Frontmatter;
 
 B<Internal module.> Its interface may change without notice.
 
-The skill catalogue of ADR 0019 §4. It takes skill roots in precedence
-order and the skill directories of plugins, and knows every skill's name,
-description and body. Which roots exist in which layout mode is the
-caller's decision; this module only reads what it is given. A root or
-skill directory that does not exist is skipped silently.
+The skill catalogue of ADR 0019 §4, which holds the custom commands too
+(ADR 0030 E<sect>1: commands are skills). It takes roots in precedence
+order and the skill directories and command paths of plugins, and knows
+every entry's name, description and body. Which roots exist in which
+layout mode is the caller's decision; this module only reads what it is
+given. A root or skill directory that does not exist is skipped silently.
 
-A skill is a plain hash ref:
+An entry -- a skill or a command -- is a plain hash ref:
 
     {
-      name            => 'pdf',               # the identifier the model calls
+      name            => 'pdf',               # the identifier the model calls, /pdf for the user
+      kind            => 'skill',             # or 'command' (a commands root or plugin commands)
       description     => 'Work with PDF files ...',
-      dir             => '/abs/skills/pdf',   # base directory
+      dir             => '/abs/skills/pdf',   # base directory; a command's: the directory of its file
       file            => '/abs/skills/pdf/SKILL.md',
       source          => '.claude/skills',    # root label, or 'plugin superpowers'
       frontmatter     => { name => 'pdf', description => '...', ... },   # every key kept
       model_invocable => 1,                   # 0 iff disable-model-invocation is true
+      user_invocable  => 1,                   # 0 iff user-invocable is false
+      plugin_root     => '/abs/plugin',       # plugin entries only: ${CLAUDE_PLUGIN_ROOT}
     }
 
 =over
@@ -46,8 +50,17 @@ A skill is a plain hash ref:
 =item * B<Name.> In the C<skills> layout the skill directory's name, as
 Claude Code uses it as the identifier. A frontmatter C<name> that differs
 stays in C<frontmatter> but does not rename the skill. In the C<flat>
-layout the file name without F<.md>. Plugin skills are
-C<E<lt>pluginE<gt>:E<lt>dirE<gt>>.
+layout the file name without F<.md>. In the C<commands> layout the file's
+path below the root without F<.md>, directories joined with C<:>
+(F<frontend/component.md> is C<frontend:component>). Plugin skills are
+C<E<lt>pluginE<gt>:E<lt>dirE<gt>>, plugin commands
+C<E<lt>pluginE<gt>:E<lt>nameE<gt>> (C<plugin:sub:name> below a
+subdirectory).
+
+=item * B<Booleans.> C<disable-model-invocation> and C<user-invocable>
+take C<true> / C<yes> / C<on> / C<1> and C<false> / C<no> / C<off> /
+C<0>, in any case. Unset, C<disable-model-invocation> is false and
+C<user-invocable> true.
 
 =item * B<Description.> The frontmatter C<description> (whitespace
 collapsed), else the first non-empty line of the body that is not a
@@ -60,17 +73,20 @@ booleans for C<disable-model-invocation> and C<user-invocable>). Only when
 that finds no key either, or the YAML is not a mapping, the frontmatter is
 empty and L</problems> gets an entry; the skill is still loaded.
 
-=item * B<Precedence.> Roots in the given order, then plugins. The first
-skill of a name wins; later ones are reported by L</shadowed>. Plugin
-names carry a C<:>, so they never meet a root skill.
+=item * B<Precedence.> Roots in the given order, then plugins (each
+plugin's skills, then its commands). The first entry of a name wins;
+later ones are reported by L</shadowed>. One exception: a skill beats a
+command of the same name wherever either came from -- the command is
+shadowed (Claude Code). Plugin names carry a C<:>, so they never meet a
+root skill (a root command in a subdirectory can).
 
 =back
 
 =attr roots
 
-Skill roots, highest precedence first. Required. Each a hash ref:
+Roots, highest precedence first. Required. Each a hash ref:
 
-    { dir => '/abs/dir', source => 'label', layout => 'skills' | 'flat' }
+    { dir => '/abs/dir', source => 'label', layout => 'skills' | 'flat' | 'commands' }
 
 C<skills>: a directory of skill directories, each with a F<SKILL.md>.
 C<flat>: a directory of F<*.md> files, each one skill (the old
@@ -79,6 +95,10 @@ skills.
 C<file>: one skill file (the hash has C<file>; C<dir> is its
 parent): named by its file name without F<.md>; a file that is not there
 is a L<problem|/problems>.
+C<commands>: a directory searched recursively for F<*.md> (hidden entries
+skipped), each one command (C<kind> C<command>), named as above.
+
+A root may name its own C<base> (see L</base>).
 
 =cut
 
@@ -90,9 +110,20 @@ has roots => (
 
 =attr plugins
 
-Plugin skill directories, after all roots. Defaults to none. Each a hash
-ref C<< { name => 'plugin', dirs => [ '/abs/skill/dir', ... ] } >> -- the
-name and L<Langertha::Raider::Context::Plugins/skill_dirs> of a plugin.
+Plugin skill directories and command paths, after all roots. Defaults to
+none. Each a hash ref
+
+    {
+      name     => 'plugin',
+      dirs     => [ '/abs/skill/dir', ... ],              # Plugins->skill_dirs
+      commands => [ '/abs/commands', '/abs/x.md', ... ],  # Plugins->command_dirs, optional
+      root     => '/abs/plugin',                          # optional, becomes plugin_root
+    }
+
+-- the name, L<Langertha::Raider::Context::Plugins/skill_dirs>,
+L<Langertha::Raider::Context::Plugins/command_dirs> and root of a plugin.
+A command path is a directory, read like a C<commands> root, or one
+F<*.md> file, named by its file name.
 
 =cut
 
@@ -145,11 +176,24 @@ sub _build__catalog {
   $self->_scan_root(\%cat, $_) for @{ $self->roots };
 
   for my $plugin (@{ $self->plugins }) {
+    my %common = (
+      source => 'plugin '.$plugin->{name},
+      base   => $self->base,
+      ( defined $plugin->{root} ? ( plugin_root => path($plugin->{root})->absolute->stringify ) : () ),
+    );
     for my $d (@{ $plugin->{dirs} // [] }) {
       my $sd = path($d)->absolute;
       next unless -f $sd->child('SKILL.md');
-      $self->_add(\%cat, $plugin->{name}.':'.$sd->basename, $sd->child('SKILL.md'), $sd,
-        'plugin '.$plugin->{name}, $self->base);
+      $self->_add(\%cat, %common, name => $plugin->{name}.':'.$sd->basename,
+        file => $sd->child('SKILL.md'), dir => $sd, kind => 'skill');
+    }
+    for my $c (@{ $plugin->{commands} // [] }) {
+      my $p = path($c)->absolute;
+      my @found = -d $p ? $self->_commands_in($p)
+        : -f $p && $p->basename =~ /\.md\z/ ? ( [ $p->basename(qr/\.md\z/), $p ] )
+        : ();
+      $self->_add(\%cat, %common, name => $plugin->{name}.':'.$_->[0],
+        file => $_->[1], dir => $_->[1]->parent, kind => 'command') for @found;
     }
   }
   return \%cat;
@@ -157,11 +201,12 @@ sub _build__catalog {
 
 sub _scan_root {
   my ( $self, $cat, $root ) = @_;
-  my $pbase = $root->{base} // $self->base;
+  my %common = ( source => $root->{source}, base => $root->{base} // $self->base );
   if (($root->{layout} // '') eq 'file') {
     my $file = path($root->{file})->absolute;
     if (-f $file) {
-      $self->_add($cat, $file->basename(qr/\.md\z/), $file, $file->parent, $root->{source}, $pbase);
+      $self->_add($cat, %common, name => $file->basename(qr/\.md\z/), file => $file,
+        dir => $file->parent, kind => 'skill');
     }
     else {
       push @{ $cat->{problems} }, { file => $file->stringify, reason => 'skill file not found' };
@@ -172,6 +217,11 @@ sub _scan_root {
   return unless defined $dir && -d $dir;
   my $base = path($dir)->absolute;
   my $layout = $root->{layout} // 'skills';
+  if ($layout eq 'commands') {
+    $self->_add($cat, %common, name => $_->[0], file => $_->[1], dir => $_->[1]->parent,
+      kind => 'command') for $self->_commands_in($base);
+    return;
+  }
   my @found;
   if ($layout eq 'flat') {
     @found = map { [ $_->basename(qr/\.md\z/), $_, $base ] }
@@ -181,18 +231,48 @@ sub _scan_root {
     @found = map { [ $_->basename, $_->child('SKILL.md'), $_ ] }
       grep { -d $_ && -f $_->child('SKILL.md') } $base->children;
   }
-  $self->_add($cat, @$_, $root->{source}, $pbase) for sort { $a->[0] cmp $b->[0] } @found;
+  $self->_add($cat, %common, name => $_->[0], file => $_->[1], dir => $_->[2], kind => 'skill')
+    for sort { $a->[0] cmp $b->[0] } @found;
   return;
 }
 
+# The command files below $dir, each [ name, file ], sorted by name: every
+# *.md at any depth (hidden entries skipped, each real directory once),
+# named by its path below $dir without .md, directories joined with ':'.
+sub _commands_in {
+  my ( $self, $dir ) = @_;
+  return sort { $a->[0] cmp $b->[0] } $self->_walk_commands($dir, {});
+}
+
+sub _walk_commands {
+  my ( $self, $dir, $seen, @prefix ) = @_;
+  my $real = eval { $dir->realpath->stringify } // $dir->stringify;
+  return if $seen->{$real}++;
+  my @found;
+  for my $child (grep { $_->basename !~ /\A\./ } eval { $dir->children }) {
+    if (-d $child) {
+      push @found, $self->_walk_commands($child, $seen, @prefix, $child->basename);
+    }
+    elsif (-f $child && $child->basename =~ /\.md\z/) {
+      push @found, [ join(':', @prefix, $child->basename(qr/\.md\z/)), $child ];
+    }
+  }
+  return @found;
+}
+
+# One entry into the catalogue: name, file, dir (Path::Tiny), kind, source,
+# base and plugin_root. The first of a name wins -- but a skill beats a
+# command of its name whatever came first; the command is then shadowed.
 sub _add {
-  my ( $self, $cat, $name, $file, $dir, $source, $base ) = @_;
-  if (my $winner = $cat->{by_name}{$name}) {
+  my ( $self, $cat, %e ) = @_;
+  my ( $name, $file, $kind ) = @e{qw( name file kind )};
+  my $loser = $cat->{by_name}{$name};
+  if ($loser && !( $kind eq 'skill' && $loser->{kind} eq 'command' )) {
     push @{ $cat->{shadowed} }, {
       name   => $name,
-      source => $source,
+      source => $e{source},
       file   => $file->stringify,
-      by     => $winner->{source},
+      by     => $loser->{source},
     };
     return;
   }
@@ -201,20 +281,33 @@ sub _add {
     push @{ $cat->{problems} }, { file => $file->stringify, reason => 'unreadable' };
     return;
   }
+  if ($loser) {
+    @{ $cat->{skills} } = grep { $_ != $loser } @{ $cat->{skills} };
+    delete $cat->{$_}{$name} for qw( by_name body base );
+    push @{ $cat->{shadowed} }, {
+      name   => $name,
+      source => $loser->{source},
+      file   => $loser->{file},
+      by     => $e{source},
+    };
+  }
   my ( $fm, $body ) = $self->_split($text, $file, $cat->{problems});
   my $skill = {
     name            => $name,
+    kind            => $kind,
     description     => $self->_description($fm, $body),
-    dir             => $dir->stringify,
+    dir             => $e{dir}->stringify,
     file            => $file->stringify,
-    source          => $source,
+    source          => $e{source},
     frontmatter     => $fm,
     model_invocable => $self->_is_true($fm->{'disable-model-invocation'}) ? 0 : 1,
+    user_invocable  => $self->_is_false($fm->{'user-invocable'}) ? 0 : 1,
+    ( defined $e{plugin_root} ? ( plugin_root => $e{plugin_root} ) : () ),
   };
   push @{ $cat->{skills} }, $skill;
   $cat->{by_name}{$name} = $skill;
   $cat->{body}{$name} = $body;
-  $cat->{base}{$name} = $base if defined $base;
+  $cat->{base}{$name} = $e{base} if defined $e{base};
   return;
 }
 
@@ -251,7 +344,10 @@ sub _description {
   return '';
 }
 
-# YAML true: a boolean object, or the plain true/yes/1 a schema may leave.
+# Frontmatter booleans: a boolean object, Perl's own (YAML::PP reads true as
+# 1 and false as ''), or the words a schema leaves as strings --
+# true/yes/on/1 and false/no/off/0, any case. Unset or anything else is
+# neither.
 sub _is_true {
   my ( $self, $v ) = @_;
   return 0 unless defined $v;
@@ -259,20 +355,29 @@ sub _is_true {
   return $v =~ /\A(?:true|yes|on|1)\z/i ? 1 : 0;
 }
 
+sub _is_false {
+  my ( $self, $v ) = @_;
+  return 0 unless defined $v;
+  return $v ? 0 : 1 if ref $v;
+  return $v =~ /\A(?:false|no|off|0|)\z/i ? 1 : 0;
+}
+
 =method skills
 
     for my $s ($skills->skills) { say $s->{name}.' ('.$s->{source}.')' }
 
-Every skill that won its name, in precedence order: roots in the given
-order, sorted by name inside a root, then the plugins in the given order.
-Model-invocable or not.
+Every entry (skill or command) that won its name, in precedence order:
+roots in the given order, sorted by name inside a root, then the plugins
+in the given order. Model- or user-invocable or not. A skill that took
+its name from a command stands where the skill was read.
 
 =method shadowed
 
     for my $s ($skills->shadowed) { say $s->{name}.' in '.$s->{source}.' shadowed by '.$s->{by} }
 
-Skills that lost their name to an earlier one, each
-C<< { name, source, file, by } >> -- C<by> is the winner's C<source>.
+Entries that lost their name to an earlier one, or commands that lost it
+to a skill, each C<< { name, source, file, by } >> -- C<by> is the
+winner's C<source>.
 
 =method problems
 
@@ -302,6 +407,30 @@ sub find {
   $name =~ s{\A/}{};
   return $self->_catalog->{by_name}{$name};
 }
+
+=method find_user_invocable
+
+    my $entry = $skills->find_user_invocable('/frontend:component');
+
+The entry a user runs as C</name>: L</find>, but only an entry with
+C<user_invocable>; C<undef> otherwise. Commands and skills alike, also
+those that are not model-invocable.
+
+=method user_invocable
+
+    for my $e ($skills->user_invocable) { say '/'.$e->{name} }
+
+The L</skills> with C<user_invocable>, in catalogue order.
+
+=cut
+
+sub find_user_invocable {
+  my ( $self, $name ) = @_;
+  my $entry = $self->find($name) or return;
+  return $entry->{user_invocable} ? $entry : undef;
+}
+
+sub user_invocable { grep { $_->{user_invocable} } $_[0]->skills }
 
 =method listed
 
@@ -357,8 +486,9 @@ sub paths_of {
     my @new = $skills->add_roots({ dir => ..., source => ..., layout => 'skills', base => ... });
 
 Reads more roots into the catalogue, after everything it holds: a name
-that is known keeps its skill (the new one is L</shadowed>). Returns the
-skills that are new. Nested F<.claude/skills> found while working in a
+that is known keeps its entry (the new one is L</shadowed>) -- unless the
+known one is a command and the new one a skill. Returns the entries that
+are new. Nested F<.claude/skills> found while working in a
 subtree come in this way.
 
 =method activate_for
@@ -373,10 +503,10 @@ base) as L</activated>, and returns those that were not activated before.
 sub add_roots {
   my ( $self, @roots ) = @_;
   my $cat = $self->_catalog;
-  my %had = map { $_->{name} => 1 } @{ $cat->{skills} };
+  my %had = map { ( "$_" => 1 ) } @{ $cat->{skills} };
   push @{ $self->roots }, @roots;
   $self->_scan_root($cat, $_) for @roots;
-  return grep { !$had{ $_->{name} } } @{ $cat->{skills} };
+  return grep { !$had{"$_"} } @{ $cat->{skills} };
 }
 
 sub activate_for {
@@ -448,10 +578,18 @@ C<undef> for an unknown name:
 
     <body>
 
+A command (C<kind> C<command>) has no C<Base directory> line: its text is
+the body alone (ADR 0030 E<sect>2).
+
 Every C<$ARGUMENTS> in the body is replaced by C<$args>; without C<$args>
 (undefined or empty) by nothing, as Claude Code does. When the body has no
 C<$ARGUMENTS> and C<$args> is given, C<ARGUMENTS: $args> is appended after
 a blank line.
+
+This is the plain text without a renderer. The application's C<skill> tool
+renders through L<Langertha::Raider::SlashCommand> instead
+(L<Langertha::Raider::Application/skill_tool_text>, ADR 0030 E<sect>2):
+every placeholder and C<!`cmd`>, the same shape.
 
 =cut
 
@@ -468,6 +606,7 @@ sub tool_text {
     $body =~ s/\s+\z//;
     $body .= "\n\nARGUMENTS: ".$value;
   }
+  return $body if ( $skill->{kind} // '' ) eq 'command';
   return 'Base directory for this skill: '.$skill->{dir}."\n\n".$body;
 }
 

@@ -70,7 +70,11 @@ our @EXPORT_OK = qw( run_scenario_files );
 #   review:  [ yes | no | 'no: feedback', ... ]  the person reviewing plans of
 #            exit_plan_mode, in order (without the key nobody reviews)
 #   prompt:  the user prompt (or `prompts:`, a list run one after the other on
-#            the same raider, so the conversation carries over)
+#            the same raider, so the conversation carries over). A prompt
+#            `/NAME ARGS` that names a user-invocable skill or custom command
+#            runs as raider's /NAME (ADR 0030): Application->slash_run_request,
+#            then run_prompt with its run options; a render that aborts sends
+#            nothing and gives the outcome { status: 'not sent', error }
 #   between: { N => { files => {...}, home => {...}, remove => [ path, ... ], remove_home => [...], reload => true } }
 #            done before prompt N (0-based): files written or removed in the
 #            root (or the home), then with reload the application reads its
@@ -194,6 +198,16 @@ sub run_scenario_file {
       }
       my $p = $prompts[$i];
       $answer = eval {
+        # /NAME ARGS of a user-invocable catalogue entry: raider's /NAME run.
+        if ( $p =~ m{\A/(\S+)\s*(.*?)\s*\z}s
+             && ( my $req = $app->slash_run_request( $1, length $2 ? $2 : undef ) ) ) {
+          if ( defined $req->{error} ) {
+            $outcome = { status => 'not sent', error => $req->{error} };
+            return undef;
+          }
+          $outcome = $app->run_prompt( delete $req->{prompt}, %$req );
+          return $outcome->{response};
+        }
         return '' . $app->run($p) unless $s->{run_prompt};
         $outcome = $app->run_prompt($p);
         return $outcome->{response};

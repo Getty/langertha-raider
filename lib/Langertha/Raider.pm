@@ -283,6 +283,7 @@ has _last_prompt_tokens => (
   is => 'rw',
   isa => 'Int',
   predicate => 'has_last_prompt_tokens',
+  clearer   => '_clear_last_prompt_tokens',
 );
 
 has _injections => (
@@ -1044,6 +1045,32 @@ Switches back to the default engine (the one passed at construction).
 
 =cut
 
+sub override_engine {
+  my ( $self, $engine ) = @_;
+  my @was = $self->_has_active_engine ? ( $self->_active_engine ) : ();
+  $self->_active_engine($engine);
+  $self->_tools_dirty(1);
+  return sub {
+    @was ? $self->_active_engine($was[0]) : $self->_clear_active_engine;
+    $self->_tools_dirty(1);
+  };
+}
+
+=method override_engine
+
+    my $restore = $raider->override_engine($engine);
+    ...                                  # raids run on $engine
+    $restore->();                        # back to the engine before
+
+Makes C<$engine>, which need not be in the C<engine_catalog>, the active
+engine until the returned CodeRef is called. Calling it puts back the
+engine that was active before (a C<switch_engine> choice or the default).
+Both ways the tools are re-gathered for the engine on the next iteration;
+C<active_engine_name> is left as it is. For a temporary engine, such as
+the model of one run.
+
+=cut
+
 sub engine_info {
   my ($self) = @_;
   my $engine = $self->active_engine;
@@ -1131,17 +1158,24 @@ the catalog.
 =cut
 
 async sub compress_history_f {
-  my ( $self ) = @_;
+  my ( $self, %opt ) = @_;
   my @history = @{$self->history};
   return unless @history;
 
   my $engine = $self->has_compression_engine
     ? $self->compression_engine : $self->engine;
 
+  # Focus instructions (/compact INSTRUCTIONS) follow the request, as Claude
+  # Code appends them to its compaction prompt.
+  my $ask = 'Provide a concise summary.';
+  my $instructions = $opt{instructions};
+  $ask .= "\n\nAdditional instructions:\n".$instructions
+    if defined $instructions && $instructions =~ /\S/;
+
   my @messages = (
     { role => 'system', content => $self->compression_prompt },
     @history,
-    { role => 'user', content => 'Provide a concise summary.' },
+    { role => 'user', content => $ask },
   );
 
   my $request = $engine->chat_request(\@messages);
@@ -1168,6 +1202,11 @@ async sub compress_history_f {
     { role => 'assistant', content => $summary },
   ]);
 
+  # The last prompt size measured the history just replaced; kept, it would
+  # compress the summary again before the next raid. The next response
+  # reports the new size.
+  $self->_clear_last_prompt_tokens;
+
   # Mark compression event in session_history — through the pusher, so the
   # marker gets its embedding slot like every other message.
   $self->_push_session_history({
@@ -1181,10 +1220,19 @@ async sub compress_history_f {
 =method compress_history_f
 
     my $summary = await $raider->compress_history_f;
+    my $summary = await $raider->compress_history_f( instructions => 'Keep the API decisions' );
 
 Async. Summarizes the current working history via LLM and replaces it
 with the summary. Uses C<compression_engine> if set, otherwise falls
-back to C<engine>. A marker is added to C<session_history>.
+back to C<engine>. A marker is added to C<session_history>. Returns the
+summary; with an empty history nothing, and no request is sent. The last
+prompt size (what C<max_context_tokens> is checked against) is forgotten,
+so the next raid does not compress the summary again; the next response
+reports the new size.
+
+C<instructions> (optional) focus the summary: they are appended to the
+summary request after C<Additional instructions:>, as Claude Code's
+C</compact INSTRUCTIONS> does. Without them the request is unchanged.
 
 The summary is read through the engine's public C<chat_response> (the parser
 L<Langertha::Role::Chat/chat_f> uses), so an error carried in a 200 body croaks
@@ -1195,15 +1243,16 @@ C<response_text_content>.
 =cut
 
 sub compress_history {
-  my ( $self ) = @_;
-  return $self->compress_history_f->get;
+  my ( $self, %opt ) = @_;
+  return $self->compress_history_f(%opt)->get;
 }
 
 =method compress_history
 
     my $summary = $raider->compress_history;
+    my $summary = $raider->compress_history( instructions => 'Keep the API decisions' );
 
-Synchronous wrapper around C<compress_history_f>.
+Synchronous wrapper around C<compress_history_f>, with the same arguments.
 
 =cut
 

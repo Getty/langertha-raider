@@ -192,7 +192,16 @@ and raider warns about the other.
 |--------------------------|------------------------------------------------------|
 | `/help`                  | Command list                                         |
 | `/clear`                 | Reset conversation history and token counters        |
-| `/metrics`               | Cumulative raid metrics                              |
+| `/reset`                 | Same as `/clear`                                     |
+| `/new`                   | Same as `/clear`                                     |
+| `/compact [TEXT]`        | Summarise the history now, TEXT says what to keep    |
+| `/context`               | Context by part with estimated tokens                |
+| `/memory [N]`            | Instruction files; `/memory N` edits one             |
+| `/skills`                | Skills and custom commands with their sources        |
+| `/agents`                | Agents the agent tool can start                      |
+| `/hooks`                 | Configured hooks by event                            |
+| `/init`                  | Model writes or improves the instructions file       |
+| `/metrics`             | Cumulative raid metrics                              |
 | `/stats`                 | Tokens in / out / total this session                 |
 | `/reload`                | Re-read the instructions file, hot-swap the mission  |
 | `/prompt`                | Launch the prompt-builder (edits the instructions)   |

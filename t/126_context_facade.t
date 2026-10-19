@@ -70,7 +70,9 @@ subtest 'skill roots: explicit, native, Claude, plugins -- the first name wins' 
     [ mixed => 'skills' ], [ mixed => 'flat' ], [ globbed => 'flat' ], [ "$p/tree" => 'skills' ],
     [ '.raider/skills' => 'skills' ], [ '~/.raider/skills' => 'skills' ], [ '~/.claude/skills' => 'skills' ],
     [ '.claude/skills' => 'skills' ], [ '.agents/skills' => 'skills' ],
-  ], 'roots in ADR 0019 §4 order');
+    [ '.raider/commands' => 'commands' ], [ '~/.raider/commands' => 'commands' ],
+    [ '~/.claude/commands' => 'commands' ], [ '.claude/commands' => 'commands' ],
+  ], 'roots in ADR 0019 §4 order, the command roots of ADR 0030 last');
   is(names($c), [
     'dirskill', 'flatskill', 'onlyflat', 'treeskill',
     'dup', 'proj-native', 'home-native', 'user-claude', 'proj-claude', 'agents-skill',
