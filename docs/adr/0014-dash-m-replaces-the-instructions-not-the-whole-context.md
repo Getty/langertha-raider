@@ -55,3 +55,10 @@ With ADR 0011 the project instructions file is `.raider/instructions.md`; legacy
 `.raider.md` is read when the new file is absent. Wherever this ADR says `.raider.md`,
 read "the project instructions file". The reported instructions source is `-M`,
 `.raider/instructions.md`, `.raider.md` or `default`.
+
+## Update (2026-10-19, karr #151)
+
+In the Claude Code layout (ADR 0019) the `CLAUDE.md` memory items are separate context items;
+`-M` does not replace them, as Claude Code's `--system-prompt` keeps `CLAUDE.md`. `--bare`
+reads no layout at all. "Loaded skills" are no longer part of the prompt as full text: the
+prompt lists them, the `skill` tool loads one.

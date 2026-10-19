@@ -42,3 +42,11 @@ automatically and home context not to bleed into projects (and vice versa).
 ## Source
 
 Proposal: `docs/RAIDER-REDESIGN-HANDOFF.md` §2 (4, 5), §4.
+
+## Update (2026-10-19, karr #151)
+
+ADR 0019 adds the Claude Code layout: in a project set up for Claude Code (no `.raider/`, but
+`CLAUDE.md` / `.claude/`) the `CLAUDE.md` hierarchy, `@` imports, `CLAUDE.local.md`, nested
+`CLAUDE.md` and `.claude/settings*.json` are read without `--claude`. The one-time trust
+decision of this ADR is still not implemented; until it is, the Claude layout loads like the
+native instructions file does, and hooks are only read.

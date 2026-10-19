@@ -48,6 +48,8 @@ follow symbolic links out of the root). C<todo_write> keeps a list in the state 
 the run and has no effect outside it. C<ask_user> is C<message>, like
 C<raider_ask_user>: it puts a question to a person.
 
+C<skill> is C<read>: it returns a skill file from the local skill directories.
+
 =cut
 
 my %EFFECTS = (
@@ -61,6 +63,8 @@ my %EFFECTS = (
   # run state
   todo_write             => [],
   ask_user               => [qw( message )],
+  # skills
+  skill                  => [qw( read )],
   # shell
   bash                   => [qw( code )],
   # web

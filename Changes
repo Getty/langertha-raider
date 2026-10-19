@@ -29,6 +29,15 @@ Revision history for Langertha-Raider
       and the expectations `events:`, `questions:` and `todos:`. Unit tests
       t/110 (tool names), t/111 (search tools, Perl and ripgrep alike), t/112
       (todo, ask, REPL) and t/114 (loadguard).
+    - Every scenario runs with a fresh temporary $HOME and no
+      $CLAUDE_CONFIG_DIR (`home:` files, `{{HOME}}` / `{{ROOT}}` in
+      contents, `app:` arguments). Claude layout scenarios: CLAUDE.md with an
+      import, user memory and CLAUDE.local.md, a raider project with and
+      without claude: true, a skill listed and loaded by the skill tool, a
+      skill hidden by disable-model-invocation, nested CLAUDE.md on the first
+      read, a plugin skill, settings env seen by bash, native .raider/skills,
+      and bare reading nothing. isolate_home() of the test library also
+      clears $CLAUDE_CONFIG_DIR, so no test reads the real ~/.claude.
     - t/201_remote_session.t: a session on another agent -- an ACP client opens a
       session on a hall in its own process, the hall spawns a real raider on
       `-e mock`, and the answer and the tool's file come back from the remote side.
@@ -103,6 +112,51 @@ Revision history for Langertha-Raider
       binary, whose $^X is no usable interpreter, and return a tool error
       saying so when there is none. The lib's perl-version marker records
       the version of the perl that uses the lib, not the packed one.
+
+  [Claude Code layout and skills]
+    - Raider decides once per run which layout it reads (ADR 0019): a project
+      with .raider/ (or a legacy .raider.yml / .raider.md) is a raider
+      project; one with only CLAUDE.md, CLAUDE.local.md or .claude/ (in it or
+      up to the repository top) is in Claude mode and is read like Claude Code
+      reads it, without any flag; anything else is native, and so is the home
+      directory itself. --bare reads no layout. config explain and the REPL
+      banner show the mode and what decided it.
+    - In the Claude layout raider reads the CLAUDE.md hierarchy as Claude
+      Code does: ~/.claude/CLAUDE.md, then CLAUDE.md (or AGENTS.md where a
+      level has none) and CLAUDE.local.md of every directory from the
+      repository top down to the working directory, each file its own
+      prompt item; @path imports are expanded (5 levels, not in code). A
+      CLAUDE.md below the working directory is appended to the result of
+      the first file tool that touches its subtree, once per session. -M
+      replaces only the persona and the raider instructions file, never
+      the Claude memory.
+    - The Claude settings are read too (~/.claude/settings.json,
+      .claude/settings.json, .claude/settings.local.json): their env is set
+      for the tools and their subprocesses, enabledPlugins picks the
+      installed Claude Code plugins whose skills are offered; permissions and
+      hooks are only read and shown, not applied yet. A broken settings file
+      is reported, never fatal; config explain lists the files, rule counts,
+      env names (never values), hook events and unused keys.
+    - Changed: --claude is now the switch for the Claude layout (also in a
+      raider project) and is saved as claude: true in the project config,
+      not as skills: [claude] (which still means the same when read). In a
+      Claude-mode project nothing is saved any more, so no .raider.yml
+      appears there. --openai / --codex load AGENTS.md as an instructions
+      item; skills: entries of type: file are no longer read.
+    - Changed: skills are no longer glued into the system prompt in full.
+      The prompt lists every skill as "name: description" (frontmatter), and
+      the model loads one with the new skill tool, which returns its body
+      with "Base directory for this skill: DIR" and $ARGUMENTS filled in.
+      Skills come from --skills DIR and skills: directories (*/SKILL.md and
+      flat *.md), .raider/skills, ~/.raider/skills and, in the Claude layout,
+      ~/.claude/skills, .claude/skills, .agents/skills and enabled plugins
+      (as plugin:skill; a plugin installed both for the user and for the
+      project is loaded once, the project install first); the first of a
+      name wins, the others are reported as shadowed.
+      disable-model-invocation: true hides a skill from the model. A
+      frontmatter YAML rejects but Claude Code reads (an unquoted ": " in a
+      description) is read line by line as key: value, so such a skill keeps
+      its description.
 
   [CLI and REPL]
     - bin/raider is a thin wrapper around internal

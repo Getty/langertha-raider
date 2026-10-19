@@ -197,6 +197,7 @@ LOGO
     $repl->banner($readline_impl);
 
 Prints the logo and the live configuration: mission source, profiles,
+layout mode (ADR 0019) and the memory files it loads, the listed
 skills, packs, ignored agent files, engine, model, API key, root.
 
 =cut
@@ -235,9 +236,17 @@ sub banner {
     $line->('profiles: ', join(', ', map { $_.($self->saved_profiles->{$_} ? ' (saved)' : '') } @profiles));
   }
 
+  my $context = $app->context;
+  my $layout = $context->layout;
+  $line->('layout:   ', $layout->mode.' ('.$layout->reason.')'
+    .( $context->claude_layout && $layout->mode ne 'claude' ? ', Claude layout on ('.$layout->claude_layout_reason.')' : '' ));
+  if (my @memory = $context->instruction_items) {
+    $line->('memory:   ', join(', ', map { $_->{label} } @memory));
+  }
+
   my @skills = $app->loaded_skill_names;
   $line->('skills:   ', @skills
-    ? sprintf('%d loaded (%s)', scalar @skills, join(', ', @skills))
+    ? sprintf('%d listed (%s)', scalar @skills, join(', ', @skills))
     : 'none');
 
   my @active_packs = @{$app->packs->active_pack_names};

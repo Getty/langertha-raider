@@ -207,17 +207,25 @@ and raider warns about the other.
 | `/pack NAME`             | Toggle a pack                                        |
 | `/quit` `/exit` `:q`     | Leave                                                |
 
-## Loading project skills
+## Instructions, layout and skills
 
-Profile flags preload per-tool agent files into the mission and persist
-themselves to the config file after first use:
+A project with only Claude Code files (`CLAUDE.md`, `CLAUDE.local.md`,
+`.claude/`) is read like Claude Code reads it: the `CLAUDE.md` hierarchy
+with its imports, `.claude/settings*.json` (its `env` is applied), the
+Claude skill directories and the skills of enabled plugins. A project with
+`.raider/` reads it only with `claude: true` in its config. Skills are
+listed in the prompt as `name: description` and loaded on demand by the
+`skill` tool. These flags persist themselves to the config file after
+first use:
 
-- `--claude` — loads `CLAUDE.md` and any `.claude/skills/*/SKILL.md`.
+- `--claude` — read the Claude Code layout also in a raider project
+  (saved as `claude: true`).
 - `--openai` / `--codex` — loads `AGENTS.md`.
-- `--skills DIR` — extra plain-markdown directory (repeatable).
+- `--skills DIR` — extra skill directory, `*/SKILL.md` or plain `*.md`
+  (repeatable).
 
-When a well-known file is present but its profile isn't active, the startup
-banner shows a `seeing FILE, ignoring (use --<profile> to load)` hint.
+When a well-known file is present but not loaded, the startup banner shows
+a `seeing FILE, ignoring (use --<profile> to load)` hint.
 
 ## Engine options via the config file
 

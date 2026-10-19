@@ -145,9 +145,9 @@ Options:
   -M, --mission TEXT       Replace the persona and the instructions file
                            (.raider/instructions.md, else .raider.md; skills,
                            packs and the tool descriptions still apply)
-      --bare               Isolated context: no instructions file, skills,
-                           packs:, default packs or detection (--pack NAME and
-                           /pack NAME still work)
+      --bare               Isolated context: no instructions file, Claude
+                           layout, skills, packs:, default packs or detection
+                           (--pack NAME and /pack NAME still work)
   -i, --interactive        REPL mode (default on a TTY with no prompt / pipe)
       --json[=N]           Print one JSON document for the run and exit
       --msgpack[=N]        The same document as MessagePack
@@ -167,9 +167,10 @@ Options:
       --no-pack NAME       Switch a pack off (also a detected/default one)
       --no-detect          Do not activate packs by workspace detection
                            (--detect forces it on over detect: false)
-      --claude             Load CLAUDE.md + .claude/skills/*/SKILL.md
+      --claude             Read the Claude Code layout (CLAUDE.md, settings,
+                           Claude skills) also in a .raider/ project
       --openai / --codex   Load AGENTS.md
-      --skills DIR         Load *.md from DIR as skills (repeatable)
+      --skills DIR         Offer DIR's skills (*/SKILL.md or *.md; repeatable)
       --customize-prompt   Launch the prompt-builder at startup
       --export-skill [PATH]        Write a "how to use raider" markdown doc, exit
       --export-claude-skill [PATH] Write a Claude Code SKILL.md, exit
@@ -555,11 +556,37 @@ eval, and reports what it installed. It never loops. (Note that `perl -c` runs
   own packs go into `.raider/packs/<name>/` of the project, `~/.raider/packs/<name>/`
   or a directory listed in `RAIDER_PACK_DIRS`; a `pack.yml` may set
   `exclusive_group`, `enabled_by_default`, `tools: [perl]` and a `detect:` rule.
-- A **skill** is know-how — instructions and maybe resources — loaded into the
-  mission. `--claude` loads `CLAUDE.md` and `.claude/skills/*/SKILL.md`,
-  `--openai`/`--codex` loads `AGENTS.md`, and `--skills DIR` loads plain markdown
-  from a directory. These persist to `.raider.yml` on first use (the banner shows
-  `(saved)`), so they load automatically next time.
+- A **skill** is know-how — instructions and maybe resources — loaded on demand,
+  as in Claude Code: the prompt lists every skill as `name: description`, and the
+  model loads one with the `skill` tool, which returns its body and its base
+  directory. Skills come from `--skills DIR` / `skills:` directories,
+  `.raider/skills/` and `~/.raider/skills/`, and in the Claude layout (below) also
+  from `~/.claude/skills/`, `.claude/skills/`, `.agents/skills/` and the enabled
+  Claude Code plugins (as `plugin:skill`). A skill with
+  `disable-model-invocation: true` is not offered. `--openai`/`--codex` loads
+  `AGENTS.md`. `--claude`, `--openai` and `--skills` persist to `.raider.yml` on
+  first use (the banner shows `(saved)`) — `--claude` as `claude: true`.
+
+### Claude Code projects
+
+raider reads a project the way it was set up (ADR 0019):
+
+- **`.raider/` present** — a raider project: `.raider/config.yml` and
+  `.raider/instructions.md` apply; the Claude layout only with `claude: true` (or
+  `--claude`).
+- **no `.raider/`, but `CLAUDE.md` or `.claude/`** — Claude mode: raider reads the
+  project like Claude Code does. `~/.claude/CLAUDE.md`, every `CLAUDE.md` and
+  `CLAUDE.local.md` from the repository top down to the working directory (a level
+  without `CLAUDE.md` uses its `AGENTS.md`), `@path` imports inside them, and a
+  nested `CLAUDE.md` below the working directory the first time a tool touches that
+  subtree. `~/.claude/settings.json`, `.claude/settings.json` and
+  `.claude/settings.local.json` are merged: `env` is applied to the tools,
+  `enabledPlugins` selects plugin skills, `permissions` and `hooks` are read (not
+  enforced yet).
+- **neither** — raider-native, as before.
+
+`raider config explain` shows the mode and why, the memory files, the settings
+files and what was ignored in them, and every skill with its source.
 
 Packs can also **activate by workspace detection** (ADR 0012): the bundled `perl`
 pack turns its Perl tools on when it detects a Perl workspace (`cpanfile`,

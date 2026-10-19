@@ -28,6 +28,13 @@ use Langertha::Raider::Loadguard;
 #   env:     { LOADGUARD_* => value }   the environment of that gate
 #   ask:     [ answer, ... ]            the person at the keyboard; ask_user gets these in order
 #            (without the key nobody can answer)
+#   home:    { path => content }        written to the home: every scenario runs
+#            with $HOME at a fresh temporary directory and no
+#            $CLAUDE_CONFIG_DIR, so none sees the real ~/.raider or ~/.claude;
+#            %ENV is restored after each scenario. In the content of both,
+#            {{HOME}} and {{ROOT}} stand for the two directories.
+#   app:     { argument => value }      more arguments for the application
+#            (e.g. bare: 1, claude: 1)
 #   prompt:  the user prompt (or `prompts:`, a list run one after the other on
 #            the same raider, so the conversation carries over)
 #   script:  the model's answers, one per request:
@@ -61,8 +68,14 @@ for my $file (@files) {
   my $name = path($file)->basename;
   subtest "$name: " . ( $s->{title} // '' ) => sub {
     skip_all $s->{skip} if $s->{skip};
-    my $root = Path::Tiny->tempdir;
-    $root->child($_)->touchpath->spew_utf8( $s->{files}{$_} ) for keys %{ $s->{files} // {} };
+    local %ENV = %ENV;
+    my @tmp  = ( Path::Tiny->tempdir, Path::Tiny->tempdir );   # held: removed at the end
+    my ( $root, $home ) = map { $_->realpath } @tmp;
+    $ENV{HOME} = "$home";
+    delete $ENV{CLAUDE_CONFIG_DIR};
+    my $fill = sub { ( my $t = $_[0] ) =~ s/\{\{HOME\}\}/$home/g; $t =~ s/\{\{ROOT\}\}/$root/g; $t };
+    $root->child($_)->touchpath->spew_utf8( $fill->( $s->{files}{$_} ) ) for keys %{ $s->{files} // {} };
+    $home->child($_)->touchpath->spew_utf8( $fill->( $s->{home}{$_} ) ) for keys %{ $s->{home} // {} };
 
     for my $path ( keys %{ $s->{age} // {} } ) {
       my $t = time - $s->{age}{$path};
@@ -75,7 +88,7 @@ for my $file (@files) {
     }
     my @answers = @{ $s->{ask} // [] };
     my $app = mock_app(
-      root => "$root", script => $s->{script} // [], @gate,
+      root => "$root", script => $s->{script} // [], @gate, %{ $s->{app} // {} },
       on_event => sub { my ( $type, %p ) = @_; push @events, { type => $type, %p } },
       $s->{ask} ? ( on_ask_user => sub { push @questions, { question => $_[0], options => $_[1] }; shift @answers } ) : (),
     );

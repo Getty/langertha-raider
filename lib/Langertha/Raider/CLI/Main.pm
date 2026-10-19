@@ -20,6 +20,7 @@ use Langertha::Raider::CLI::Runner;
 use Langertha::Raider::CLI::Sessions;
 use Langertha::Raider::Config;
 use Langertha::Raider::Config::Migrate;
+use Langertha::Raider::Context::Layout;
 use Langertha::Raider::Hall::CLI;
 use Langertha::Raider::Provider::Binding;
 use Langertha::Raider::SessionStore;
@@ -157,6 +158,7 @@ has in => (
 
 sub app_class     { 'Langertha::Raider::CLI' }
 sub config_class  { 'Langertha::Raider::Config' }
+sub layout_class  { 'Langertha::Raider::Context::Layout' }
 sub migrate_class { 'Langertha::Raider::Config::Migrate' }
 sub machine_class { 'Langertha::Raider::CLI::Machine' }
 sub provider_class { 'Langertha::Raider::CLI::Provider' }
@@ -269,11 +271,16 @@ Options:
       --no-detect          Do not activate packs by workspace detection
                            (--detect forces it on over detect: false)
       --customize-prompt   Launch the prompt-builder at startup
-      --claude             Load Claude Code layout: CLAUDE.md +
-                           .claude/skills/*/SKILL.md.
+      --claude             Read the Claude Code layout (CLAUDE.md memory,
+                           .claude/settings*.json, Claude skills) also in
+                           a raider project; saved as claude: true.
+                           A project with only Claude files reads it
+                           anyway.
       --openai / --codex   Load AGENTS.md (the OpenAI Codex / cross-tool
                            convention).
-      --skills DIR         Load *.md files from DIR as skills (repeatable).
+      --skills DIR         Offer the skills in DIR (*/SKILL.md or *.md;
+                           repeatable), loaded on demand by the skill
+                           tool.
       --export-skill [PATH]
                            Write a plain-markdown "how to use raider" doc
                            (default: ./RAIDER-SKILL.md) and exit.
@@ -631,30 +638,37 @@ sub run {
     $args{provider} = $activation;
   }
 
-  my ( @skill_specs, @cli_profiles );
+  # --claude is the layout switch (ADR 0019); --openai and --skills DIR are
+  # skills: items, as the config file holds them.
+  my ( @skill_items, @cli_profiles );
   if ($opt->{profile_claude}) {
-    push @skill_specs, @{ $Langertha::Raider::CLI::AGENT_PROFILES{claude} };
+    $args{claude} = 1;
     push @cli_profiles, 'claude';
   }
   if ($opt->{profile_openai}) {
-    push @skill_specs, @{ $Langertha::Raider::CLI::AGENT_PROFILES{openai} };
+    push @skill_items, 'openai';
     push @cli_profiles, 'openai';
   }
-  my @persist_skills = @cli_profiles;
+  my @persist_skills = @skill_items;
   for my $dir (@{ $opt->{skill_dirs} }) {
     my $spec = { type => 'dir', path => $dir };
-    push @skill_specs, $spec;
+    push @skill_items, $spec;
     # A directory named like a profile keyword is saved as a spec, so it is
     # not read back as that profile.
     push @persist_skills, ($dir =~ /\A(?:claude|openai|codex|agents)\z/ ? $spec : $dir);
   }
-  $args{cli_skill_sources} = \@skill_specs if @skill_specs;
+  $args{cli_skill_sources} = \@skill_items if @skill_items;
 
-  # Persist --claude / --openai / --skills to the config file so the user doesn't
-  # need to retype them every invocation. Track which profiles were freshly
-  # persisted this run for the banner "(saved)" hint.
-  my %saved_now = $config_cmd ? ()
-    : map { $_ => 1 } grep { !ref } $config->add_skills(@persist_skills);
+  # Persist --claude (as claude: true) / --openai / --skills to the config file
+  # so the user doesn't need to retype them every invocation. Track which
+  # profiles were freshly persisted this run for the banner "(saved)" hint.
+  # A project with only Claude files reads the Claude layout anyway; a raider
+  # file written there would turn it into a raider project, so nothing is.
+  my %saved_now;
+  if (!$config_cmd && $self->layout_class->new(root => $config->root)->mode ne 'claude') {
+    $saved_now{claude} = 1 if $opt->{profile_claude} && $config->enable_claude;
+    $saved_now{$_} = 1 for grep { !ref } $config->add_skills(@persist_skills);
+  }
 
   # Unknown engine or an invalid detection rule: stop before anything runs.
   my $app = $self->app_class->new(%args);
@@ -713,7 +727,8 @@ sub run {
       in               => $in,
       runner           => $runner,
       $store ? ( session_store => $store ) : (),
-      active_profiles  => [ grep { !$seen{$_}++ } @cli_profiles, $config->profiles($app->engine_name) ],
+      active_profiles  => [ grep { !$seen{$_}++ } @cli_profiles,
+        ( $config->options($app->engine_name)->{claude} ? 'claude' : () ), $config->profiles($app->engine_name) ],
       saved_profiles   => \%saved_now,
       customize_prompt => $opt->{customize_prompt} ? 1 : 0,
       $session ? ( session => $session ) : (),

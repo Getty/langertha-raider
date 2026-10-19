@@ -41,6 +41,17 @@ nothing when there is no home at all.
 
 F<.raider> under the given project root.
 
+=method claude_home
+
+    my $dir = Langertha::Raider::Home->claude_home;          # ~/.claude
+    my $dir = Langertha::Raider::Home->claude_home($home);   # <home>/.claude
+
+The Claude Code configuration directory (ADR 0019):
+C<$ENV{CLAUDE_CONFIG_DIR}> when it is set and not empty, else F<.claude>
+under the given home, by default under L</home_dir>. Returns nothing when
+there is neither. The one place the readers of the Claude layout
+(L<Langertha::Raider::Context> and its parts) take it from.
+
 =cut
 
 sub home_dir { $ENV{HOME} // (getpwuid($<))[7] }
@@ -57,6 +68,15 @@ sub home_base {
 sub project_base {
   my ( $self, $root ) = @_;
   return $self->_base($root);
+}
+
+sub claude_home {
+  my ( $self, $home ) = @_;
+  my $dir = $ENV{CLAUDE_CONFIG_DIR};
+  return path($dir)->absolute if defined $dir && length $dir;
+  $home //= $self->home_dir;
+  return unless defined $home;
+  return path($home)->absolute->child('.claude');
 }
 
 sub _base { path($_[1])->absolute->child($_[0]->dir_name) }

@@ -73,6 +73,13 @@ loaded progressively. **Persona**: tone and working style. **Pack**: a named bun
 skills, persona defaults and *requested* capabilities (called "packs" in code, "persona" in
 Hall/README today).
 
+**Layout mode**: which project files raider reads — `raider` (a `.raider/` project; the
+Claude layout only with `claude: true`), `claude` (no `.raider/`, but `CLAUDE.md` or
+`.claude/`: read like Claude Code), `native`, or `bare` (ADR 0019). _Avoid_: profile.
+
+**Memory** (Claude layout): the `CLAUDE.md` hierarchy with its imports, as Claude Code
+calls it. Not the assistant's long-term memory.
+
 **Detection rule**: declarative `must` / `may` / `must_not` conditions on files and their
 content that activate a pack when the workspace matches (ADR 0012). Activates, never grants.
 _Avoid_: profile (taken, see above).

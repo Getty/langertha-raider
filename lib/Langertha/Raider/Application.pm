@@ -19,9 +19,11 @@ use Langertha::Raider::SearchTools;
 use Langertha::Raider::TodoTools;
 use Langertha::Raider::AskTools;
 use Langertha::Raider::Loadguard;
+use Langertha::Raider::SkillTools qw( build_skill_tools_server );
 use Langertha::Raider::Packs     qw( build_packs );
 use Langertha::Raider::Config;
 use Langertha::Raider::Instructions;
+use Langertha::Raider::Context;
 use Langertha::Raider::Detect;
 use Langertha::Raider::EngineResolver;
 use Langertha::Raider::Provider::Binding;
@@ -185,15 +187,20 @@ has api_key => (
 =attr mission
 
 System prompt of the Raider, compiled from separate items (ADR 0004,
-ADR 0014): the instructions (a generic assistant persona plus the project
-instructions file, L</instructions>), the tool description, the loaded
-skills and the active packs. The tool description lists the tools of the mounted tool servers
+ADR 0014, ADR 0019), in this order: the instructions (a generic assistant
+persona plus the project instructions file, L</instructions>); the context
+items of L</context> (the Claude memory files, F<AGENTS.md> of
+C<--openai>, the listing of the skills as C<name: description> --
+L<Langertha::Raider::Context/prompt_items>); the tool description; the
+active packs. Skill bodies are not in it: the model loads one with the
+C<skill> tool. The tool description lists the tools of the mounted tool servers
 -- the same servers the engine gets -- each as C<name(required, [optional])>
 from its input schema (ADR 0005); a tool that is not mounted is not
 described. A C<mission> passed to the constructor (C<-M>) replaces the
-instructions item only, also across L</reload_mission>; the other items
-still apply. With L</bare> the skills, the instructions file and all packs not
-switched on by C<--pack> or C</pack> are left out.
+instructions item only, also across L</reload_mission>; the other items,
+the Claude memory included, still apply. With L</bare> the context items,
+the instructions file and all packs not switched on by C<--pack> or
+C</pack> are left out.
 
 =cut
 
@@ -215,7 +222,8 @@ has _explicit_mission => (
 =attr bare
 
 C<--bare>: an isolated context. No instructions file (F<.raider.md>,
-F<.raider/instructions.md>), no skills, no pack
+F<.raider/instructions.md>), no layout (no Claude memory, settings or
+plugins, layout mode C<bare>), no skills, no pack
 detection, and no packs from C<packs:> or C<enabled_by_default>;
 C<--pack NAME> and C</pack NAME> still switch a pack on explicitly. What
 remains is the instructions (the default persona, or the C<-M> text) and
@@ -229,13 +237,71 @@ has bare => (
   default => 0,
 );
 
+=attr claude
+
+C<--claude>: read the Claude Code layout (ADR 0019) in every layout mode
+but C<bare>, whatever the configuration says. Without it, C<claude:> in
+F<.raider.yml> (or the legacy C<skills: [claude]>) switches it on in a
+raider project; a project with only Claude files is in Claude mode anyway.
+
+=cut
+
+has claude => (
+  is      => 'ro',
+  isa     => 'Bool',
+  default => 0,
+);
+
+=attr context
+
+The L<Langertha::Raider::Context> of L</root> (ADR 0019): layout mode,
+the Claude memory, settings and plugins, the F<AGENTS.md> item and the
+skill catalogue, from L</claude>, C<claude:> of the configuration,
+L</skill_sources> and L</bare>. Built once; building it sets the C<env> of
+the Claude settings in the process environment
+(L<Langertha::Raider::Context/apply_env>), before any tool runs.
+
+=cut
+
+has context => (
+  is       => 'ro',
+  isa      => 'Langertha::Raider::Context',
+  init_arg => undef,
+  lazy     => 1,
+  builder  => '_build_context',
+);
+
+sub context_class { 'Langertha::Raider::Context' }
+
+sub _build_context {
+  my ($self) = @_;
+  my @profiles = $self->_skill_profiles;
+  my $claude = $self->_load_yml_options->{claude};
+  $claude = 1 if !defined $claude && grep { $_ eq 'claude' } @profiles;
+  my $context = $self->context_class->new(
+    root           => $self->root,
+    bare           => $self->bare ? 1 : 0,
+    force_claude   => $self->claude ? 1 : 0,
+    config_claude  => $claude,
+    skill_specs    => $self->skill_sources,
+    want_agents_md => ( grep { $_ eq 'openai' } @profiles ) ? 1 : 0,
+  );
+  $context->apply_env;
+  return $context;
+}
+
+# The profile keywords (claude, openai) of the skills: items of the config
+# file, -o skills= and the command line.
+sub _skill_profiles {
+  my ($self) = @_;
+  return $self->config->profiles($self->engine_name,
+    @{ $self->_cli_app_options->{skills} // [] },
+    $self->has_cli_skill_sources ? @{ $self->cli_skill_sources } : ());
+}
+
 sub _build_mission {
   my ($self) = @_;
-  my @items = ( $self->_instructions_text, $self->_tools_text );
-
-  my @skills = $self->_load_skill_texts;
-  push @items, "Loaded skills (domain knowledge the user enabled for this session):\n\n"
-    .join("\n\n", @skills)."\n" if @skills;
+  my @items = ( $self->_instructions_text, $self->context->prompt_items, $self->_tools_text );
 
   my @pack_texts = $self->packs->skill_texts;
   push @items, "Active packs:\n\n".join("\n\n", @pack_texts)."\n" if @pack_texts;
@@ -314,10 +380,12 @@ You have no yield / ask / abort tool. Task done: plain text reply. User
 answers in the next turn.
 EOM
 
-# Points at the instructions file in use (.raider.md in a legacy project).
+# Points at the instructions file in use (.raider.md in a legacy project,
+# CLAUDE.md in a Claude project, both when a raider project reads the
+# Claude layout).
 sub _persona_body {
   my ($self) = @_;
-  my $label = $self->instructions->label;
+  my $label = $self->_instructions_label;
   return <<"EOM";
 Name, persona, tone are defaults. User can rename you, rewrite your
 background, or change persona entirely via C<$label> in working dir.
@@ -335,6 +403,13 @@ How you work:
     user explicit ask.
 
 EOM
+}
+
+sub _instructions_label {
+  my ($self) = @_;
+  my $label = $self->instructions->label;
+  return $label if $self->bare || !$self->context->claude_layout;
+  return $self->context->mode eq 'claude' ? 'CLAUDE.md' : $label.' or CLAUDE.md';
 }
 
 =attr root
@@ -778,15 +853,18 @@ has context_compress_threshold => (
 
 =attr skill_sources
 
-ArrayRef of skill-source specs to load and append to the mission. Each spec
-is a hashref:
+ArrayRef of the explicit skill directories, the first skill roots of
+L</context> (ADR 0019 E<sect>4). Each spec is a hashref:
 
-    { type => 'claude', path => '.claude/skills' }  # Claude Code SKILL.md tree
-    { type => 'dir',    path => 'my-skills', glob => '*.md' }
+    { type => 'claude', path => 'some/skills' }      # */SKILL.md skill directories
+    { type => 'dir',    path => 'my-skills', glob => '*.md' }   # flat *.md skills
+    { type => 'dir',    path => 'my-skills' }        # both
 
 Defaults to the C<skills> entries of F<.raider.yml> (see
-L<Langertha::Raider::Config>) followed by L</cli_skill_sources>. Passing
-C<skill_sources> explicitly replaces both. With L</bare> there are none.
+L<Langertha::Raider::Config/normalize_skill_spec>), then C<-o skills=>,
+then L</cli_skill_sources>. Passing C<skill_sources> explicitly replaces
+them. With L</bare> there are none. The skills are listed in the mission
+and loaded by the model with the C<skill> tool, not glued in.
 
 =cut
 
@@ -799,15 +877,17 @@ has skill_sources => (
 
 =attr cli_skill_sources
 
-ArrayRef of skill-source specs from the command line (C<--claude>,
-C<--openai>, C<--skills DIR>). They are added to the F<.raider.yml> skills,
-duplicates dropped.
+ArrayRef of C<skills:> items from the command line: C<openai> for
+C<--openai> / C<--codex> (F<AGENTS.md> as an instructions item) and
+C<< { type => 'dir', path => DIR } >> for each C<--skills DIR>. They are
+added to the F<.raider.yml> skills, duplicates dropped. C<--claude> is
+L</claude>.
 
 =cut
 
 has cli_skill_sources => (
   is        => 'ro',
-  isa       => 'ArrayRef[HashRef]',
+  isa       => 'ArrayRef',
   predicate => 'has_cli_skill_sources',
 );
 
@@ -871,53 +951,6 @@ sub _build_skill_sources {
     @{ $self->_cli_app_options->{skills} // [] },
     $self->has_cli_skill_sources ? @{$self->cli_skill_sources} : (),
   ) ];
-}
-
-sub _load_skill_texts {
-  my ($self) = @_;
-  my @out;
-  for my $spec (@{$self->skill_sources}) {
-    my $type = $spec->{type} // 'dir';
-    my $rel  = $spec->{path};
-    next unless defined $rel && length $rel;
-    my $base = Path::Tiny::path($rel);
-    $base = Path::Tiny::path($self->root)->child($rel) unless $base->is_absolute;
-    next unless $type eq 'file' || -d $base;
-
-    my @files;
-    if ($type eq 'file') {
-      # Single markdown file — $base is that file, not a directory.
-      my $f = Path::Tiny::path($rel);
-      $f = Path::Tiny::path($self->root)->child($rel) unless $f->is_absolute;
-      next unless -f $f;
-      @files = ($f);
-    }
-    elsif ($type eq 'claude') {
-      # Claude layout: $base/<skill>/SKILL.md
-      for my $dir ($base->children) {
-        next unless -d $dir;
-        my $f = $dir->child('SKILL.md');
-        push @files, $f if -f $f;
-      }
-    }
-    else {
-      my $glob = $spec->{glob} // '*.md';
-      push @files, $base->children(qr/\Q$glob\E$/);
-      # Fallback: recurse if nothing matched at the top level
-      if (!@files) {
-        @files = grep { -f $_ && /\.md$/ } $base->children;
-      }
-    }
-
-    for my $f (sort @files) {
-      my $name = $type eq 'claude' ? $f->parent->basename : $f->basename;
-      my $body = eval { $f->slurp_utf8 } // next;
-      # Strip YAML frontmatter if present.
-      $body =~ s/\A---\s*\n.*?\n---\s*\n//s;
-      push @out, "### Skill: $name\n\n$body";
-    }
-  }
-  return @out;
 }
 
 =attr engine_options
@@ -985,6 +1018,7 @@ has _tool_servers => (is => 'ro', lazy => 1, builder => '_build_tool_servers', p
 has _stock_tool_servers => (is => 'ro', lazy => 1, builder => '_build_stock_tool_servers');
 has _perl_tool_server   => (is => 'ro', lazy => 1, builder => '_build_perl_tool_server');
 has _hall_tool_server   => (is => 'ro', lazy => 1, builder => '_build_hall_tool_server');
+has _skill_tool_server  => (is => 'ro', lazy => 1, builder => '_build_skill_tool_server');
 
 sub _build_api_key { $_[0]->engine_resolver->api_key }
 
@@ -1008,7 +1042,15 @@ sub _build_tool_servers {
     @{ $self->_stock_tool_servers },
     ( $self->perl_tools_enabled ? $self->_perl_tool_server : () ),
     ( $self->_hall_tool_server // () ),
+    ( $self->_skill_tool_server // () ),
   ];
+}
+
+# The skill tool (ADR 0019 §4), when the context lists a skill.
+sub _build_skill_tool_server {
+  my ($self) = @_;
+  return unless $self->context->has_listed_skills;
+  return build_skill_tools_server(skills => $self->context->skill_catalog);
 }
 
 sub _build_stock_tool_servers {
@@ -1128,8 +1170,10 @@ sub _raider_plugins {
   # The rule-driven test engine (-e mock) matches the prompt word for word, so
   # it gets the prompt as typed, without the [situation] line and its clock.
   my $virtual = $self->engine_resolver->engine_class eq 'Langertha::Engine::Virtual';
-  # Events last, so it reports the tool calls that actually run.
+  # Events last, so it reports the tool calls that actually run -- and the
+  # results as the model gets them, nested CLAUDE.md files included.
   return ( ( $virtual ? () : '+Langertha::Raider::Plugin::Situation' ),
+    ( $self->context->claude_layout ? ( '+Langertha::Raider::Plugin::NestedMemory', { context => $self->context } ) : () ),
     '+Langertha::Raider::Plugin::Events', { on_event => sub { $app->event(@_) if $app } } );
 }
 
@@ -1386,39 +1430,15 @@ sub raider { $_[0]->_raider }
 
 =method loaded_skill_names
 
-Returns a list of skill names currently discoverable from the configured
-L</skill_sources>. Intended for banner/status display.
+    my @names = $app->loaded_skill_names;   # ('pdf', 'superpowers:brainstorming')
+
+The names of the skills the mission lists and the C<skill> tool loads
+(L<Langertha::Raider::Context::Skills/listed>), in precedence order. For
+the banner and status display.
 
 =cut
 
-sub loaded_skill_names {
-  my ($self) = @_;
-  my @names;
-  for my $spec (@{$self->skill_sources}) {
-    my $type = $spec->{type} // 'dir';
-    my $rel  = $spec->{path};
-    next unless defined $rel && length $rel;
-    my $base = Path::Tiny::path($rel);
-    $base = Path::Tiny::path($self->root)->child($rel) unless $base->is_absolute;
-    if ($type eq 'file') {
-      push @names, $base->basename if -f $base;
-      next;
-    }
-    next unless -d $base;
-    if ($type eq 'claude') {
-      for my $dir (sort $base->children) {
-        next unless -d $dir;
-        push @names, $dir->basename if -f $dir->child('SKILL.md');
-      }
-    }
-    else {
-      for my $f (sort $base->children) {
-        push @names, $f->basename if -f $f && $f =~ /\.md$/;
-      }
-    }
-  }
-  return @names;
-}
+sub loaded_skill_names { map { $_->{name} } $_[0]->context->skill_catalog->listed }
 
 =attr session_store
 
@@ -1584,7 +1604,7 @@ L</explain_config>, L</perl_tools_grant>, L</detection_state>,
 L</mission_source> and the pack sources. The keys are C<engine>,
 C<model>, C<api_key>, C<engine_options>, C<engine_options packs>,
 C<pack_names>, C<no_pack_names>, C<perl>, C<detect>, C<no_detect>,
-C<bare>, C<mission> and C<cli_skill_sources>. A surface names its own
+C<bare>, C<mission>, C<claude> and C<cli_skill_sources>. A surface names its own
 way of setting them in L</source_labels>; without, the label is the key.
 
 =method source_labels
@@ -1609,7 +1629,7 @@ Where each effective setting came from, constructor arguments included.
 The shape of L<Langertha::Raider::Config/explain>, with C<source> (and
 C<shadowed>) naming an argument by its L</source_label> (the command line
 names its flags: C<-e>, C<-m>, C<-k>, C<-o>, C<--pack>, C<--perl>,
-C<--claude/--openai/--skills>), a layer of the config file by its
+C<--claude>, C<--openai/--skills>), a layer of the config file by its
 L<Langertha::Raider::Config/label> (C<.raider.yml>, C<.raider.yml default:>,
 C<.raider/config.yml openai:>), a layer of the home file
 F<~/.raider/config.yml> (C<home>, C<home default:>, C<home openai:>), an
@@ -1634,6 +1654,17 @@ C<instructions> is L</mission_source> and C<bare> is L</bare>.
 C<ignored_instructions_files> are the instructions files that are present
 but not used (L<Langertha::Raider::Instructions/ignored_files>): a legacy
 F<.raider.md> next to F<.raider/instructions.md>.
+
+C<layout>, C<memory>, C<settings> (only in the Claude layout), C<skills>,
+C<shadowed_skills>, C<skill_problems> and C<plugins> are
+L<Langertha::Raider::Context/report> of L</context>: the layout mode and
+what decided it, the memory files with their imports, the Claude settings
+(their files, counts of the permission rules, the names -- never the
+values -- of the C<env> keys, the enabled plugins, the hook events, the
+keys raider does not use), every skill with its root and whether it is
+listed, the skills shadowed by an earlier one of the same name, broken
+skill files, and the enabled plugins. C<claude> is among C<values> when
+set: by L</claude>, C<claude:> or C<-o claude=>.
 
 C<tools> lists the mounted tools, each with its C<name>, its C<source>
 (C<engine:N>) and C<effects>: what it can do, from a static built-in table
@@ -1709,6 +1740,7 @@ sub explain_config {
   my %flag = (
     ( $self->has_pack_names ? ( packs => [ $self->source_label('pack_names'), $self->pack_names ] ) : () ),
     ( $explicit->{perl} && $self->perl ? ( perl => [ $self->source_label('perl'), 1 ] ) : () ),
+    ( $self->claude ? ( claude => [ $self->source_label('claude'), 1 ] ) : () ),
     ( $self->has_detect_flag
       ? ( detect => [ $self->source_label($self->detect ? 'detect' : 'no_detect'), $self->detect ? 1 : 0 ] ) : () ),
   );
@@ -1761,6 +1793,7 @@ sub explain_config {
     perl_tools    => $self->perl_tools_grant,
     tools         => $self->_tool_effects_report,
     ignored_instructions_files => [ $self->instructions->ignored_files ],
+    %{ $self->context->report },
   };
 }
 

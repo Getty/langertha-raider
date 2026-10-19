@@ -56,4 +56,21 @@ engine: openai
 OUT
 };
 
+subtest 'config report: the skill name column fits the longest name' => sub {
+  my ( $out, $read ) = output();
+  $out->config_report({
+    file => '/x/.raider.yml', exists => 1, engine => 'openai', values => [], ignored => [],
+    skills => [
+      { name => 'pdf', source => '.claude/skills', listed => 1 },
+      { name => 'mattpocock-skills:improve-codebase-architecture', source => 'plugin mattpocock-skills', listed => 1 },
+      { name => 'deploy', source => '.claude/skills', listed => 0 },
+    ],
+  });
+  my @rows = grep { /^  \S/ } split /\n/, $read->();
+  is(scalar @rows, 3, 'one row per skill');
+  is([ map { index($_, ' listed') > 0 ? index($_, ' listed') : index($_, ' hidden') } @rows ],
+    [ (2 + 47) x 3 ], 'the state column lines up behind the longest name (47 characters)');
+  like($rows[2], qr/^  deploy +hidden    \.claude\/skills; disable-model-invocation$/, 'hidden row');
+};
+
 done_testing;

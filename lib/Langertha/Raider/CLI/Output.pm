@@ -156,11 +156,19 @@ setting with its value, source, what it was merged with, what it overrides
 and whether it applies to the engine or to raider; the instructions source (C<-M>,
 C<.raider/instructions.md>, C<.raider.md>, C<default>) with C<(bare)> under
 C<--bare>, and any instructions file ignored next to the one in use (a
-legacy F<.raider.md> beside F<.raider/instructions.md>); each pack with its state, the
+legacy F<.raider.md> beside F<.raider/instructions.md>); the layout mode
+(ADR 0019) with what decided it and whether the Claude layout is read, and
+each memory file with its scope and imports; each pack with its state, the
 kind of place it was found in (C<project>, C<home>, C<shipped>, C<env>)
 and why it is on or off; the pack directories that were skipped, and why; the perl tools grant; and
 each mounted tool with its source and effect classes (C<unknown> for a tool
-the built-in table does not know); and, when F<~/.raider/config.yml> has a
+the built-in table does not know); each skill with its state (C<listed>,
+or C<hidden> for C<disable-model-invocation>) and root, the shadowed skills
+and the broken skill files; in the Claude layout the settings -- each file
+(read, not present, or its error), the permission rule counts and default
+mode, the names of the C<env> keys (never their values), the hook events
+with their group counts, the enabled plugins and the keys raider does not
+use -- and the plugins whose skills are offered; and, when F<~/.raider/config.yml> has a
 C<project_tools>, each of its selectors (matched or not, and why) and each
 tool name with the selectors granting it, the packs requesting it and
 whether raider knows it -- information only; and, when the home file has
@@ -184,6 +192,16 @@ sub config_report {
     $self->c(meta => $report->{bare} ? ' (bare)' : ''), "\n") if defined $report->{instructions};
   for my $ign (@{ $report->{ignored_instructions_files} // [] }) {
     $self->emit('  ', $self->c(warn => 'ignored file '.$ign->{file}.': '.$ign->{reason}), "\n");
+  }
+  if (my $l = $report->{layout}) {
+    $self->emit($self->c(meta => 'layout: '), $self->c(title => $l->{mode}),
+      $self->c(meta => ' ('.$l->{reason}.'); Claude layout '
+        .( $l->{claude_layout} ? 'on' : 'off' ).' ('.$l->{claude_layout_reason}.')'), "\n");
+    $self->emit('  ', $self->c(meta => 'project dir: '), $l->{project_dir}, "\n") if defined $l->{project_dir};
+  }
+  for my $m (@{ $report->{memory} // [] }) {
+    $self->emit('  ', $self->c(meta => 'memory '), $self->c(title => $m->{label}),
+      $self->c(meta => ' ('.$m->{scope}.( @{ $m->{imports} } ? ', imports '.join(', ', @{ $m->{imports} }) : '' ).')'), "\n");
   }
   for my $v (@{ $report->{values} }) {
     my $value = ref $v->{value} ? $json->encode($v->{value}) : $v->{value} // '';
@@ -220,6 +238,45 @@ sub config_report {
       $self->emit(sprintf("  %s %-10s  %s\n", $self->c(title => sprintf('%-22s', $t->{name})), $t->{source},
         $self->c(meta => !$fx ? 'unknown' : @$fx ? join(', ', @$fx) : 'none')));
     }
+  }
+  if (my $skills = $report->{skills}) {
+    $self->emit($self->c(meta => 'skills: '), $self->c(meta => '(listed in the prompt, loaded by the skill tool)'), "\n")
+      if @$skills || @{ $report->{shadowed_skills} // [] } || @{ $report->{skill_problems} // [] };
+    # The name column as wide as the longest name (plugin:skill names run long).
+    my ( $width ) = sort { $b <=> $a } 22, map { length $_->{name} } @$skills;
+    for my $s (@$skills) {
+      $self->emit(sprintf("  %s %-8s  %s\n", $self->c(title => sprintf('%-'.$width.'s', $s->{name})),
+        $s->{listed} ? 'listed' : 'hidden', $self->c(meta => $s->{source}.( $s->{listed} ? '' : '; disable-model-invocation' ))));
+    }
+    for my $s (@{ $report->{shadowed_skills} // [] }) {
+      $self->emit('  ', $self->c(warn => 'shadowed skill '.$s->{name}.' ('.$s->{source}.') by '.$s->{by}), "\n");
+    }
+    for my $p (@{ $report->{skill_problems} // [] }) {
+      $self->emit('  ', $self->c(warn => 'skill file '.$p->{file}.': '.$p->{reason}), "\n");
+    }
+  }
+  if (my $st = $report->{settings}) {
+    my $perm = $st->{permissions};
+    $self->emit($self->c(meta => 'settings: '), $self->c(meta => '(Claude Code settings; permissions and hooks read only)'), "\n");
+    for my $f (@{ $st->{files} }) {
+      $self->emit('  ', $self->c(title => sprintf('%-30s', $f->{label})), ' ',
+        $f->{error} ? $self->c(warn => $f->{error}) : $f->{exists} ? 'read' : $self->c(meta => 'not present'), "\n");
+    }
+    $self->emit('  ', $self->c(meta => 'permissions: '), join(', ', map { $_.' '.$perm->{$_} } qw( allow ask deny )),
+      ( defined $perm->{default_mode} ? ', default mode '.$perm->{default_mode} : '' ),
+      ( $perm->{additional_directories} ? ', '.$perm->{additional_directories}.' additional directories' : '' ), "\n");
+    $self->emit('  ', $self->c(meta => 'env: '), join(', ', @{ $st->{env} }), $self->c(meta => ' (set for tools)'), "\n")
+      if @{ $st->{env} };
+    $self->emit('  ', $self->c(meta => 'hooks: '), join(', ', map { $_.' ('.$st->{hooks}{$_}.')' } sort keys %{ $st->{hooks} }),
+      $self->c(meta => ' (not run yet)'), "\n") if %{ $st->{hooks} };
+    $self->emit('  ', $self->c(meta => 'enabled plugins: '), join(', ', @{ $st->{enabled_plugins} }), "\n")
+      if @{ $st->{enabled_plugins} };
+    for my $i (@{ $st->{ignored} }) {
+      $self->emit('  ', $self->c(warn => 'ignored '.$i->{key}.' ('.$i->{source}.'): not used by raider'), "\n");
+    }
+  }
+  if (my @plugins = @{ $report->{plugins} // [] }) {
+    $self->emit($self->c(meta => 'plugins: '), join(', ', map { $_->{name}.' ('.$_->{scope}.')' } @plugins), "\n");
   }
   if (my $providers = $report->{providers}) {
     $self->emit($self->c(meta => 'providers: '), $self->c(meta => '(stored aliases of the home file; raider provider list|show|remove)'), "\n");

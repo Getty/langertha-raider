@@ -20,7 +20,8 @@ use Langertha::Raider::Home;
     my @specs   = $config->skill_specs('openai');
     my $report  = $config->explain('openai');         # which value came from where
 
-    my @added = $config->add_skills('claude');        # the one writer
+    my @added = $config->add_skills('my-skills');     # the project writers
+    $config->enable_claude;                           # claude: true
     $config->set_model('gpt-4o');
 
 =head1 DESCRIPTION
@@ -92,7 +93,7 @@ overwrite it.
 =cut
 
 # Keys that configure raider itself and never reach the engine constructor.
-my %APP_KEY = map { $_ => 1 } qw( detect engine no_detect packs perl preferred_lib_target project_tools providers skills );
+my %APP_KEY = map { $_ => 1 } qw( claude detect engine no_detect packs perl preferred_lib_target project_tools providers skills );
 
 my %PROFILE_KEYWORD = (
   claude => 'claude',
@@ -549,7 +550,7 @@ sub options {
 
     my $opts = $config->engine_options($engine_name);
 
-L</options> without raider's own keys (C<detect>, C<engine>, C<no_detect>,
+L</options> without raider's own keys (C<claude>, C<detect>, C<engine>, C<no_detect>,
 C<packs>, C<perl>, C<preferred_lib_target>, C<project_tools>, C<providers>,
 C<skills>): what goes to the engine constructor.
 
@@ -566,7 +567,7 @@ sub engine_options {
 
     $config->is_app_key('perl');   # 1
 
-True for the keys that configure raider itself (C<detect>, C<engine>,
+True for the keys that configure raider itself (C<claude>, C<detect>, C<engine>,
 C<no_detect>, C<packs>, C<perl>, C<preferred_lib_target>, C<project_tools>,
 C<providers>, C<skills>) and never reach the engine constructor.
 
@@ -864,24 +865,25 @@ sub providers {
 
     my @specs = $config->normalize_skill_spec($item);
 
-Turns one C<skills:> item into skill-source hashes: C<claude> becomes
-F<CLAUDE.md> plus F<.claude/skills>, C<openai> / C<codex> / C<agents> become
-F<AGENTS.md>, any other string a markdown directory, a hash passes through.
+Turns one C<skills:> item into the skill directories it names (ADR 0019
+E<sect>4): any string that is no profile keyword becomes
+C<< { type => 'dir', path => $item } >>, a hash with C<type> C<claude> or
+C<dir> (or none) passes through. The profile keywords name no directory
+and give nothing: C<claude> is the legacy spelling of C<claude: true>,
+C<openai> / C<codex> / C<agents> load F<AGENTS.md> as an instructions item
+(see L</profiles>). A C<< type => 'file' >> hash is no skill any more and
+gives nothing either.
 
 =cut
 
 sub normalize_skill_spec {
   my ( $self, $spec ) = @_;
   if (!ref $spec) {
-    return (
-      { type => 'file',   path => 'CLAUDE.md' },
-      { type => 'claude', path => '.claude/skills' },
-    ) if $spec eq 'claude';
-    return { type => 'file', path => 'AGENTS.md' } if $PROFILE_KEYWORD{$spec};
+    return if !defined $spec || $PROFILE_KEYWORD{$spec};
     return { type => 'dir', path => $spec };
   }
-  return $spec if ref $spec eq 'HASH';
-  return;
+  return if ref $spec ne 'HASH' || ( $spec->{type} // 'dir' ) eq 'file';
+  return $spec;
 }
 
 sub _skill_items {
@@ -921,15 +923,19 @@ sub skill_specs {
 =method profiles
 
     my @profiles = $config->profiles($engine_name);
+    my @profiles = $config->profiles($engine_name, @more_items);
 
-The agent profiles (C<claude>, C<openai>) named in C<skills:>, in order.
+The agent profiles (C<claude>, C<openai>) named in C<skills:>, then in
+C<@more_items> (C<skills:> items from elsewhere, such as C<-o skills=>),
+in order: C<claude> for the item C<claude>, C<openai> for C<openai>,
+C<codex> and C<agents>.
 
 =cut
 
 sub profiles {
-  my ( $self, $engine ) = @_;
+  my ( $self, $engine, @more ) = @_;
   my ( %seen, @profiles );
-  for my $item ($self->_skill_items($engine)) {
+  for my $item ($self->_skill_items($engine), @more) {
     next if ref $item;
     my $profile = $PROFILE_KEYWORD{$item} or next;
     push @profiles, $profile unless $seen{$profile}++;
@@ -1082,7 +1088,7 @@ sub update_home {
 
 =method add_skills
 
-    my @added = $config->add_skills('claude', 'my-skills');
+    my @added = $config->add_skills('openai', 'my-skills');
 
 Appends the items not yet listed to the top-level C<skills:> list and writes
 the file. Items already present at top level or in C<default:> are skipped.
@@ -1116,6 +1122,34 @@ sub add_skills {
     return 1;
   });
   return @added;
+}
+
+=method enable_claude
+
+    my $written = $config->enable_claude;
+
+Writes the top-level C<claude: true> (ADR 0019 E<sect>1, what C<--claude>
+persists) and returns true -- unless the file already says C<claude: true>
+at the top level or in C<default:>, or still lists the legacy C<claude> in
+C<skills:> there: then nothing is written and it returns false. Only that
+one key is touched. Without any file it creates the legacy F<.raider.yml>,
+as every project writer does.
+
+=cut
+
+sub enable_claude {
+  my ( $self ) = @_;
+  return $self->_update(sub {
+    my ( $data ) = @_;
+    for my $layer ( $data, ( ref $data->{default} eq 'HASH' ? $data->{default} : () ) ) {
+      return 0 if $layer->{claude};
+      my $skills = $layer->{skills};
+      return 0 if grep { defined && !ref && $_ eq 'claude' }
+        ref $skills eq 'ARRAY' ? @$skills : ($skills);
+    }
+    $data->{claude} = !!1;
+    return 1;
+  }) ? 1 : 0;
 }
 
 sub _item_key {

@@ -255,12 +255,12 @@ F<.raider/> are read from it.
 =opt -M, --mission TEXT
 
 The instructions: replaces the default persona and F<.raider.md> for this
-run. Skills, packs and the tool list still apply.
+run. Skills, packs, the Claude memory and the tool list still apply.
 
 =opt --bare
 
-An isolated context: no F<.raider.md>, no skills, no C<packs:>, no default
-packs, no detection. C<--pack NAME> and C</pack NAME> still work.
+An isolated context: no F<.raider.md>, no Claude Code layout, no skills,
+no C<packs:>, no default packs, no detection. C<--pack NAME> and C</pack NAME> still work.
 
 =opt -i, --interactive
 
@@ -323,17 +323,26 @@ Switch pack detection off, or on over C<detect: false> in F<.raider.yml>.
 
 =opt --claude
 
-Load F<CLAUDE.md> and F<.claude/skills/*/SKILL.md> as skills. Saved to
-C<skills:> in F<.raider.yml> on first use.
+Read the Claude Code layout also in a raider project (one with
+F<.raider/>): the F<CLAUDE.md> hierarchy (user, repository top down to the
+working directory, C<CLAUDE.local.md>, C<@imports>, nested files on first
+touch), F<.claude/settings*.json> (its C<env> is set for the tools), the
+skills of F<~/.claude/skills>, F<.claude/skills>, F<.agents/skills> and of
+the enabled plugins. Saved as C<claude: true> in F<.raider.yml> on first
+use (the older C<skills: [claude]> means the same). A project with only
+Claude Code files reads that layout without the flag, and nothing is saved
+there.
 
 =opt --openai, --codex
 
-Load F<AGENTS.md>. Saved like C<--claude>.
+Load F<AGENTS.md> as instructions. Saved to C<skills:> in F<.raider.yml>
+on first use.
 
 =opt --skills DIR
 
-Load the F<*.md> files in C<DIR> as skills (repeatable). Saved like
-C<--claude>.
+Offer the skills in C<DIR> (repeatable): every F<*/SKILL.md> and every
+F<*.md> in it. The prompt lists them by name and description; the model
+loads one with the C<skill> tool. Saved like C<--openai>.
 
 =opt --customize-prompt
 

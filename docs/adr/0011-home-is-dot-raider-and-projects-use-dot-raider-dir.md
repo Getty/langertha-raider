@@ -45,3 +45,9 @@ home config. The handoff proposed an XDG split (`~/.config/raider`, `~/.local/st
 ## Source
 
 Maintainer comments on the target-state README, 2026-09-24.
+
+## Update (2026-10-19, karr #151)
+
+A project with `.raider/` stays raider-native; it reads the Claude Code layout only with
+`claude: true` in its config (ADR 0019). Skills in `.raider/skills` and `~/.raider/skills`
+are discovered and loaded on demand through the `skill` tool like Claude Code skills.
