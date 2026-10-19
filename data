@@ -1,0 +1,34 @@
+---
+claimed_at: 2026-10-19T08:05:24Z
+claimed_by: strom-a
+class: standard
+completed: 2026-10-19T08:05:23Z
+created: 2026-10-19T04:06:55Z
+id: 153
+priority: high
+started: 2026-10-19T05:09:05Z
+status: done
+tags:
+- claude-code-flow
+title: 'Subagents: agent files, agent tool, tool restrictions, model mapping, briefing.skills
+  preload via Skilletor'
+updated: 2026-10-19T08:05:24Z
+---
+
+Strom A. Hängt an Strom K und skilletor-Perl-Dist. Plan: /home/getty/dev/perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md
+
+2026-10-19 05:14 strom-a: Worktree .claude/worktrees/strom-a (Branch worktree-strom-a von lokalem main dea227a). ADR 0020 geschrieben (Agent-Dateien, agent-Tool, Kind-Lauf, Modell-Mapping, briefing-Preload; raiders/<name>.yml -> agents/<name>.md, Update in ADR 0011). Slice 1 (Agent-Katalog + config explain) an raider-worker.
+
+2026-10-19 05:30 strom-a: Slice 1 committed (e518865): Context::Agents-Katalog, Frontmatter-Leser geteilt, Plugins agent_dirs, config explain agents, Config-Keys agent_models/max_agent_depth; Suite 127/1186 grün. ADR 0020 präzisiert (--bare, leere tools, Bash(...)-Muster). Slice 2 (agent-Tool + Kind-Lauf + Kind-Session) an raider-worker.
+
+2026-10-19 05:58 strom-a: Slice 2 committed (e46168c): agent-Tool (AgentTools), Kind-Lauf (Subagent) mit gefilterter Tool-Menge, eigener Todo-Liste, Tiefenlimit, Kind-Session (parent/parent_call/agent/depth), agent.started/finished; Szenarien 34/35/38/39; Tests auf t/160-162 umnummeriert (Absprache Koordinator). Suite 129/1202 grün. Tool-Calls einer Runde laufen sequenziell (ADR ergänzt). Slice 3 (Modell-Mapping, briefing-Preload, Szenarien 36/37, Repo-Agenten als Testfall) an raider-worker.
+
+2026-10-19 06:20 strom-a: Slice 3 committed (a93e9bb): Modell-Mapping (resolve_model -> build_subagent_engine), briefing-Preload (Briefing.pm, byte-identisch zum Plugin für alle vier raider-*-Agenten), SkillResolver-Kette (Catalog; Skilletor als weiterer Eintrag in Context::skill_resolvers), Verweigerung bei unbekanntem Skill, agent.warning >64 KB, Szenarien 36/37/50, t/163-165; Suite 132/1222 grün. Fehler aus K an Koordinator gemeldet: SessionStore legt .raider/sessions an -> Layout kippt Claude-Projekt in raider-Modus. Nächster Schritt: Rebase auf main (b6bb59d K2, f10f969 P) + Modus-Vererbung via Permissions->for_subrun.
+
+2026-10-19 06:49 strom-a: Rebase auf main 24879d8 (93c86ef, 18215ee, c3d5d12) + Modus-Vererbung committed (f03f9bf): Subagent-Gate aus Permissions->for_subrun (gleicher Modus/Regeln, geteilte Sitzungsregeln), eigenes exit_plan_mode, Agent(name)/Task(name) gaten den Spawn, fehlendes subagent_type zählt als general-purpose (Deny-Lücke in Rule.pm geschlossen), /reload liest Agents neu; t/166, t/167, Szenarien 51-55. Suite 143/1317 grün. Hinweis: in 18215ee/c3d5d12 einzeln scheitert t/151 Test 18 (agent jetzt bekanntes Tool), in f03f9bf behoben. Folgepunkte: Gate vor Tool-Lookup in Raider.pm (P), Rückfrage nennt Subagent nicht, Tool-Calls einer Runde sequenziell, oversized briefing nicht in config explain, Hall-raider-Definitionen als Agent-Dateien. Offen: Slice 4 Skilletor-Resolver (wartet auf Skilletor auf main).
+
+2026-10-19 07:21 strom-a: Rebase auf 30a492b (H) + Slice 4 committed (871a338): SkillResolver::Skilletor (Claude-Layout, nur mit skilletor.json, fetch missing, Gründe pro Skill in Verweigerung und config explain), cpanfile requires Skilletor 0.001, SubagentStart/SubagentStop um den Unterlauf, native_briefing an (briefing-preload-Hooks übersprungen, andere Agent-Hooks laufen), PreToolUse auch in Subagenten; t/168-169, Szenarien 56-59; Suite 149/1374 grün. RELEASE-VORAUSSETZUNG: Skilletor muss vor einem raider-Release auf CPAN (README vermerkt). Binary (Strom B): Skilletor braucht HTTP::Tiny + IO::Socket::SSL/Net::SSLeay (per Name), Compress::Raw::Zlib, Unicode::Normalize, git für ungecachte git-Quellen. Letzter Rebase auf 1e6d583 (P2) läuft.
+
+Strom A fertig. Branch worktree-strom-a (Worktree .claude/worktrees/strom-a), rebased auf main 97e5b40: ff4f0be Agent-Katalog, 14a6869 agent-Tool + Kind-Lauf, c101fbf Modell-Mapping + briefing-Preload, b5feec9 Modus-Vererbung for_subrun, 27bf8a5 Skilletor-Resolver + SubagentStart/Stop + native_briefing, c828f0d Szenario 35 im default-Modus. ADR 0020 (neu), Nachträge in ADR 0011/0021/0022. Suite 157 Dateien / 1424 Tests grün. Tests t/160-169, Szenarien 34-39, 50-59. RELEASE-VORAUSSETZUNG: Skilletor 0.001 muss vor raider-Release auf CPAN (cpanfile requires, README vermerkt). Folgepunkte: (1) t/53_repl_interrupt_tools.t Test 4 ist Zeit-Flake auch auf main (~1/10); (2) agent-Aufrufe einer Runde laufen sequenziell; (3) Freigabe-Rückfrage nennt den Subagenten nicht; (4) systemMessage aus Hooks im Subagenten nur im Kind-Journal, nicht live; (5) übergroßes briefing nicht in config explain; (6) L-Konverter: Sidechain-Turns von Subagenten und .claude/agents-Dateien fehlen; (7) Binary (Strom B): Skilletor braucht HTTP::Tiny + IO::Socket::SSL/Net::SSLeay (per Name), Compress::Raw::Zlib, Unicode::Normalize, git; (8) Hall-raider-Definitionen als Agent-Dateien; (9) raiders/ noch als .raider-Marker gelistet, obwohl durch agents/ ersetzt; (10) -e mock mit Skript-rules_file teilt den Cursor nicht mit Subagenten.
+
+Koordinator 2026-10-19: geprüft (1424 Tests, nur bekannter t/53-Flake; t/160–169 rot gegen alten Code; config explain im raider-Repo zeigt die vier Agenten mit briefing.skills), nach main gemerged (c828f0d).
