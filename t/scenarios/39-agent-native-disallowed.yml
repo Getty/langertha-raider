@@ -1,0 +1,25 @@
+title: a native .raider/agents file with disallowedTools Bash is listed in the agent tool and runs without bash
+files:
+  .raider/agents/careful.md: "---\ndescription: Works without a shell.\ndisallowedTools: Bash\n---\nCAREFUL-BODY-MARKER\n"
+prompt: Let the careful agent write a file.
+script:
+  - tool_calls:
+      - [ agent, { description: Write a file, prompt: Write ok.txt with the text ok., subagent_type: careful } ]
+  - tool_calls:
+      - [ write_file, { path: ok.txt, content: ok } ]
+  - text: wrote ok.txt
+  - text: The careful agent wrote ok.txt.
+expect:
+  answer: The careful agent wrote ok.txt.
+  files:
+    ok.txt: ok
+  requests:
+    - { index: 0, tool_text: "- careful: Works without a shell. (Tools: All tools except bash)" }
+    - { index: 0, tool_text: "- general-purpose: " }
+    - { index: 1, contains: CAREFUL-BODY-MARKER }
+    - { index: 1, lacks: [ bash, ask_user, agent ] }
+    - { index: 1, contains: "write_file(" }
+    - { index: 1, contains: "todo_write(" }
+  tools:
+    - { name: write_file }
+    - { name: agent, text: '\Awrote ok.txt\z' }

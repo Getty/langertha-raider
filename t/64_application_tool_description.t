@@ -73,6 +73,7 @@ subtest 'stock set: exactly the mounted tools, with their parameters' => sub {
     'grep(pattern, [-A], [-B], [-C], [-i], [-n], [context], [glob], [head_limit], [multiline], [offset], [output_mode], [path], [type])',
     'todo_write(todos)',
     'ask_user(question, [options])',
+    'agent(description, prompt, [subagent_type])',
   ], 'tool description lists the stock tool servers');
   unlike($app->mission, qr/perl_eval/, 'Perl tools not mounted, not described');
   unlike($app->mission, qr/telegram_reply|hall_status/, 'Hall tools not mounted, not described');

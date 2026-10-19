@@ -269,8 +269,12 @@ Revision history for Langertha-Raider
       explain lists every agent with its tools, model, declared skills,
       unused keys, shadowed agents and files that are not agents. New config
       keys agent_models (model per alias) and max_agent_depth (default 1)
-      are read; nothing starts a subagent yet. The lenient frontmatter reader
+      are read. The lenient frontmatter reader
       now keeps one level of nesting (briefing: / skills: / - item).
+    - The agent tool (ADR 0020, second step) starts a subagent in the same
+      process: its own context, its own filtered tool set (no ask_user, own
+      todo list), its own child session, and agent.started / agent.finished
+      in the caller's journal and stream.
 
   [Permissions]
     - INCOMPATIBLE: every tool call of raider now passes a permission policy

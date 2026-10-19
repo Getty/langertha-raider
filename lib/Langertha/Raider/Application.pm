@@ -37,6 +37,7 @@ use Langertha::Raider::Permissions;
 use Langertha::Raider::Hooks;
 use Langertha::Raider::ToolNames;
 use Langertha::Raider::SessionStore;
+use Langertha::Raider::Subagent;
 use Langertha::Raider;
 
 =head1 SYNOPSIS
@@ -65,7 +66,9 @@ packs (L<Langertha::Raider::Packs>, ADR 0012), compiles the mission (ADR
 (L<Langertha::Raider::FileTools>), C<bash> (L<MCP::Run::Bash>), web
 (L<Langertha::Raider::WebTools>), the Perl tools
 (L<Langertha::Raider::PerlTools>) when granted, the Hall tools when
-spawned by a Hall -- and builds the L<Langertha::Raider> that runs the
+spawned by a Hall, the C<agent> tool (L<Langertha::Raider::AgentTools>,
+whose calls run as L<Langertha::Raider::Subagent>) below
+L</max_agent_depth> -- and builds the L<Langertha::Raider> that runs the
 raids. It opens, creates and replays the sessions of the project
 (L</session_store>, ADR 0015) and records every run in the session's
 journal (L</run_prompt>), handing the run's events on to the surface. It
@@ -310,7 +313,29 @@ sub _skill_profiles {
 
 sub _build_mission {
   my ($self) = @_;
-  my @items = ( $self->_instructions_text, $self->context->prompt_items, $self->_tools_text );
+  return $self->compile_mission($self->_instructions_text, $self->_tool_servers);
+}
+
+=method compile_mission
+
+    my $mission = $app->compile_mission($instructions, \@tool_servers);
+
+A mission as L</mission> is built: the instructions item C<$instructions>,
+the context items (L<Langertha::Raider::Context/prompt_items>), the tool
+description of C<@tool_servers> and the active packs. The skill listing
+is left out when C<@tool_servers> has no C<skill> tool. A subagent's
+mission (L<Langertha::Raider::Subagent>) is compiled here with the agent's
+body as C<$instructions> and its own tool set.
+
+=cut
+
+sub compile_mission {
+  my ($self, $instructions, $servers) = @_;
+  my $has_skill = grep { $_->name eq 'skill' } map { @{ $_->tools } } @$servers;
+  my $skills = $has_skill ? undef : $self->context->skill_catalog->prompt_text;
+  my @items = ( $instructions,
+    ( grep { !defined $skills || $_ ne $skills } $self->context->prompt_items ),
+    $self->_tools_text($servers) );
 
   my @pack_texts = $self->packs->skill_texts;
   push @items, "Active packs:\n\n".join("\n\n", @pack_texts)."\n" if @pack_texts;
@@ -334,10 +359,10 @@ sub _instructions_text {
 
 # The tool description item, derived from the tool servers mounted for
 # this raider (ADR 0005) -- the same servers the catalogue comes from; -M
-# never replaces it (ADR 0014).
+# never replaces it (ADR 0014). A subagent passes its own servers.
 sub _tools_text {
-  my ($self) = @_;
-  my @tools = $self->_mounted_tools;
+  my ($self, $servers) = @_;
+  my @tools = map { @{ $_->tools } } @{ $servers // $self->_tool_servers };
   return 'Working directory: '.$self->root."\n\n"
     ."Tools (MCP):\n"
     .join('', map { '  - '.$self->_tool_signature($_)."\n" } @tools);
@@ -1699,6 +1724,7 @@ has _stock_tool_servers => (is => 'ro', lazy => 1, builder => '_build_stock_tool
 has _perl_tool_server   => (is => 'ro', lazy => 1, builder => '_build_perl_tool_server');
 has _hall_tool_server   => (is => 'ro', lazy => 1, builder => '_build_hall_tool_server');
 has _skill_tool_server  => (is => 'ro', lazy => 1, builder => '_build_skill_tool_server', clearer => '_clear_skill_tool_server');
+has _agent_tool_server  => (is => 'ro', lazy => 1, builder => '_build_agent_tool_server');
 
 sub _build_api_key { $_[0]->engine_resolver->api_key }
 
@@ -1723,6 +1749,7 @@ sub _build_tool_servers {
     ( $self->perl_tools_enabled ? $self->_perl_tool_server : () ),
     ( $self->_hall_tool_server // () ),
     ( $self->_skill_tool_server // () ),
+    ( $self->_agent_tool_server // () ),
     ( $self->_plan_tool_wanted ? $self->_plan_tool_server : () ),
   ];
 }
@@ -1776,6 +1803,49 @@ sub _search_hider {
   return unless $policy->read_rules_active;
   return sub { $policy->hides_read($_[0]) };
 }
+
+=method subagent_class
+
+The class that runs a call of the C<agent> tool:
+L<Langertha::Raider::Subagent>.
+
+=cut
+
+sub subagent_class { 'Langertha::Raider::Subagent' }
+
+# The agent tool (ADR 0020 §3) of the main run, at depth 0, when
+# max_agent_depth lets it start subagents. Every call runs a subagent of the
+# run in progress: its tool set, session, call id and event stream.
+sub _build_agent_tool_server {
+  my ($self) = @_;
+  return unless $self->max_agent_depth > 0;
+  weaken(my $app = $self);
+  return $self->subagent_class->agent_tool_server(
+    app    => $self,
+    depth  => 0,
+    caller => sub { {
+      servers => $app->_tool_servers,
+      session => $app->has_run ? $app->_run->{session} : undef,
+      call    => $app->_current_call,
+      event   => sub { $app->event(@_) if $app },
+    } },
+  );
+}
+
+# The subagents running right now, by refaddr (held weakly), so cancel_run
+# reaches them (Langertha::Raider::Subagent/run).
+has _live_subagents => (
+  is       => 'ro',
+  init_arg => undef,
+  default  => sub { {} },
+);
+
+# The id of the last tool.call of the main run (c1, c2, ...): the agent
+# call that is running, since tool calls run one after another.
+has _current_call => (
+  is       => 'rw',
+  init_arg => undef,
+);
 
 # The skill tool (ADR 0019 §4), when the context lists a skill.
 sub _build_skill_tool_server {
@@ -1893,6 +1963,24 @@ sub _build_engine {
   return $self->engine_resolver->build_engine(mcp_servers => $self->_mcps);
 }
 
+=method build_subagent_engine
+
+    my $engine = $app->build_subagent_engine(mcp_servers => \@clients, model => $model);
+
+The engine of a subagent (L<Langertha::Raider::Subagent>): the class and
+arguments of the main engine (L<Langertha::Raider::EngineResolver/build_engine>)
+over the subagent's own MCP clients, on the same loop. C<model> replaces
+the model when given; without, the subagent inherits it. The one place a
+subagent's engine comes from, so a subclass (or a test) can swap it.
+
+=cut
+
+sub build_subagent_engine {
+  my ($self, %o) = @_;
+  return $self->engine_resolver->build_engine(mcp_servers => $o{mcp_servers},
+    defined $o{model} ? ( model => $o{model} ) : ());
+}
+
 # Engine constructor arguments (Langertha::Raider::EngineResolver/engine_args).
 sub _engine_args {
   my ($self) = @_;
@@ -1904,6 +1992,23 @@ sub _engine_args {
 sub _raider_plugins {
   my ($self) = @_;
   weaken(my $app = $self);
+  return $self->run_plugins(sub { $app->event(@_) if $app });
+}
+
+=method run_plugins
+
+    my @plugins = $app->run_plugins(sub { my ( $type, %payload ) = @_; ... });
+
+The plugins every raider of the application runs with, as name + {args}
+pairs for L<Langertha::Raider/plugins>, with C<$on_event> as the consumer of
+L<Langertha::Raider::Plugin::Events>. The main raider's consumer is
+L</event>; a subagent passes its own, so its events go to its journal only.
+A surface's own plugins (the live trace) are not part of it.
+
+=cut
+
+sub run_plugins {
+  my ($self, $on_event) = @_;
   # The rule-driven test engine (-e mock) matches the prompt word for word, so
   # it gets the prompt as typed, without the [situation] line and its clock.
   my $virtual = $self->engine_resolver->engine_class eq 'Langertha::Engine::Virtual';
@@ -1913,7 +2018,7 @@ sub _raider_plugins {
   return ( ( $virtual ? () : '+Langertha::Raider::Plugin::Situation' ),
     '+Langertha::Raider::Plugin::NestedMemory', { context => $self->context },
     ( $self->context->claude_layout ? ( '+Langertha::Raider::Plugin::ClaudeHooks', { app => $self } ) : () ),
-    '+Langertha::Raider::Plugin::Events', { on_event => sub { $app->event(@_) if $app } } );
+    '+Langertha::Raider::Plugin::Events', { on_event => $on_event } );
 }
 
 sub _build_raider {
@@ -2008,7 +2113,22 @@ one. An empty C<$text> runs nothing and returns nothing.
 # The ADR 0015 event types the journal records from the events of a run;
 # run.finished is written by end_run.
 my %JOURNAL_TYPE = map { $_ => 1 } qw( run.started message tool.call tool.result todo.updated
-  permission.asked permission.granted permission.denied permission.mode hook.ran hook.message );
+  permission.asked permission.granted permission.denied permission.mode hook.ran hook.message
+  agent.started agent.finished );
+
+=method is_journal_type
+
+    $app->is_journal_type('tool.call');   # 1
+
+Whether the journal records events of that type from a run (ADR 0015):
+C<run.started>, C<message>, C<tool.call>, C<tool.result>, C<todo.updated>,
+the C<permission.*> events (ADR 0021), C<hook.ran> and C<hook.message> (ADR
+0022), and C<agent.started> and C<agent.finished> of the subagents it starts (ADR
+0020). C<run.finished> is written by L</end_run>.
+
+=cut
+
+sub is_journal_type { $JOURNAL_TYPE{ $_[1] // '' } ? 1 : 0 }
 
 # The run in progress: { session, run, on_event, t0 }.
 has _run => (
@@ -2120,8 +2240,9 @@ sub end_run {
 Cancels the run in progress (ADR 0009): its raid stops at the next safe
 point (L<Langertha::Raider/cancel>) and L</run_prompt> ends the run as
 C<cancelled> -- C<run.finished> with that status, and a tool call cut off
-gets its C<tool.result> with status C<cancelled>. Tool subprocesses are
-not signalled here; that is the surface's to do. Only records the
+gets its C<tool.result> with status C<cancelled>. Every subagent running
+for it (L<Langertha::Raider::Subagent>) is cancelled too, and its C<agent>
+call ends with an error result. Tool subprocesses are not signalled here; that is the surface's to do. Only records the
 request, so a signal handler may call it. Outside a run it does nothing
 and returns false.
 
@@ -2132,6 +2253,7 @@ sub cancel_run {
   my $run = $self->_run or return 0;
   $run->{cancelled} = 1;
   $self->_raider->cancel if $self->_has_raider;
+  $_->cancel for grep { defined } values %{ $self->_live_subagents };
   return 1;
 }
 
@@ -2161,6 +2283,7 @@ C<run> id), the C<on_event> of that run, and L</on_event>.
 
 sub event {
   my ( $self, $type, %payload ) = @_;
+  $self->_current_call($payload{call}) if $type eq 'tool.call';
   if (my $run = $self->_run) {
     $self->_append($run, $type, run => $run->{run}, %payload) if $run->{session} && $JOURNAL_TYPE{$type};
     $run->{on_event}->($type, %payload) if $run->{on_event};

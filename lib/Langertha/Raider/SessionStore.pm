@@ -7,6 +7,7 @@ use namespace::autoclean;
 use Carp qw( croak );
 use Fcntl qw( O_WRONLY O_CREAT O_EXCL );
 use POSIX qw( strftime );
+use JSON::MaybeXS ();
 use Path::Tiny;
 use Time::HiRes ();
 use Langertha::Raider::Home;
@@ -188,11 +189,39 @@ sub ids {
 
 =method latest
 
-The id of the newest session, or C<undef>.
+The id of the newest session that is not a subagent's (L</parent_of>), or
+C<undef>: what C<--continue> resumes.
 
 =cut
 
-sub latest { ( $_[0]->ids )[0] }
+sub latest {
+  my ( $self ) = @_;
+  for my $id ($self->ids) {
+    return $id unless defined $self->parent_of($id);
+  }
+  return;
+}
+
+=method parent_of
+
+    my $parent = $store->parent_of($id);
+
+The C<parent> of the session's C<session.created> -- the id of the session
+whose run started it as a subagent (ADR 0020) -- or C<undef> for a session
+of its own. Reads only the first line of the journal.
+
+=cut
+
+sub parent_of {
+  my ( $self, $id ) = @_;
+  my $fh = eval { $self->path_of($id)->openr_raw } or return;
+  my $line = <$fh>;
+  close $fh;
+  return unless defined $line;
+  my $event = eval { JSON::MaybeXS->new(utf8 => 1)->decode($line) };
+  return unless ref $event eq 'HASH' && ( $event->{type} // '' ) eq 'session.created';
+  return $event->{parent};
+}
 
 =method is_ref
 

@@ -54,6 +54,9 @@ C<exit_plan_mode> has no effect class: it hands a plan to the person and
 may switch the permission mode of the run (ADR 0021), which changes nothing
 outside it.
 
+C<agent> has no class of its own (ADR 0020): it starts a subagent, whose
+tool calls carry their effects in the subagent's journal.
+
 =cut
 
 my %EFFECTS = (
@@ -66,6 +69,7 @@ my %EFFECTS = (
   edit_file              => [qw( write )],
   # run state
   todo_write             => [],
+  agent                  => [],
   ask_user               => [qw( message )],
   exit_plan_mode         => [],
   # skills

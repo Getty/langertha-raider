@@ -89,7 +89,8 @@ their effects in the subagent's journal.
 - **Own context.** Empty history: the subagent sees only its prompt, never the parent's
   conversation. Its mission is compiled like the parent's with the agent body in the place
   of raider's persona and native instructions — exactly what `-M` replaces (ADR 0014) — so
-  Claude memory items and the skill listing stay, as in Claude Code.
+  Claude memory items stay, as in Claude Code. The skill listing stays when the subagent's
+  tool set has `skill`; without it the listing would point at a tool it cannot call.
 - **Own tool set.** The caller's active set filtered by §2, then: `ask_user` is removed (a
   subagent has nobody to ask, as in Claude Code), and `agent` is removed at the depth limit.
   Stateful tools (`todo_write`) get their own instance, so a subagent's list does not
@@ -106,7 +107,11 @@ their effects in the subagent's journal.
   (`call`, `agent`, `description`, `session`, `model`) and `agent.finished` (`call`,
   `agent`, `session`, `status`). The subagent's own events go only to its journal, so a
   consumer of the caller's stream keeps one run per stream. New types need no new `v`
-  (ADR 0013, 0015).
+  (ADR 0013, 0015). A child session is never the "latest" session that `--continue`
+  resumes; `session list` shows its parent and agent.
+- **One after the other.** The raid loop awaits tool calls in turn and in-process tool
+  calls block, so several `agent` calls of one model turn run sequentially. The tool text
+  does not promise concurrency; running them in parallel is follow-up work.
 
 ### 5. Model mapping
 

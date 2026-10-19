@@ -612,6 +612,14 @@ eval, and reports what it installed. It never loops. (Note that `perl -c` runs
   tool result). `--openai`/`--codex` loads
   `AGENTS.md`. `--claude`, `--openai` and `--skills` persist to `.raider.yml` on
   first use (the banner shows `(saved)`) — `--claude` as `claude: true`.
+- An **agent** is a subagent definition in Claude Code's format (Markdown with
+  frontmatter) in `.raider/agents/`, `~/.raider/agents/` and, in the Claude layout,
+  `.claude/agents/`, `~/.claude/agents/` and enabled plugins; `general-purpose` is
+  built in. The model starts one with the `agent` tool: it runs in the same process
+  with an empty history, the agent file as its instructions and the caller's tools
+  filtered by `tools` / `disallowedTools` (never `ask_user`), and its last text comes
+  back as the tool result. With a session it journals into a child session of its
+  own. Subagents cannot start subagents unless `max_agent_depth` is raised.
 
 ### Claude Code projects
 

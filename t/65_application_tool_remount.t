@@ -64,7 +64,7 @@ subtest '/pack on perl after the raider was built mounts the Perl tools' => sub 
   ok(has_perl(engine_tools($app)), 'engine now answers with perl_eval');
   ok(has_perl(described($app)), 'the raider mission describes perl_eval');
   is(described($app), engine_tools($app), 'prompt and catalogue stay one tool set');
-  is(scalar @{ $app->_tool_servers }, 7, 'files, bash, web, search, todo, ask + perl');
+  is(scalar @{ $app->_tool_servers }, 8, 'files, bash, web, search, todo, ask, agent + perl');
 };
 
 subtest '/pack off perl unmounts them again' => sub {

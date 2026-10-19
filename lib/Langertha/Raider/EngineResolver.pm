@@ -406,18 +406,22 @@ sub engine_args {
 =method build_engine
 
     my $engine = $resolver->build_engine(mcp_servers => \@clients);
+    my $other  = $resolver->build_engine(mcp_servers => \@clients, model => 'claude-haiku-5-5');
 
 Loads L</engine_class> and builds it with L</engine_args>; with
 L</provider> the engine connects to the checked address and its
-synchronous user agent follows no redirect.
+synchronous user agent follows no redirect. A C<model> given here
+replaces L</model> for this engine (a subagent's model, ADR 0020
+E<sect>5).
 
 =cut
 
 sub build_engine {
   my ( $self, %extra ) = @_;
+  my $model = delete $extra{model};
   my $class = $self->engine_class;
   Module::Runtime::require_module($class);
-  my $engine = $class->new($self->engine_args(%extra));
+  my $engine = $class->new($self->engine_args(%extra), defined $model ? ( model => $model ) : ());
   if ($self->has_provider && $engine->can('user_agent')) {
     # Not for the key (Langertha's agent strips it on another origin), and
     # no longer for another host (the pin refuses that hop, k141): for the

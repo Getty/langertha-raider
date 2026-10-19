@@ -69,7 +69,9 @@ has _json => (
 One session in short: C<id>, C<path>, C<created> (ISO 8601, UTC, from the
 id), C<runs> (how many), C<status> (of the last run, C<empty> without
 one), C<prompt> (the first user input, or C<undef>) and C<damaged> (how
-many lines could not be read).
+many lines could not be read). A subagent's session (ADR 0020) also has
+C<parent> (the id of the session whose run started it) and C<agent> (its
+name).
 
 =cut
 
@@ -79,6 +81,7 @@ sub summary {
   my $runs = $journal->runs;
   my ( $first ) = grep { defined $_->{prompt} } @$runs;
   my ( $date, $time ) = $id =~ /\A(\d{8})-(\d{6})/;
+  my $created = $journal->created;
   return {
     id      => $id,
     path    => ''.$journal->path,
@@ -87,6 +90,8 @@ sub summary {
     status  => @$runs ? $runs->[-1]{status} : 'empty',
     prompt  => $first ? $first->{prompt} : undef,
     damaged => scalar @{ $journal->damaged },
+    ( $created && defined $created->{parent}
+      ? ( parent => $created->{parent}, agent => $created->{agent} ) : () ),
   };
 }
 
@@ -112,6 +117,7 @@ sub list {
     $out->emit($out->c(title => $s->{id}), '  ',
       sprintf('%3d run%s  %-11s', $s->{runs}, $s->{runs} == 1 ? ' ' : 's', $s->{status}), '  ',
       $out->c(meta => $self->_short($s->{prompt} // '', 60)),
+      defined $s->{parent} ? $out->c(meta => '  (agent '.($s->{agent} // '?').' of '.$s->{parent}.')') : '',
       $s->{damaged} ? $out->c(warn => '  ('.$s->{damaged}.' damaged)') : '', "\n");
   }
   return;
@@ -153,6 +159,7 @@ sub show {
       $self->summary($id)->{created}, 'by', $c->{principal} // '?', 'in', $c->{root} // '?',
       '(raider '.($c->{raider} // '?').')');
     $line->('forked from', $c->{forked_from}) if defined $c->{forked_from};
+    $line->('agent of', $c->{parent}.( defined $c->{agent} ? ' ('.$c->{agent}.')' : '' )) if defined $c->{parent};
   }
   for my $e (@{ $journal->events }) {
     my $run = defined $e->{run} ? $e->{run}.' ' : '';
@@ -172,6 +179,14 @@ sub show {
       my $content = $e->{content} // '';
       $line->($run.'result', ($e->{call} // '?').' '.($e->{status} // '?').', '.length($content).' chars: ',
         $out->c(meta => $self->_short($content, 100)));
+    }
+    elsif ($type eq 'agent.started') {
+      $line->($run.'agent', ($e->{call} // '?').' ', $out->c(title => $e->{agent} // '?'),
+        join '', map { ' '.$_ } grep { defined } $e->{description},
+          defined $e->{session} ? '(session '.$e->{session}.')' : undef);
+    }
+    elsif ($type eq 'agent.finished') {
+      $line->($run.'agent end', ($e->{call} // '?').' '.($e->{status} // '?'));
     }
     elsif ($type eq 'run.finished') {
       $line->($run.'finished', join ', ', grep { defined } $e->{status},

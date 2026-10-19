@@ -72,13 +72,19 @@ our @EXPORT_OK = qw( run_scenario_files );
 #   script:  the model's answers, one per request:
 #              - tool_calls: [ [ tool_name, { arguments } ], ... ]
 #              - text: the final answer
+#              - error: [ status, message ]   the request fails with that HTTP status
 #   expect:
 #     answer:      the final answer, exactly
 #     outcome:     { status, error } of the last run_prompt (error: a regex)
 #     files:       { path => content }  must exist afterwards with this content
 #     absent:      [ path, ... ]        must not exist afterwards
 #     requests:    [ { index: N, contains: text, absent: text } ] -- the text of the
-#                  conversation the model saw in request N (0-based)
+#                  conversation the model saw in request N (0-based); with
+#                  offers: [ tool, ... ] the tools that request offered, exactly (any
+#                  order), with lacks: [ tool, ... ] tools it must not offer, with
+#                  tool_text: text the descriptions of the offered tools must contain. A
+#                  subagent's requests count in the same sequence, in the order made
+#                  (the caller's agent call, the subagent's requests, the caller's next)
 #     events:      [ { type => ..., fields } ] events of the application, in order; each
 #                  is matched (as a subset) by the next event of its type
 #     questions:   [ { question => ..., options => [...] } ] what ask_user put to the person
@@ -199,6 +205,14 @@ sub run_scenario_file {
       } @{ $req->{body}{messages} // [] };
       like( $seen, qr/\Q$r->{contains}\E/, "request $r->{index} contains '$r->{contains}'" ) if defined $r->{contains};
       unlike( $seen, qr/\Q$r->{absent}\E/, "request $r->{index} lacks '$r->{absent}'" ) if defined $r->{absent};
+      my %offered = map { ( $_->{function}{name} // $_->{name} // '' ) => 1 } @{ $req->{tools} // [] };
+      is( [ sort keys %offered ], [ sort @{ $r->{offers} } ], "request $r->{index} offers exactly @{ $r->{offers} }" )
+        if $r->{offers};
+      ok( !$offered{$_}, "request $r->{index} does not offer $_" ) for @{ $r->{lacks} // [] };
+      if ( defined $r->{tool_text} ) {
+        my $texts = join "\n", map { $_->{function}{description} // $_->{description} // '' } @{ $req->{tools} // [] };
+        like( $texts, qr/\Q$r->{tool_text}\E/, "request $r->{index} tool texts contain '$r->{tool_text}'" );
+      }
     }
 
     if ( my $want = $expect->{events} ) {
