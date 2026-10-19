@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-10-19T09:46:38Z
+claimed_by: embeddings-E
+class: standard
+completed: 2026-10-19T09:46:37Z
+created: 2026-10-19T09:26:34Z
+id: 162
+priority: medium
+started: 2026-10-19T09:26:55Z
+status: done
+tags:
+- claude-code-flow
+title: No session embeddings when nothing reads them (no history tool, no embedding
+  provider)
+updated: 2026-10-19T09:46:38Z
+---
+
+Strom E: Fund aus #160. Plan: /home/getty/dev/perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md
+
+Fix: Application#session_embeddings (enabled only if a (raider_)session_history tool is mounted) feeds no_session_embeddings; config explain shows session_embeddings; ADR 0028; t/220. Raider core default unchanged.
+
+2026-10-19 09:36 Committed d996ac6 on worktree-embeddings-E, rebased on main bf09bd5. Suite green (159 files, 1434 tests) per worker.
+
+Koordinator 2026-10-19: geprüft (1434 grün, t/220 rot gegen alten Code), gemerged (d996ac6). ADR 0028 (D 0023–0026, A2 0027).
