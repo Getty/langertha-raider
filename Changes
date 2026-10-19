@@ -50,6 +50,10 @@ Revision history for Langertha-Raider
     - The hall scenarios (t/202) count the hall as started when it answers
       `ps` on the control socket, not when the socket accepts: the hall
       opens the ACP port later, and under load the ACP connect failed.
+    - Hall scenario 04c and t/52_cli_cancel wait for events -- the raider's
+      end, the stub's request -- instead of fixed delays; 04c's stuck tool
+      lives as long as its raider, so a late cancel no longer turns the
+      expected KILL into a plain cancel. New t/176_subagent_embeddings.
     - Scenario suite: t/200_scenarios.t runs every t/scenarios/*.yml with a
       scripted model (Langertha::Engine::Virtual, via Test::Raider::MockAI; skipped
       without Langertha 0.504 or later) driving the real application, raid

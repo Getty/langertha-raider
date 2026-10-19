@@ -1077,7 +1077,7 @@ YAML
     # What the hall started is gone with it: a raider is not ours to wait for
     # (it is a child of the hall), so look at the process table.
     # The deadline only bounds a failing run; on a loaded machine a raider
-    # takes seconds to end (04c leaves a `sleep 3` behind on purpose).
+    # takes seconds to end (04c leaves its tool behind for a moment on purpose).
     my @left;
     my $deadline = Test::Raider::HallScenario::now() + 30;
     while (1) {
