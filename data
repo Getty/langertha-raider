@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-10-19T09:26:08Z
+claimed_by: strom-b
+class: standard
+completed: 2026-10-19T09:26:07Z
+created: 2026-10-19T08:05:53Z
+id: 160
+priority: high
+started: 2026-10-19T08:06:25Z
+status: done
+tags:
+- claude-code-flow
+- binary
+title: Binary check of the Claude Code flow and clean-ups (flaky tests, markers, public
+  API inventory)
+updated: 2026-10-19T09:26:08Z
+---
+
+Strom B. Plan: /home/getty/dev/perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md
+
+Doku-Teil fertig: ADR 0017 Addendum 1 (alle neuen Module intern; Konsequenz 1 eingeengt: von 31 neuen Application-Namen über CLI nur claude/permission_mode/skip_permissions/max_agent_depth/agent_models öffentlich), ADR 0019 Addendum 2 (raiders/ kein Marker), Changes [Before you upgrade] (3x INCOMPATIBLE) + [Release order] (Skilletor 0.001 → Langertha 0.504 → raider), README. Folgepunkt: cpanfile-Floor Langertha 0.503 → 0.504 beim Release-Audit (raider braucht Engine::Virtual). Doppelte Pfad-Einsperrung FileTools/SearchTools erst nach Strom-D-Merge.
+
+Binary-Spur fertig: verify-binary.sh Schritt 7 (Claude-Projekt: config explain, skill-Tool + Plugin-Skill, NestedMemory, glob/grep ohne rg, todo_write, Hooks, loadguard-Gate + CONFINE-Neustart über packed_binary, plan/default, agent+Briefing aus Skilletor-git), Schritt 3 Skilletor-Laufzeit (49 Module, HTTPS via HTTP::Tiny/IO::Socket::SSL, gzip, punycode), Schritt 6 ACP-Freigabe über Hall-Kanal. 2x verify OK (Dev-Build mit dev-Langertha 0.504). Pack-Liste war vollständig. Fund: verify Schritte 5/6 scheiterten seit P (default-Modus lehnt ab) → bypassPermissions. Folgepunkte: (1) Skilletor nicht auf CPAN → release-binaries-Workflow scheitert bis Release; (2) Warnung 'Suspended async sub Langertha::Role::Embedding::simple_embedding_f lost its returning future' im Subagent-Lauf (gepackt+ungepackt) → raider-worker; (3) CONFINE-Prüfung im CI-Container übersprungen (kein systemd-user).
+
+Wackeltests: t/53 T4 Ursache = 5-s-Frist ab Prozessstart, raider braucht 4-7 s → SIGINT vor REPL-Handler; Fix: Stub meldet Anfrage (seen-Datei), Test wartet darauf. t/202 Ursache = Harness wertete Control-Socket als 'gestartet', ACP-Port öffnet später; Fix: Hall beantwortet ps. Unter Last t/53 40/0 (alt 12/2), t/202 16/0 (alt 4/1). Marker raiders/ raus (Layout.pm + t/120). Volle Suite 157 Dateien/1424 Tests PASS. Rest: Szenario 04c Restmarge (2 s Kill vs 3 s Tool), t/52 fester 1-s-Sleep, raider-Start ~4 s auch für --version.
+
+Restpunkte: (a) Szenario 04c Tool lebt so lange wie sein Raider (statt sleep 3) → spätes Cancel egal; t/52 wartet auf seen-Datei; je 20/0 unter Last. (b) Warnung 'lost its returning future' im Subagent-Lauf: Ursache Kind-Raider wird mit laufenden Session-Embedding-Futures weggeräumt; Fix DEMOLISH retain (cancel ließ halb offene N::A::HTTP-Verbindung hängen); t/90 Subtest + t/176 neu. Suite 158/1428 PASS. Folgepunkte: (1) Application hängt kein session-history-Tool an, trotzdem kostet jede Nachricht eine Embedding-Anfrage (bei Providern ohne Embeddings 404) → no_session_embeddings in der App erwägen (Verhaltensentscheidung); (2) langertha-Core: Role::AsyncHTTP nimmt den N::A::HTTP-Client nie vom Loop → Leck je Subagent-Engine (langertha-Board); (3) raider-Start ~4 s auch für --version.
+
+Strom B fertig, Branch worktree-strom-b auf main 4528dd3 rebased, 6 Commits. Suite nach Rebase: 158 Dateien, 1432 Tests PASS (nur Live-Tests übersprungen). verify-binary 2x OK (Dev-Build). Offen (Notizen oben): Skilletor/Langertha 0.504 vor raider auf CPAN, cpanfile-Floor 0.504 im Release-Audit; Pfad-Einsperrung FileTools/SearchTools nach D-Merge; Embedding-Anfragen ohne Nutzer in der App; langertha Role::AsyncHTTP-Client-Leck; raider-Start ~4 s.
+
+Koordinator 2026-10-19: geprüft (1432 grün -j3, neue Tests rot gegen alten Code), gemerged (bf09bd5). Folgepunkte: Session-Embeddings ohne history-Tool (-> Strom E), langertha AsyncHTTP-Client-Leck (-> langertha-Karte), Pfad-Einsperrung nach D.
