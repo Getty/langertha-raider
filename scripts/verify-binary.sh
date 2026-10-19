@@ -587,4 +587,80 @@ else
   echo "loadguard confine: SKIPPED (no systemd user manager with the memory controller here)"
 fi
 
+# --- 8. a configured MCP stdio server (ADR 0029) ----------------------------------
+# The packed raider starts a server from `mcp:` of the home config: fork and
+# exec of `perl` found on PATH -- the server is a program of its own, never
+# the binary run as perl ($^X is not a perl in here) -- the handshake over its
+# pipes in the packed IO::Async loop, tools/list, and from tools running
+# inside the Future chain: tools/call, and the resource tools
+# (list_mcp_resources, read_mcp_resource: Langertha::Raider::MCP::Resources,
+# which waits on the loop from inside a tool callback). The server is a
+# fake of core modules only (JSON::PP), as the fake OpenAI endpoint is.
+cat > "$work/fake-mcp.pl" <<'FAKE'
+use strict;
+use warnings;
+use JSON::PP;
+my $json = JSON::PP->new->canonical;
+$| = 1;
+open my $pf, '>', $ARGV[0] or die $!;
+print $pf $$;
+close $pf;
+sub reply { print $json->encode( $_[0] )."\n" }
+while ( my $line = <STDIN> ) {
+  my $msg = eval { $json->decode($line) } or next;
+  my ( $id, $method ) = @{$msg}{qw( id method )};
+  next unless defined $id && defined $method;
+  my $r;
+  if ( $method eq 'initialize' ) {
+    $r = { protocolVersion => $msg->{params}{protocolVersion},
+      capabilities => { tools => {}, resources => {} }, serverInfo => { name => 'verify-mcp', version => '1' } };
+  }
+  elsif ( $method eq 'tools/list' ) {
+    $r = { tools => [ { name => 'echo', description => 'Echoes a word',
+      inputSchema => { type => 'object', properties => { word => { type => 'string' } } } } ] };
+  }
+  elsif ( $method eq 'tools/call' ) {
+    $r = { content => [ { type => 'text', text => 'mcp-echo:'.( $msg->{params}{arguments}{word} // '' ).':'.( $ENV{VERIFY_MCP_ENV} // '(unset)' ) } ] };
+  }
+  elsif ( $method eq 'resources/list' ) {
+    $r = { resources => [ { uri => 'file:///verify.txt', name => 'verify.txt', mimeType => 'text/plain' } ] };
+  }
+  elsif ( $method eq 'resources/read' ) {
+    $r = { contents => [ { uri => $msg->{params}{uri}, mimeType => 'text/plain', text => 'mcp-resource-body' } ] };
+  }
+  else {
+    reply({ jsonrpc => '2.0', id => $id, error => { code => -32601, message => "Method '$method' not found" } });
+    next;
+  }
+  reply({ jsonrpc => '2.0', id => $id, result => $r });
+}
+FAKE
+command -v perl >/dev/null || fail "perl is not on PATH (the MCP server of step 8 is run by it)"
+mcphome="$work/mcphome"
+mkdir -p "$mcphome/.raider" "$work/mcpcwd"
+cat > "$mcphome/.raider/config.yml" <<YAML
+mcp:
+  vm:
+    command: perl
+    args: [ "$work/fake-mcp.pl", "$work/mcp.pid" ]
+    env: { VERIFY_MCP_ENV: from-config }
+YAML
+cat > "$work/scenarios/mcp.json" <<'JSON'
+[ ["mcp__vm__echo", {"word": "ping"}],
+  ["list_mcp_resources", {}],
+  ["read_mcp_resource", {"server": "vm", "uri": "file:///verify.txt"}] ]
+JSON
+out=$(cd "$work/mcpcwd" && HOME="$mcphome" run -r "$work/mcpcwd" -e openai -k fake -m fake \
+        -o "url=http://127.0.0.1:$port/v1" --no-session --permission-mode bypassPermissions \
+        --json "scenario=mcp") \
+  || fail "MCP raid exited $?: $out"
+for want in 'SMOKE-DONE mcp-echo:ping:from-config' 'file:///verify\.txt' 'mcp-resource-body'; do
+  grep -qE -- "$want" <<< "$out" || fail "MCP raid: no /$want/ in: $out"
+done
+[ -s "$work/mcp.pid" ] || fail "MCP raid: the server never started"
+mcp_pid=$(cat "$work/mcp.pid")
+for _ in $(seq 50); do kill -0 "$mcp_pid" 2>/dev/null || break; sleep 0.1; done
+if kill -0 "$mcp_pid" 2>/dev/null; then fail "MCP raid: server PID $mcp_pid still running after the run"; fi
+echo "mcp stdio (home config server via PATH perl, handshake, tools/call, list_mcp_resources + read_mcp_resource, server stopped with the run): OK"
+
 echo "verify: OK"
