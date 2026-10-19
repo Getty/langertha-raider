@@ -1,0 +1,32 @@
+---
+claimed_at: 2026-10-19T13:02:39Z
+claimed_by: strom-c
+class: standard
+completed: 2026-10-19T13:02:38Z
+created: 2026-10-19T11:51:53Z
+id: 165
+priority: high
+started: 2026-10-19T11:52:36Z
+status: done
+tags:
+- claude-code-flow
+title: 'Slash commands like Claude Code: .claude/commands, plugin commands, skills
+  as /name, $ARGUMENTS, built-in commands'
+updated: 2026-10-19T13:02:39Z
+---
+
+Strom C. Plan: /home/getty/dev/perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md
+
+2026-10-19 11:57 strom-c: Worktree .claude/worktrees/strom-c (Branch strom-c von main b22ccb2). ADR 0030 festgelegt: Befehle = Skills in einem Katalog (Skill schlägt gleichnamigen Befehl); $N 0-basiert wie aktuelles Claude Code; !`cmd` läuft nur bei allow (allowed-tools zählt), sonst Abbruch ohne Rückfrage; @datei nur bei /name; eigener Eintrag ersetzt Built-in wie Claude Code; neu -p/--print; model-Frontmatter nur bei /name (Engine-Wechsel mitten im Lauf nicht möglich). Slice 1 (Renderer) und 2 (Katalog) laufen.
+
+2026-10-19 12:04 Slice renderer done (uncommitted): lib/Langertha/Raider/SlashCommand.pm + t/260_slash_command_render.t (18 subtests pass). render(entry, body, arguments, attach_files) -> {text|error, arguments, commands, files_read}; record_reads(result, read_state) seeds read-before-write after begin_run; allowed_tool_rules(entry) -> rule texts; check_command holds allowed-tools as extra allow rules only where the base verdict is ask-by-mode (stopgap until Permissions grows run-scoped rules). Skills::tool_text can delegate: render(entry, body, arguments) gives the same text for kind skill.
+
+2026-10-19 12:06 ADR 0030 §1 slice (catalogue) done, uncommitted: Context::Skills layout 'commands' (recursive *.md, a:b names), entries kind/user_invocable/plugin_root, skill beats command (also via add_roots), find_user_invocable + user_invocable, tool_text without Base-directory line for commands; Plugins->command_dirs; Context->command_roots (native .raider/commands, ~/.raider/commands; Claude ~/.claude/commands, .claude/commands; plugin commands), report kind=>'command'. New t/261_context_commands.t; t/124, t/126 expectations extended. Related t/12*,13*,16*,168,206,34,37,66 pass.
+
+2026-10-19 12:07 strom-c: Slice 1 Renderer (e4b8df8, t/260) und Slice 2 Katalog (f6197e0, t/261) als WIP. Gestartet: Slice 3 Aufruf/-p/Lauf-Regeln, Slice 4 eingebaute Befehle (/help /skills /compact /context /memory /agents /hooks /init, /reset /new).
+
+2026-10-19 12:34 Slice invocation (ADR 0030 §3/§4, skill tool via renderer) done, uncommitted: Permissions run_rules/add_run_rules/clear_run_rules (shared in for_subrun, in rule_list/report/policy_revision); SlashCommand::check_command plain decide, render adds allowed-tools as run rules only while checking; Settings disable_skill_shell_execution; Application slash_renderer/slash_run_request/skill_tool_text/resolve_run_model, begin_run takes allow_rules/allow_source/model/attach_reads, end_run clears run rules + restores engine; SkillTools render option; Runner run_options; Commands dispatch/resolve/command_method (catalogue lookup + built-ins fail-safe); REPL run_slash; Main -p/--print + oneshot_command. Tests t/262,263,264 + scenarios 190-194 (harness: /NAME prompt runs slash_run_request). Related t/12*,15*,16*,17*,19*,200,206,24*,26*,38,39,49-57,62,63 pass.
+
+Fertig auf Branch strom-c (6 WIP-Commits auf main a108f18, bis e19e13e). ADR 0030 + Nachtrag. Volle Suite -j3 grün: 195 Dateien, 1703 Tests. Tests t/260-266, Szenarien 190-194. Folgepunkte: mehrere Skills in einer Zeile (/a /b text), context: fork, Skill-hooks, effort, Listen-Zeichenbudget, @datei in normalen Prompts, ACP available_commands, /compact nicht im Journal + keine PreCompact/PostCompact-Hooks, model-Frontmatter bei Modell-Aufruf ignoriert, reload_mission greift noch auf private Raider-Methoden zu, Binary: SlashCommand startet bash per fork/exec (für Strom B prüfen).
+
+Koordinator 2026-10-19: geprüft (1703 grün -j3, t/260–266 rot gegen alten Code), zusammengefasst und gemerged. Offen siehe Notizen (context: fork, Skill-hooks, ACP available_commands, PreCompact/PostCompact …).
