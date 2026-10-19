@@ -1,0 +1,34 @@
+---
+claimed_at: 2026-10-19T06:13:06Z
+claimed_by: strom-p
+class: standard
+completed: 2026-10-19T06:13:06Z
+created: 2026-10-19T04:06:56Z
+id: 154
+priority: high
+started: 2026-10-19T05:09:07Z
+status: done
+tags:
+- claude-code-flow
+title: 'Permission modes like Claude Code: default, acceptEdits, plan, bypassPermissions;
+  settings rules; REPL prompt'
+updated: 2026-10-19T06:13:06Z
+---
+
+Strom P. Hängt an K und A. Plan: /home/getty/dev/perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md
+
+2026-10-19 05:13 Strom P gestartet: Worktree .claude/worktrees/p, Branch worktree-p (vom lokalen main dea227a). raider-worker baut in 4 Scheiben (S1 Regel-Engine, S2 Verdrahtung/nicht-interaktiv/Szenarien ab 60, S3 REPL-Rückfrage/plan/exit_plan_mode/additionalDirectories, S4 ADR 0020/Changes/POD). WIP-Commit nach jeder Scheibe.
+
+2026-10-19 05:22 S1 done (uncommitted in worktree p): lib/Langertha/Raider/Permissions.pm + Permissions/Rule.pm (pure logic: rule parsing/matching in Claude syntax, modes, deny>plan>ask>allow>mode, session rules shared via for_subrun, policy_revision, suggest_rule), t/130_permission_rules.t, t/131_permissions.t green. Strict choices to record in ADR 0020: raider-name rules apply to foreign MCP tools only as deny/ask; Read deny/ask also blocks grep/glob over a tree that could contain the denied path; unknown/foreign tools ask in plan mode; exact Bash rule may name a whole composite command.
+
+2026-10-19 05:40 S2 done (uncommitted): Config permissions key (both files, sources), Permissions->from_sources/report, Application permission_mode/skip_permissions/permissions/tool_gate/set_permission_mode, gate always on (also prompt builder), noninteractive ask->deny with how-to-allow, permission.* events in journal, CLI --permission-mode/--dangerously-skip-permissions, config explain section, Hall raiders.permission_mode. Scenario 11 unskipped, 60-72 new; harness permission_mode (default bypassPermissions). Tests adjusted to bypass: 50,52x2,53,55,56,62,201(acceptEdits),HallScenario. Follow-ups: ACP session/request_permission (not built); mcp__ rule scenario not feasible in harness (no foreign MCP mount).
+
+2026-10-19 05:41 S1 (fc9ff5d→rebased) und S2 (c520a85→rebased auf main b6bb59d nach K2-Merge) als WIP committet. S2: Gate in der Application immer an, nicht-interaktiv ask=Ablehnung mit Regelvorschlag, --permission-mode/--dangerously-skip-permissions, .raider/config.yml permissions:, Hall raiders.NAME.permission_mode, config explain, Szenario 11 frei, Szenarien 60-72. S3 läuft (REPL-Rückfrage, plan/exit_plan_mode, additionalDirectories, SearchTools-Filter).
+
+2026-10-19 05:54 S3 done (uncommitted): REPL approval (on_permission_request: once via Approval/session rule/no+reason), on_plan_review + exit_plan_mode (PlanTools, mounted once plan mode is entered, ToolEffects []), /permissions [mode M], reload_permissions on /reload (keeps session rules + runtime mode), additional directories in FileTools/SearchTools (extra_roots), SearchTools hider replaces the grep/glob block ('N paths hidden by permission rules', Perl engine while a hider is in force). Prompt builder uses the same gate and so the REPL prompt. Scenarios 73-81; t/143, t/144; my t/130-132 renamed to t/140-142 (K2 took 130-133).
+
+2026-10-19 06:00 S4 done (uncommitted): ADR 0021 (renamed from 0020 per hub; all refs in lib/t/docs updated), ADR 0005 'Complemented by: ADR 0021', CONTEXT.md Permission mode/rule, Changes [Permissions] (INCOMPATIBLE + remedy), README Permissions section/options/commands, bin/raider PERMISSIONS + =opt. Tests renumbered t/150-154. dzil build (DZIL_DOCKER_API_SKIP) + podchecker on built files + author-pod-syntax.t green. Card not moved (coordinator moves it).
+
+Strom P fertig auf Branch worktree-p (Worktree .claude/worktrees/p), rebased auf main b6bb59d. WIP-Commits: S1 Regel-Engine, S2 Verdrahtung/CLI/Hall/Szenarien 11+60-72, S3 REPL-Rückfrage/plan+exit_plan_mode/additionalDirectories/Suchfilter + Szenarien 73-81, S4 ADR 0021/Changes/README/POD; Tests t/150-154. Volle Suite -j3: 135 Dateien, 1253 Tests PASS (nur Live-Tests übersprungen). Offen: Modus-Vererbung an Subagenten nach A-Merge über Permissions->for_subrun verdrahten; ACP session/request_permission; /reload ändert additional directories der gemounteten Tools nicht; kein mcp__-Szenario (Harness kann keinen fremden MCP-Server mounten). WIP-Commits beim Merge zusammenfassen.
+
+Koordinator 2026-10-19: geprüft (1253 grün, Gegenprobe rot, config explain liest Gettys Settings), zusammengefasst und gemerged. Offen: Modus-Vererbung an Subagenten + agent in ToolEffects (-> Strom A nach Rebase); ACP session/request_permission; /reload aktualisiert additionalDirectories gemounteter Tools nicht; defaultMode 'auto' (neuer Claude-Code-Modus) wird ignoriert -> default.
