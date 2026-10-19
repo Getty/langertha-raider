@@ -1,0 +1,819 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use utf8;
+use FindBin;
+use lib "$FindBin::Bin/../lib";
+use Carp qw( croak );
+use Getopt::Long qw( GetOptions );
+use JSON::MaybeXS ();
+use Path::Tiny;
+use Pod::Usage qw( pod2usage );
+use YAML::PP;
+use YAML::PP::Common qw( PRESERVE_FLOW_STYLE PRESERVE_ORDER YAML_FLOW_MAPPING_STYLE YAML_FLOW_SEQUENCE_STYLE );
+use Langertha::Raider::ToolNames;
+
+binmode STDOUT, ':encoding(UTF-8)';
+binmode STDERR, ':encoding(UTF-8)';
+
+=head1 NAME
+
+claude-log-to-scenario - draft a raider scenario from a section of a Claude Code session
+
+=head1 SYNOPSIS
+
+    maint/claude-log-to-scenario SESSION --list
+    maint/claude-log-to-scenario [--project DIR] SESSION [--from UUID] [--turns N]
+        [--title TEXT] [--root DIR] [--home DIR] [-o FILE]
+
+    maint/claude-log-to-scenario 1eccd093 --list
+    maint/claude-log-to-scenario 1eccd093-ac1a-4db8-944c-edc0621ec6f3 --from 787db9a7 --turns 4 \
+        -o t/scenarios/claude-logs/50-skill-then-read.yml
+
+=head1 DESCRIPTION
+
+Reads a Claude Code session log (the JSONL file Claude Code keeps under
+F<~/.claude/projects/E<lt>projectE<gt>/E<lt>sessionE<gt>.jsonl>) and writes the
+chosen section of it as a scenario in the format of F<t/200_scenarios.t> (the
+keys are documented in F<t/lib/Test/Raider/Scenario.pm>): what Claude Code's
+model answered becomes the C<script:> of raider's scripted model, and what
+Claude Code's tools answered becomes the C<expect:> raider's real tools have
+to meet. The output is a B<draft> to curate, never a finished test; its head
+comment says so.
+
+=over
+
+=item * A step of C<script:> is one model response. Claude Code writes one
+response over several lines with the same C<message.id> (a line per content
+block); they are put back together. Thinking blocks are left out. A response
+with tool calls becomes C<tool_calls:> (its text goes into a comment), one
+with text only becomes C<text:>.
+
+=item * Tool names and arguments are translated by
+L<Langertha::Raider::ToolNames> (C<Read> becomes C<read_file> with C<path>,
+C<Agent> becomes C<agent>, the C<Bash> timeout becomes seconds, ...).
+C<MultiEdit> becomes one C<edit_file> per edit. A tool raider does not have
+(C<ToolSearch>, C<SendMessage>, C<Monitor>, ...) and every C<mcp__*> tool (a
+scenario mounts no MCP server) is left out and noted in a comment.
+
+=item * Paths: under the project root (the C<cwd> the log records, or
+C<--root>) they become relative; under the home (C<$HOME>, or C<--home>)
+C<{{HOME}}/...>; a file tool call on any other path is left out and noted. In
+every other string of a tool call the root becomes C<{{ROOT}}> and the home
+C<{{HOME}}>, which the scenario runner fills in; in the prompt and the model's
+texts the root is dropped (C<lib/A.pm>, C<.>) and the home becomes C<~>, as
+those are compared literally.
+
+=item * C<files:> (and C<home:>) are rebuilt from what the session shows of
+each file before it was changed: a C<Read> that returned the whole file, or
+the C<originalFile> Claude Code records for an C<Edit> or a C<Write> over an
+existing file. A file read only in part, or edited without a recorded
+original, is not rebuilt and noted.
+
+=item * C<expect:> lists every tool call with its name and C<error: true>
+where Claude Code's call failed, a short regex anchor (the first line of the
+file) for a C<read_file> that read a whole file, and the last text as the
+C<answer>. Claude Code's error text goes into a comment: raider words its
+errors differently. C<bash> gets no anchor: its output depends on the machine.
+
+=item * Secrets are replaced by C<REDACTED> everywhere, comments included:
+API keys (C<sk-...>, C<ghp_...>, C<github_pat_...>, C<AKIA...>, C<xox?-...>,
+C<AIza...>, C<glpat-...>, C<npm_...>), JWTs, private key blocks, bearer and
+basic credentials, passwords in URLs and the value of every assignment whose
+name says key, token, secret, password or credential. It errs on the side of
+too much.
+
+=back
+
+Sidechain records (a subagent's own turns) are skipped; given a subagent's
+log (F<E<lt>sessionE<gt>/subagents/agent-*.jsonl>) those are its turns.
+
+=head1 OPTIONS
+
+=over
+
+=item SESSION
+
+The session log: a path, or a session id (also the start of one, or an
+C<agent-...> id) looked up in F<$CLAUDE_CONFIG_DIR/projects/*/> (default
+F<~/.claude/projects>), including the subagent logs.
+
+=item --project DIR
+
+Look the session id up only in this project directory: a path, or a name
+under F<projects/> (C<-home-getty-dev-skilletor>).
+
+=item --list
+
+Print the prompts and the model responses of the session, each with its
+record id, and exit.
+
+=item --from UUID
+
+The record to start at (a unique prefix will do): a user prompt (the prompt
+of the scenario, the section starts after it) or a model response (the section
+starts with it; the prompt is the last one before). Default: the first prompt.
+
+=item --turns N
+
+How many model responses to take. A user prompt among them starts the next
+of C<prompts:>. Default: up to the next user prompt.
+
+=item --title TEXT
+
+The C<title:>. Default: the first line of the prompt.
+
+=item --root DIR
+
+The project root of the session. Default: the C<cwd> of the first record taken.
+
+=item --home DIR
+
+The home of the session. Default: C<$HOME>.
+
+=item -o FILE, --output FILE
+
+Where to write the scenario. Default: standard output.
+
+=back
+
+=head1 LIMITS
+
+=over
+
+=item * The scenario's C<bash> calls run for real when it is run. A command
+naming a path outside the home still names that real path: read every command
+before running a draft.
+
+=item * What a C<bash> command did to files is unknown: a file a command
+created or changed before the model read it is rebuilt as the model saw it.
+
+=item * C<agent> calls replay the call only: the subagent's own model turns
+are in its own log and not in C<script:>.
+
+=item * Old logs (before C<toolUseResult>) carry a whole file only as the
+numbered result text; its last newline is assumed.
+
+=item * The secret patterns are patterns: a secret in another shape passes.
+Read the draft before committing it.
+
+=back
+
+=cut
+
+my $JSON  = JSON::MaybeXS->new( utf8 => 1, canonical => 1, convert_blessed => 1 );
+my $YAML  = YAML::PP->new( boolean => 'JSON::PP', preserve => PRESERVE_FLOW_STYLE | PRESERVE_ORDER, width => 1000 );
+my $TRUE  = JSON::MaybeXS->true;
+my $tools = 'Langertha::Raider::ToolNames';
+
+# Keys written first in a flow mapping, the way the hand-written scenarios read.
+my %KEY_RANK = (
+  name => 0, path => 1, command => 1, pattern => 1,
+  error => 2, old_string => 2, content => 2, text => 3, new_string => 3,
+);
+
+my @SECRET_RE = (
+  qr/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----/s,
+  qr/\bsk-[A-Za-z0-9_-]{16,}/,
+  qr/\bgh[pousr]_[A-Za-z0-9]{20,}/,
+  qr/\bgithub_pat_[A-Za-z0-9_]{20,}/,
+  qr/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/,
+  qr/\bxox[abposr]-[A-Za-z0-9-]{10,}/,
+  qr/\bAIza[0-9A-Za-z_-]{35}/,
+  qr/\bglpat-[A-Za-z0-9_-]{20,}/,
+  qr/\bnpm_[A-Za-z0-9]{36}/,
+  qr/\b[0-9]{8,10}:AA[A-Za-z0-9_-]{30,}/,
+  qr/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+/,
+);
+my $SECRET_NAME = qr/[A-Za-z0-9_.-]*(?:key|token|secret|passw(?:or)?d|passphrase|credential|private)[A-Za-z0-9_]*/i;
+
+sub main {
+  my %opt;
+  GetOptions(
+    'project=s'  => \$opt{project},
+    'list'       => \$opt{list},
+    'from=s'     => \$opt{from},
+    'turns=i'    => \$opt{turns},
+    'title=s'    => \$opt{title},
+    'root=s'     => \$opt{root},
+    'home=s'     => \$opt{home},
+    'output|o=s' => \$opt{output},
+    'help|h'     => \$opt{help},
+  ) or pod2usage(2);
+  pod2usage( -verbose => 2, -exitval => 0 ) if $opt{help};
+  pod2usage(2) unless @ARGV == 1;
+  pod2usage( -message => '--turns must be at least 1', -exitval => 2 ) if defined $opt{turns} && $opt{turns} < 1;
+
+  my $log = read_log( find_session( $ARGV[0], $opt{project} ) );
+  if ( $opt{list} ) {
+    list_events($log);
+    return 0;
+  }
+  my $yaml = scenario_yaml( $log, select_section( $log, \%opt ), \%opt );
+  if ( defined $opt{output} ) {
+    path( $opt{output} )->touchpath->spew_utf8($yaml);
+  }
+  else {
+    print $yaml;
+  }
+  return 0;
+}
+
+#### The session log
+
+sub find_session {
+  my ( $arg, $project ) = @_;
+  my $file = path($arg);
+  return $file if $file->is_file;
+  croak 'No session log '.$arg if $arg =~ m{/};
+  my $config   = defined $ENV{CLAUDE_CONFIG_DIR} ? path( $ENV{CLAUDE_CONFIG_DIR} ) : path( $ENV{HOME} // '.', '.claude' );
+  my $projects = $config->child('projects');
+  my @dirs = defined $project
+    ? ( path($project)->is_dir ? path($project) : $projects->child($project) )
+    : ( $projects->is_dir ? grep { $_->is_dir } $projects->children : () );
+  ( my $id = $arg ) =~ s/\.jsonl\z//;
+  my @hits;
+  for my $dir ( grep { $_->is_dir } @dirs ) {
+    push @hits, grep { $_->basename =~ /\A\Q$id\E/ } $dir->children(qr/\.jsonl\z/);
+    for my $sub ( grep { $_->child('subagents')->is_dir } $dir->children ) {
+      push @hits, grep { $_->basename =~ /\A\Q$id\E/ } $sub->child('subagents')->children(qr/\.jsonl\z/);
+    }
+  }
+  croak 'No session '.$id.' under '.( defined $project ? $project : $projects ) unless @hits;
+  croak 'Session '.$id.' is not unique: '.join( ', ', sort map {"$_"} @hits ) if @hits > 1;
+  return $hits[0];
+}
+
+# The conversation of the log as events in order: prompts (a user's text) and
+# steps (one model response, its blocks gathered over every line of its
+# message id), plus the tool results by tool_use id.
+sub read_log {
+  my ( $file ) = @_;
+  my @records;
+  for my $line ( $file->lines_raw ) {
+    my $r = eval { $JSON->decode($line) };
+    push @records, $r if ref $r eq 'HASH' && ( $r->{type} // '' ) =~ /\A(?:user|assistant)\z/;
+  }
+  croak 'No conversation in '.$file unless @records;
+  my $side = !grep { !$_->{isSidechain} } @records;   # a subagent's own log
+  @records = grep { !!$_->{isSidechain} == $side } @records;
+
+  my ( @events, %step_of, %event_of, %result_of );
+  for my $r (@records) {
+    my $content = ref $r->{message} eq 'HASH' ? $r->{message}{content} : undef;
+    if ( $r->{type} eq 'assistant' ) {
+      my $id   = $r->{message}{id} // $r->{uuid};
+      my $step = $step_of{$id} //= do {
+        my $s = { kind => 'step', id => $id, uuid => $r->{uuid}, time => $r->{timestamp}, cwd => $r->{cwd}, blocks => [] };
+        push @events, $s;
+        $s;
+      };
+      push @{ $step->{blocks} }, ref $content eq 'ARRAY' ? @$content : defined $content ? { type => 'text', text => $content } : ();
+      $event_of{ $r->{uuid} } = $step if defined $r->{uuid};
+      next;
+    }
+    my @results = ref $content eq 'ARRAY' ? grep { ( $_->{type} // '' ) eq 'tool_result' } @$content : ();
+    if (@results) {
+      for my $b (@results) {
+        $result_of{ $b->{tool_use_id} } = { block => $b, @results == 1 ? ( data => $r->{toolUseResult} ) : () };
+      }
+      $event_of{ $r->{uuid} } = { kind => 'result' } if defined $r->{uuid};
+      next;
+    }
+    my $text = prompt_text($r) // next;
+    my $e = { kind => 'prompt', uuid => $r->{uuid}, time => $r->{timestamp}, cwd => $r->{cwd}, text => $text };
+    push @events, $e;
+    $event_of{ $r->{uuid} } = $e if defined $r->{uuid};
+  }
+  return { file => $file, events => \@events, event_of => \%event_of, result_of => \%result_of };
+}
+
+sub prompt_text {
+  my ( $r ) = @_;
+  return if $r->{isMeta} || $r->{isCompactSummary} || $r->{isVisibleInTranscriptOnly};
+  my $c    = $r->{message}{content};
+  my $text = ref $c eq 'ARRAY'
+    ? join( "\n\n", map { $_->{text} // '' } grep { ( $_->{type} // '' ) eq 'text' } @$c )
+    : $c;
+  return unless defined $text;
+  $text = strip_reminders($text);
+  return if $text =~ /\A\s*\z/
+    || $text =~ /\A\[Request interrupted/
+    || $text =~ /\A\s*<(?:command-name|command-message|command-args|local-command-\w+|bash-\w+)>/;
+  return $text;
+}
+
+sub strip_reminders {
+  my ( $text ) = @_;
+  $text =~ s{\s*<system-reminder>.*?</system-reminder>\s*}{\n}gs;
+  $text =~ s/\A\n+//;
+  $text =~ s/\n+\z/\n/ if $text =~ /\n\z/;
+  return $text;
+}
+
+sub list_events {
+  my ( $log ) = @_;
+  for my $e ( @{ $log->{events} } ) {
+    my $what = $e->{kind} eq 'prompt'
+      ? 'PROMPT  '.one_line( $e->{text}, 90 )
+      : 'MODEL   '.join( ' ', map {
+          $_->{type} eq 'tool_use' ? $_->{name} : $_->{type} eq 'text' ? '"'.one_line( $_->{text}, 40 ).'"' : ()
+        } @{ $e->{blocks} } );
+    print join( '  ', $e->{uuid} // '-', $e->{time} // '-', redact($what) ), "\n";
+  }
+}
+
+sub one_line {
+  my ( $text, $max ) = @_;
+  my ( $line ) = grep { /\S/ } split /\n/, $text // '';
+  $line //= '';
+  $line =~ s/\A\s+|\s+\z//g;
+  return length $line > $max ? substr( $line, 0, $max - 3 ).'...' : $line;
+}
+
+#### The section
+
+sub select_section {
+  my ( $log, $opt ) = @_;
+  my @events = @{ $log->{events} };
+  my $start;
+  if ( defined $opt->{from} ) {
+    my $from = $opt->{from};
+    my @hits = grep { index( $_, $from ) == 0 } keys %{ $log->{event_of} };
+    croak 'No record '.$from.' in '.$log->{file} unless @hits;
+    croak 'Record '.$from.' is not unique: '.join( ', ', sort @hits ) if @hits > 1;
+    $start = $log->{event_of}{ $hits[0] };
+    croak 'Record '.$hits[0].' is a tool result: start at a prompt or a model response' if $start->{kind} eq 'result';
+  }
+  else {
+    ($start) = grep { $_->{kind} eq 'prompt' } @events;
+    croak 'No prompt in '.$log->{file}.': pick a model response with --from' unless $start;
+  }
+  my ($i) = grep { $events[$_] == $start } 0 .. $#events;
+
+  my @spans;
+  if ( $start->{kind} eq 'prompt' ) {
+    push @spans, { prompt => $start->{text}, steps => [] };
+    $i++;
+  }
+  else {
+    my ($before) = grep { $_->{kind} eq 'prompt' } reverse @events[ 0 .. $i - 1 ];
+    push @spans, { prompt => $before ? $before->{text} : undef, steps => [] };
+  }
+  my $taken = 0;
+  for my $e ( @events[ $i .. $#events ] ) {
+    if ( $e->{kind} eq 'prompt' ) {
+      last unless defined $opt->{turns};
+      push @spans, { prompt => $e->{text}, steps => [] };
+      next;
+    }
+    push @{ $spans[-1]{steps} }, $e;
+    last if defined $opt->{turns} && ++$taken >= $opt->{turns};
+  }
+  pop @spans while @spans > 1 && !@{ $spans[-1]{steps} };
+  croak 'The section has no model response' unless grep { @{ $_->{steps} } } @spans;
+  return { start => $start, spans => \@spans, taken => scalar map { @{ $_->{steps} } } @spans };
+}
+
+#### Paths, placeholders, secrets
+
+sub context_for {
+  my ( $log, $section, $opt ) = @_;
+  my $root = $opt->{root} // $section->{start}{cwd}
+    // croak 'The log records no cwd: give the project root with --root';
+  my $home = $opt->{home} // $ENV{HOME} // croak 'No home: give it with --home';
+  s{/+\z}{} for $root, $home;
+  return {
+    root => $root, home => $home,
+    files => {}, home_files => {}, decided => {}, file_notes => [],
+  };
+}
+
+# A path as the scenario names it: relative under the root, {{HOME}}/... under
+# the home; undef elsewhere.
+sub map_path {
+  my ( $ctx, $p ) = @_;
+  return $p unless $p =~ m{\A/};
+  my ( $where, $rel ) = place( $ctx, $p );
+  return unless $where;
+  return $where eq 'files' ? $rel : $rel eq '.' ? '{{HOME}}' : '{{HOME}}/'.$rel;
+}
+
+sub place {
+  my ( $ctx, $p ) = @_;
+  $p =~ s{/+\z}{} unless $p eq '/';
+  for ( [ files => $ctx->{root} ], [ home => $ctx->{home} ] ) {
+    my ( $where, $base ) = @$_;
+    return ( $where, '.' ) if $p eq $base;
+    return ( $where, substr( $p, length($base) + 1 ) ) if index( $p, $base.'/' ) == 0;
+  }
+  return;
+}
+
+# Inside tool arguments and file contents: the runner fills the placeholders.
+sub fill_placeholders {
+  my ( $ctx, $text ) = @_;
+  my ( $root, $home ) = @{$ctx}{qw( root home )};
+  $text =~ s{\Q$root\E(?![\w.-])}{\{\{ROOT\}\}}g;
+  $text =~ s{\Q$home\E(?![\w.-])}{\{\{HOME\}\}}g;
+  return $text;
+}
+
+# In texts compared literally (prompt, answers, comments).
+sub plain_paths {
+  my ( $ctx, $text ) = @_;
+  my ( $root, $home ) = @{$ctx}{qw( root home )};
+  $text =~ s{\Q$root\E/}{}g;
+  $text =~ s{\Q$root\E(?![\w.-])}{.}g;
+  $text =~ s{\Q$home\E(?![\w.-])}{~}g;
+  return $text;
+}
+
+sub deep {
+  my ( $code, $v ) = @_;
+  return ref $v eq 'HASH' ? { map { $_ => deep( $code, $v->{$_} ) } keys %$v }
+       : ref $v eq 'ARRAY' ? [ map { deep( $code, $_ ) } @$v ]
+       : defined $v && !ref $v ? $code->($v)
+       : $v;
+}
+
+
+sub redact {
+  my ( $text ) = @_;
+  return $text unless defined $text;
+  $text =~ s/$_/REDACTED/g for @SECRET_RE;
+  $text =~ s{\b(Bearer|Basic)(\s+)[A-Za-z0-9._~+/=-]{8,}}{$1$2REDACTED}g;
+  $text =~ s{(Authorization:\s*token\s+)\S+}{$1REDACTED}gi;
+  $text =~ s{(\b[a-z][a-z0-9+.-]*://[^/\s:@'"]+:)[^/\s@'"]+@}{$1REDACTED@}gi;
+  $text =~ s/([\$\@%]?)\b($SECRET_NAME)(["']?\s*(?:=>|(?<![:=!<>])=(?!=)|(?<!:):(?!:))\s*)(["']?)([^\s"',;)]+)/redact_assignment( $1, $2, $3, $4, $5 )/ge;
+  return $text;
+}
+
+# NAME=value, NAME: value, NAME => 'value': the value goes, unless it is
+# plainly no secret -- code ($token = shift, os.environ["X"]), a short or
+# punctuation-only word, a small number, a keyword.
+sub redact_assignment {
+  my ( $sigil, $name, $op, $quote, $value ) = @_;
+  my $bare = !$quote;
+  my $kept = ( $bare && ( $sigil || $value =~ m{\A[\$\@%&(\[\{<>=!~\\/-]} || $value =~ m{[(\[]} ) )
+    || ( $bare && ( length $value < 4 || $value !~ /[A-Za-z0-9]/ ) )
+    || $value =~ /\A(?:[0-9]{1,6}|true|false|null|undef|none|yes|no|REDACTED.*)\z/i;
+  return $sigil.$name.$op.$quote.( $kept ? $value : 'REDACTED' );
+}
+
+#### Tool calls
+
+sub result_text {
+  my ( $result ) = @_;
+  return '' unless $result;
+  my $c = $result->{block}{content};
+  return ref $c eq 'ARRAY' ? join( "\n", map { $_->{text} // '' } grep { ( $_->{type} // '' ) eq 'text' } @$c ) : $c // '';
+}
+
+# The whole content of a file a Read returned, or (undef, why not).
+sub read_content {
+  my ( $use, $result ) = @_;
+  return ( undef, 'no result in the log' ) unless $result;
+  return ( undef, 'the read failed' ) if $result->{block}{is_error};
+  my $data = $result->{data};
+  if ( ref $data eq 'HASH' && exists $data->{file} ) {
+    return ( undef, 'not a text file ('.( $data->{type} // '?' ).')' )
+      unless ( $data->{type} // '' ) eq 'text' && ref $data->{file} eq 'HASH';
+    my $f = $data->{file};
+    return $f->{content}
+      if ( $f->{startLine} // 1 ) == 1 && defined $f->{numLines} && defined $f->{totalLines}
+        && $f->{numLines} == $f->{totalLines} && defined $f->{content};
+    return ( undef, 'read only in part (lines '.( $f->{startLine} // '?' ).' to '
+      .( ( $f->{startLine} // 1 ) + ( $f->{numLines} // 0 ) - 1 ).' of '.( $f->{totalLines} // '?' ).')' );
+  }
+  return ( undef, 'not a text file' ) if ref $data eq 'HASH';
+  my $in = $use->{input} // {};
+  return ( undef, 'read only in part' ) if defined $in->{offset} || defined $in->{limit};
+  my @lines = split /\n/, strip_reminders( result_text($result) ), -1;
+  pop @lines if @lines && $lines[-1] eq '';
+  return ( undef, 'the result is empty' ) unless @lines;
+  my ( $n, @out ) = (0);
+  for my $line (@lines) {
+    return ( undef, 'the result is not numbered line by line' )
+      unless $line =~ /\A\s*([0-9]+)(?:\t|\x{2192})(.*)\z/s && $1 == ++$n;
+    push @out, $2;
+  }
+  return ( undef, 'possibly cut off at 2000 lines' ) if $n >= 2000;
+  return join( "\n", @out )."\n";
+}
+
+# What the session shows of a file before the section changed it.
+sub learn_file {
+  my ( $ctx, $use, $result ) = @_;
+  my $name = $use->{name};
+  return unless $name =~ /\A(?:Read|Edit|MultiEdit|Write)\z/;
+  my $fp = ( $use->{input} // {} )->{file_path};
+  return unless defined $fp && $fp =~ m{\A/};
+  my ( $where, $rel ) = place( $ctx, $fp );
+  return unless $where;
+  my $key = $where.'/'.$rel;
+  return if $ctx->{decided}{$key};
+  my $shown = $where eq 'files' ? $rel : '~/'.$rel;
+  my $data  = $result ? $result->{data} : undef;
+  my $set   = sub {
+    my ( $content ) = @_;
+    $ctx->{ $where eq 'files' ? 'files' : 'home_files' }{$rel} = fill_placeholders( $ctx, redact($content) );
+    $ctx->{decided}{$key} = 1;
+  };
+  my $unknown = sub {
+    my ( $why, $final ) = @_;
+    # one note for the reads in part, one for what settles it
+    push @{ $ctx->{file_notes} }, $shown.': '.$why if $final || !$ctx->{noted}{$key}++;
+    $ctx->{decided}{$key} = 1 if $final;
+  };
+  if ( $name eq 'Read' ) {
+    if ( $result && $result->{block}{is_error} ) {
+      my $why = one_line( result_text($result), 80 );
+      return $unknown->( 'its first read failed ('.$why.'), not written', 1 );
+    }
+    my ( $content, $why ) = read_content( $use, $result );
+    return $set->($content) if defined $content;
+    return $unknown->( 'not rebuilt, '.$why );
+  }
+  if ( $name eq 'Write' && ref $data eq 'HASH' && ( $data->{type} // '' ) eq 'create' ) {
+    return $ctx->{decided}{$key} = 1;   # did not exist
+  }
+  return $set->( $data->{originalFile} ) if ref $data eq 'HASH' && defined $data->{originalFile};
+  return $unknown->( 'changed by '.$name.' before any whole read, its content is not in the log', 1 );
+}
+
+# A Claude Code tool call as raider calls: ( [ [ tool, \%args ], ... ] ) or ( [], note ).
+sub translate_call {
+  my ( $ctx, $use ) = @_;
+  my $name  = $use->{name} // '?';
+  my $input = ref $use->{input} eq 'HASH' ? $use->{input} : {};
+  return ( [], 'left out '.$name.': an MCP tool, the scenario mounts no MCP server' ) if $tools->is_mcp($name);
+  my $tool = $tools->raider_name($name);
+  return ( [], 'left out '.$name.': raider has no such tool' ) unless defined $tool;
+  my @inputs = $name eq 'MultiEdit'
+    ? map { +{ file_path => $input->{file_path}, %$_ } } grep { ref $_ eq 'HASH' } @{ $input->{edits} // [] }
+    : ($input);
+  my @calls;
+  for my $in (@inputs) {
+    my $args = $tools->raider_input( $tool, $in );
+    my %mapped;
+    for my $key ( path_keys( $tool, $args ) ) {
+      my $p = map_path( $ctx, $args->{$key} );
+      return ( [], 'left out '.$name.' '.$args->{$key}.': outside the project and the home' ) unless defined $p;
+      $mapped{$key} = $p;
+    }
+    $args = deep( sub { fill_placeholders( $ctx, redact( $_[0] ) ) }, $args );
+    $args->{$_} = $mapped{$_} for keys %mapped;
+    push @calls, [ $tool, $args ];
+  }
+  return ( \@calls );
+}
+
+sub path_keys {
+  my ( $tool, $args ) = @_;
+  my @keys = $tool =~ /\A(?:read_file|write_file|edit_file|list_files|glob|grep)\z/ ? ('path') : ();
+  push @keys, 'pattern' if $tool eq 'glob';
+  return grep { defined $args->{$_} && !ref $args->{$_} && $args->{$_} =~ m{\A/} } @keys;
+}
+
+sub expectation {
+  my ( $ctx, $tool, $use, $result ) = @_;
+  my %want = ( name => $tool );
+  my @notes;
+  unless ($result) {
+    push @notes, 'no result in the log';
+    return ( \%want, \@notes );
+  }
+  if ( $result->{block}{is_error} ) {
+    $want{error} = $TRUE;
+    push @notes, 'Claude Code: '.one_line( plain_paths( $ctx, redact( result_text($result) ) ), 100 );
+    return ( \%want, \@notes );
+  }
+  if ( $tool eq 'read_file' ) {
+    my ($content) = read_content( $use, $result );
+    my ($first) = grep { /\S/ } split /\n/, $content // '';
+    if ( defined $first ) {
+      $first =~ s/\A\s+|\s+\z//g;
+      $first = substr( $first, 0, 40 );
+      $first = redact($first);
+      $want{text} = regex_quote($first)
+        unless index( $first, $ctx->{root} ) >= 0 || index( $first, $ctx->{home} ) >= 0;
+    }
+  }
+  return ( \%want, \@notes );
+}
+
+sub regex_quote {
+  my ( $text ) = @_;
+  $text =~ s{([\\.^\$|?*+()\[\]{}])}{\\$1}g;
+  return $text;
+}
+
+#### The scenario
+
+sub scenario_yaml {
+  my ( $log, $section, $opt ) = @_;
+  my $ctx = context_for( $log, $section, $opt );
+
+  my ( @prompts, @items, @tools, @pending, $answer );
+  for my $span ( @{ $section->{spans} } ) {
+    push @prompts, defined $span->{prompt} ? redact( plain_paths( $ctx, $span->{prompt} ) ) : undef;
+    my $last_kind = '';
+    for my $step ( @{ $span->{steps} } ) {
+      my @texts = map { $_->{text} } grep { ( $_->{type} // '' ) eq 'text' && defined $_->{text} && $_->{text} =~ /\S/ } @{ $step->{blocks} };
+      my @uses  = grep { ( $_->{type} // '' ) eq 'tool_use' } @{ $step->{blocks} };
+      my $text  = redact( plain_paths( $ctx, join "\n\n", @texts ) );
+      push @pending, 'left out a '.$_->{type}.' block' for grep { ( $_->{type} // '' ) =~ /\A(?:server_tool_use|.+_tool_result)\z/ } @{ $step->{blocks} };
+      unless (@uses) {
+        next unless @texts;
+        push @items, { comments => [ splice @pending ], step => { text => $text } };
+        $answer    = $text;
+        $last_kind = 'text';
+        next;
+      }
+      my @calls;
+      my @comments = ( @texts ? 'model: '.one_line( $text, 100 ) : () );
+      for my $use (@uses) {
+        my $result = $log->{result_of}{ $use->{id} // '' };
+        learn_file( $ctx, $use, $result );
+        my ( $translated, $note ) = translate_call( $ctx, $use );
+        push @comments, plain_paths( $ctx, redact($note) ) if defined $note;
+        for my $call (@$translated) {
+          push @calls, $call;
+          my ( $want, $notes ) = expectation( $ctx, $call->[0], $use, $result );
+          push @$notes, 'from MultiEdit: Claude Code applies its edits all or none' if $use->{name} eq 'MultiEdit';
+          push @tools, { want => $want, comments => $notes };
+        }
+      }
+      unless (@calls) {
+        push @pending, @comments;
+        next;
+      }
+      push @items, { comments => [ splice( @pending ), @comments ], step => { tool_calls => \@calls } };
+      $last_kind = 'calls';
+    }
+    next if $last_kind eq 'text';
+    # raider ends a run on a text answer; a turn that stopped elsewhere gets one.
+    push @items, { comments => [ splice( @pending ), 'the turn ends here without a text answer in the log' ], step => { text => 'done' } };
+    $answer = 'done';
+  }
+
+  my %doc;
+  $doc{title} = $opt->{title} // default_title( $ctx, $log, \@prompts );
+  my $no_prompt = !defined $prompts[0];
+  $prompts[0] //= 'go';
+  if ( @prompts > 1 ) { $doc{prompts} = \@prompts } else { $doc{prompt} = $prompts[0] }
+  $doc{files}  = $ctx->{files}      if %{ $ctx->{files} };
+  $doc{home}   = $ctx->{home_files} if %{ $ctx->{home_files} };
+  $doc{script} = [ map { $_->{step} } @items ];
+  $doc{expect} = { answer => $answer, @tools ? ( tools => [ map { $_->{want} } @tools ] ) : () };
+
+  my $out = header( $log, $section, $ctx );
+  $out .= dump_key( 0, title => $doc{title} );
+  $out .= "# no user prompt before the section: a placeholder\n" if $no_prompt;
+  $out .= exists $doc{prompts} ? dump_key( 0, prompts => $doc{prompts} ) : dump_key( 0, prompt => $doc{prompt} );
+  $out .= join '', map { '# '.$_."\n" } map { redact( plain_paths( $ctx, $_ ) ) } @{ $ctx->{file_notes} };
+  $out .= dump_key( 0, files => $doc{files} ) if $doc{files};
+  $out .= dump_key( 0, home => $doc{home} )   if $doc{home};
+  $out .= "script:\n";
+  for my $item (@items) {
+    $out .= comments( 2, $item->{comments} ).dump_item( 2, flowed( $item->{step} ) );
+  }
+  $out .= comments( 2, \@pending );
+  $out .= "expect:\n".dump_key( 2, answer => $doc{expect}{answer} );
+  if (@tools) {
+    $out .= "  tools:\n";
+    $out .= comments( 4, $_->{comments} ).dump_item( 4, flow_or_block( $_->{want} ) ) for @tools;
+  }
+
+  my $back = YAML::PP->new( boolean => 'JSON::PP' )->load_string($out);
+  my $where = first_difference( \%doc, $back, '' );
+  croak 'The scenario does not read back as written at '.$where.' (a YAML writing problem)' if defined $where;
+  return $out;
+}
+
+# Where two data structures part, or undef when they do not.
+sub first_difference {
+  my ( $want, $got, $where ) = @_;
+  if ( ref $want eq 'HASH' && ref $got eq 'HASH' ) {
+    for my $key ( sort keys %{ { %$want, %$got } } ) {
+      my $d = first_difference( $want->{$key}, $got->{$key}, $where.'/'.$key );
+      return $d if defined $d;
+    }
+    return;
+  }
+  if ( ref $want eq 'ARRAY' && ref $got eq 'ARRAY' ) {
+    for my $i ( 0 .. ( $#$want > $#$got ? $#$want : $#$got ) ) {
+      my $d = first_difference( $want->[$i], $got->[$i], $where.'/'.$i );
+      return $d if defined $d;
+    }
+    return;
+  }
+  return $JSON->encode( [$want] ) eq $JSON->encode( [$got] ) ? undef : $where || '/';
+}
+
+sub default_title {
+  my ( $ctx, $log, $prompts ) = @_;
+  my ($prompt) = grep { defined } @$prompts;
+  return one_line( $prompt, 72 ) if defined $prompt && $prompt =~ /\S/;
+  return 'a section of Claude Code session '.$log->{file}->basename('.jsonl');
+}
+
+sub header {
+  my ( $log, $section, $ctx ) = @_;
+  my $start = $section->{start};
+  my @lines = (
+    'DRAFT -- written by maint/claude-log-to-scenario from Claude Code session',
+    $log->{file}->basename('.jsonl').', from record '.( $start->{uuid} // '?' ).' ('.( $start->{time} // '?' ).'),',
+    $section->{taken}.' model response'.( $section->{taken} == 1 ? '' : 's' ).'. Curate it before it goes into t/scenarios/:',
+    '- files: holds what the session showed in full of each file before changing it;',
+    '- tool calls raider has no counterpart for are left out (noted where they were);',
+    '- the expect: anchors are guesses, raider words results and errors its own way;',
+    '- secrets are REDACTED, the project path is {{ROOT}}, the home {{HOME}};',
+    '- the bash commands run for real when the scenario runs: read them first.',
+  );
+  return join( '', map { '# '.$_."\n" } @lines )."\n";
+}
+
+sub comments {
+  my ( $indent, $lines ) = @_;
+  return join '', map { ( ' ' x $indent ).'# '.$_."\n" } map { split /\n/ } @{ $lines // [] };
+}
+
+sub dump_key {
+  my ( $indent, $key, $value ) = @_;
+  return indent( $indent, $YAML->dump_string( ordered( { $key => $value } ) ) );
+}
+
+sub dump_item {
+  my ( $indent, $value ) = @_;
+  return indent( $indent, $YAML->dump_string( ordered( [$value] ) ) );
+}
+
+sub indent {
+  my ( $indent, $text ) = @_;
+  $text =~ s/\A---\n//;
+  # YAML::PP ends a document whose last scalar keeps its trailing newlines
+  # (|+) with "...": inside a larger document that would end it early.
+  $text =~ s/^\.\.\.\n\z//m;
+  my $pad = ' ' x $indent;
+  $text =~ s/^(?=.)/$pad/mg;
+  return $text;
+}
+
+# A step with its tool calls in flow style ([ read_file, { path: a.txt } ])
+# where that stays on one short line.
+sub flowed {
+  my ( $step ) = @_;
+  return $step unless $step->{tool_calls};
+  return { tool_calls => [ map { flow_or_block($_) } @{ $step->{tool_calls} } ] };
+}
+
+sub flow_or_block {
+  my ( $value ) = @_;
+  my $multi_line = 0;
+  deep( sub { $multi_line ||= $_[0] =~ /[\n\r]/; $_[0] }, $value );
+  return $value if $multi_line;
+  my $flow = flow($value);
+  my $line = $YAML->dump_string( [$flow] );
+  return length($line) <= 110 ? $flow : $value;
+}
+
+# Mappings with their keys in a fixed order (YAML::PP keeps the order of
+# preserved mappings only; plain ones would come out in hash order).
+sub ordered {
+  my ( $v ) = @_;
+  return $v if ( ref $v eq 'HASH' && tied %$v ) || ( ref $v eq 'ARRAY' && tied @$v );
+  if ( ref $v eq 'HASH' ) {
+    my $m = $YAML->preserved_mapping( {} );
+    $m->{$_} = ordered( $v->{$_} ) for sort_keys($v);
+    return $m;
+  }
+  return [ map { ordered($_) } @$v ] if ref $v eq 'ARRAY';
+  return $v;
+}
+
+sub sort_keys {
+  my ( $hash ) = @_;
+  return sort { ( $KEY_RANK{$a} // 9 ) <=> ( $KEY_RANK{$b} // 9 ) || $a cmp $b } keys %$hash;
+}
+
+sub flow {
+  my ( $v ) = @_;
+  if ( ref $v eq 'HASH' ) {
+    my $m = $YAML->preserved_mapping( {}, style => YAML_FLOW_MAPPING_STYLE );
+    $m->{$_} = flow( $v->{$_} ) for sort_keys($v);
+    return $m;
+  }
+  return $YAML->preserved_sequence( [ map { flow($_) } @$v ], style => YAML_FLOW_SEQUENCE_STYLE ) if ref $v eq 'ARRAY';
+  return $v;
+}
+
+# A clean message for the person at the terminal, not a stack of main:: frames.
+my $exit = eval { main() };
+unless ( defined $exit ) {
+  ( my $error = $@ ) =~ s/ at \S+ line [0-9]+\.?\n.*\z//s;
+  print STDERR 'claude-log-to-scenario: '.$error."\n";
+  $exit = 2;
+}
+exit $exit;

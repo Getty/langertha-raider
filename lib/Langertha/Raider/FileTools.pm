@@ -15,7 +15,9 @@ our @EXPORT_OK = qw( build_file_tools_server );
 
 The file tools of L<raider>: an L<MCP::Server> with C<list_files(path)>,
 C<read_file(path)>, C<write_file(path, content)> and
-C<edit_file(path, old_string, new_string)>, confined to one directory.
+C<edit_file(path, old_string, new_string, replace_all)>, confined to one
+directory. C<edit_file> replaces C<old_string> where it occurs exactly once,
+or every occurrence with C<replace_all> (as Claude Code's C<Edit>).
 
 =func build_file_tools_server
 
@@ -170,13 +172,14 @@ sub build_file_tools_server {
 
   $server->tool(
     name         => 'edit_file',
-    description  => 'Replace an exact unique substring in a file (old_string must match exactly once).',
+    description  => 'Replace an exact substring in a file (old_string must match exactly once, unless replace_all is set).',
     input_schema => {
       type       => 'object',
       properties => {
-        path       => { type => 'string', description => 'File path' },
-        old_string => { type => 'string', description => 'Exact text to replace' },
-        new_string => { type => 'string', description => 'Replacement text' },
+        path        => { type => 'string', description => 'File path' },
+        old_string  => { type => 'string', description => 'Exact text to replace' },
+        new_string  => { type => 'string', description => 'Replacement text' },
+        replace_all => { type => 'boolean', description => 'Replace every occurrence of old_string (default false)' },
       },
       required => ['path', 'old_string', 'new_string'],
     },
@@ -190,8 +193,14 @@ sub build_file_tools_server {
       my $old = $in->{old_string};
       my $count = () = $content =~ /\Q$old\E/g;
       return $tool->text_result("Error: old_string not found", 1) if $count == 0;
-      return $tool->text_result("Error: old_string matches $count times, must be unique", 1) if $count > 1;
-      $content =~ s/\Q$old\E/$in->{new_string}/;
+      return $tool->text_result("Error: old_string matches $count times, must be unique (or set replace_all)", 1)
+        if $count > 1 && !$in->{replace_all};
+      if ( $in->{replace_all} ) {
+        $content =~ s/\Q$old\E/$in->{new_string}/g;
+      }
+      else {
+        $content =~ s/\Q$old\E/$in->{new_string}/;
+      }
       eval { $p->spew_utf8($content) };
       return $tool->text_result("Error writing $p: $@", 1) if $@;
       return $tool->text_result("Edited $p");

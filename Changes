@@ -78,6 +78,19 @@ Revision history for Langertha-Raider
       local fake Bot API (allowed chat answered by telegram_reply, stranger
       ignored, routing '*' and per chat) and a hall restart. 04d (tool
       processes outliving a cancel that escalated to KILL) is listed as skipped.
+    - maint/claude-log-to-scenario drafts a scenario from a section of a
+      Claude Code session log: one script step per model response, tool
+      names and arguments through Langertha::Raider::ToolNames, files rebuilt
+      from whole reads, tools raider lacks left out and noted, secrets
+      redacted (t/180; maint/ stays out of the CPAN tarball). The scenario
+      harness moved to Test::Raider::Scenario; t/181_claude_log_scenarios.t
+      runs t/scenarios/claude-logs/, curated cases after real Claude Code
+      sessions: a skill then its reference file, the CLAUDE.md hierarchy, a
+      settings deny, an ask rule with nobody to ask, loadguard refusing a
+      heavy command, plan mode with a refused and an approved plan, todo
+      progress, edits after a read, a failing bash command and the retry,
+      exploring before an edit, a hook steering the model, a refused call
+      (k156).
 
   [Distribution]
     - Langertha-Raider is the merge of the App-Raider distribution with the
@@ -503,6 +516,9 @@ Revision history for Langertha-Raider
       git-guru pack drops a pack.yml key the loader never read.
 
   [Tools]
+    - edit_file takes replace_all, as Claude Code's Edit: every occurrence
+      of old_string is replaced instead of an error when it is not unique
+      (k156).
     - New tools, named and shaped after Claude Code's Glob, Grep, TodoWrite
       and AskUserQuestion (ADR 0018). glob(pattern, [path]) lists files by
       pattern ("**/*.pm", "*.{json,yml}"), newest first, as paths relative to

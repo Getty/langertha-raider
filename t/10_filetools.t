@@ -50,6 +50,25 @@ subtest write_and_edit => sub {
   ok($miss->{isError}, 'missing old_string is an error');
 };
 
+subtest edit_replace_all => sub {
+  call_tool('write_file', { path => 'many.txt', content => "a b a b a\n" });
+  my $twice = call_tool('edit_file', { path => 'many.txt', old_string => 'a', new_string => 'x' });
+  ok($twice->{isError}, 'an old_string found more than once is an error');
+  like($twice->{content}[0]{text}, qr/matches 3 times, must be unique \(or set replace_all\)/, 'naming the way out');
+  is(path($dir, 'many.txt')->slurp_utf8, "a b a b a\n", 'and changes nothing');
+
+  my $all = call_tool('edit_file', { path => 'many.txt', old_string => 'a', new_string => 'x', replace_all => 1 });
+  ok(!$all->{isError}, 'replace_all replaces it everywhere');
+  is(path($dir, 'many.txt')->slurp_utf8, "x b x b x\n", 'every occurrence');
+
+  my $none = call_tool('edit_file', { path => 'many.txt', old_string => 'zzz', new_string => 'y', replace_all => 1 });
+  ok($none->{isError}, 'replace_all with no occurrence is still an error');
+
+  my $one = call_tool('edit_file', { path => 'many.txt', old_string => 'x b x b x', new_string => 'one', replace_all => 0 });
+  ok(!$one->{isError}, 'replace_all false keeps the single replacement');
+  is(path($dir, 'many.txt')->slurp_utf8, "one\n", 'as before');
+};
+
 subtest root_escape => sub {
   my $res = call_tool('read_file', { path => '../outside' });
   ok($res->{isError}, 'path escape rejected');

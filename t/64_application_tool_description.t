@@ -65,7 +65,7 @@ subtest 'stock set: exactly the mounted tools, with their parameters' => sub {
     'list_files(path)',
     'read_file(path)',
     'write_file(path, content)',
-    'edit_file(path, old_string, new_string)',
+    'edit_file(path, old_string, new_string, [replace_all])',
     'bash(command, [compress], [timeout], [working_directory])',
     'web_search(query, [limit])',
     'web_fetch(url, [as_html])',

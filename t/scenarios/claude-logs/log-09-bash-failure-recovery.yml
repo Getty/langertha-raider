@@ -1,0 +1,29 @@
+# Real pattern: Bash on a path that does not exist (exit 1, "No such file or
+# directory"), the model lists the directory to find the real name, retries and
+# gets on; a grep without a match (exit 1, no output) is not mistaken for a
+# failure of the tool; a later command with a real exit code is fixed with a flag.
+# Abweichung: raider prints "Exit code: N" before the output for every run, also
+# for exit 0 (Claude Code prints "Exit code N" only for a failure).
+title: a bash call on a missing file fails with exit 1; the model lists, retries, and handles a no-match grep
+files:
+  data/report-2026.txt: "total: 42\n"
+prompt: Show me the total from the report.
+script:
+  - tool_calls:
+      - [ bash, { command: cat data/report.txt } ]
+  - tool_calls:
+      - [ bash, { command: ls data } ]
+  - tool_calls:
+      - [ bash, { command: grep total data/report-2026.txt } ]
+      - [ bash, { command: grep -c missing data/report-2026.txt } ]
+  - tool_calls:
+      - [ bash, { command: "grep -c missing data/report-2026.txt || echo none" } ]
+  - text: The total is 42.
+expect:
+  answer: The total is 42.
+  tools:
+    - { name: bash, error: true, text: 'Exit code: 1.*No such file or directory' }
+    - { name: bash, text: 'Exit code: 0.*report-2026\.txt' }
+    - { name: bash, text: 'Exit code: 0.*total: 42' }
+    - { name: bash, error: true, text: 'Exit code: 1.*0' }
+    - { name: bash, text: 'Exit code: 0.*none' }

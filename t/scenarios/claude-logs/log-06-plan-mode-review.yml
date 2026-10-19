@@ -1,0 +1,45 @@
+# Real pattern: plan mode -- Glob and Read to explore, a Write attempt is refused,
+# ExitPlanMode with a plan, the person asks for a change, a second plan is
+# approved, then the Writes go through (default mode after the plan: each asks).
+# Abweichung: a refused plan is a normal tool result in raider (Claude Code: an
+# error result, "The user doesn't want to proceed"); the feedback text differs.
+title: plan mode explores, the first plan is sent back with feedback, the second is approved, then the files are written
+permission_mode: plan
+review: [ "no: also add a test", yes ]
+approve: [ once, once ]
+files:
+  src/app.txt: "app\n"
+prompt: Add a version file.
+script:
+  - tool_calls:
+      - [ glob, { pattern: "**/*.txt" } ]
+      - [ read_file, { path: src/app.txt } ]
+  - tool_calls:
+      - [ write_file, { path: VERSION, content: "1\n" } ]
+  - tool_calls:
+      - [ exit_plan_mode, { plan: "1. write VERSION" } ]
+  - tool_calls:
+      - [ exit_plan_mode, { plan: "1. write VERSION\n2. write t/version.txt" } ]
+  - tool_calls:
+      - [ write_file, { path: VERSION, content: "1\n" } ]
+      - [ write_file, { path: t/version.txt, content: "ok\n" } ]
+  - text: Both files written.
+expect:
+  answer: Both files written.
+  files:
+    VERSION: "1\n"
+    t/version.txt: "ok\n"
+  plans: [ "1. write VERSION", "1. write VERSION\n2. write t/version.txt" ]
+  permissions:
+    - { tool: write_file }
+    - { tool: write_file }
+  tools:
+    - { name: glob, text: 'src/app\.txt' }
+    - { name: read_file, text: '^app' }
+    - { name: write_file, error: true, text: "plan mode: write_file changes files, which plan mode does not allow; present your plan with exit_plan_mode first" }
+    - { name: exit_plan_mode, text: 'The user did not approve the plan: also add a test\. Stay in plan mode' }
+    - { name: exit_plan_mode, text: "User approved the plan" }
+    - { name: write_file }
+    - { name: write_file }
+  events:
+    - { type: permission.mode, from: plan, to: default, why: exit_plan_mode }
