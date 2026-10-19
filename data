@@ -1,0 +1,32 @@
+---
+claimed_at: 2026-10-19T05:08:07Z
+claimed_by: strom-k
+class: standard
+completed: 2026-10-19T05:08:02Z
+created: 2026-10-19T04:06:53Z
+id: 151
+priority: high
+started: 2026-10-19T04:08:17Z
+status: done
+tags:
+- claude-code-flow
+title: 'Claude Code mode: layout rule, CLAUDE.md hierarchy, settings loader, skill
+  discovery with a skill tool'
+updated: 2026-10-19T05:08:07Z
+---
+
+Strom K. Plan: /home/getty/dev/perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md
+
+2026-10-19 04:11 Strom K gestartet: Worktree .claude/worktrees/strom-k-kontext, Branch worktree-strom-k-kontext. ADR 0018 entworfen (f6b9534). Nächste Schritte: Layout+Memory und Settings+Plugins+Skills+skill-Tool parallel, danach Integration (Application/CLI/explain) + Szenarien.
+
+2026-10-19 04:20 Part A (Layout+Memory) commit-ready: lib/Langertha/Raider/Context/Layout.pm, Context/Memory.pm, t/120_context_layout.t, t/121_context_memory.t (15 subtests pass; mutation-checked). Open points for integration: config_claude has no isa (YAML/JSON booleans are objects); native mode ignores config claude: true (only --claude switches it on there); ~/CLAUDE.md in the home dir does count as a marker for projects under home without .git (ADR §1 only excludes the home .claude/).
+
+2026-10-19 04:20 Part B (Settings/Plugins/Skills/skill tool) done, uncommitted in the worktree: lib/Langertha/Raider/Context/{Settings,Plugins,Skills}.pm, lib/Langertha/Raider/SkillTools.pm, ToolEffects skill=>read; t/122-125 pass, t/105 passes. Deviations: $ARGUMENTS emptied when no args (Claude Code); skill_dirs dedupes; plugin-vs-plugin same name: first wins, rest shadowed. Also found: default_claude_home lives on Context::Settings as a class method — part A / integration may want it on Langertha::Raider::Home instead.
+
+2026-10-19 04:42 Part C progress: Context façade, NestedMemory plugin, Application/Config/CLI wiring, --claude saved as claude: true (Config::enable_claude), explain/banner done; ADR refs renumbered to 0019; scenarios 23-33 pass (mutation-checked).
+
+2026-10-19 04:50 Part C commit-ready (uncommitted): Context façade + Plugin::NestedMemory + wiring + config/flag migration + explain/banner + t/126, t/127, scenarios 23-33 + Changes. Full suite once: 1115 tests, only t/28_config_migrate failed (layout reason .raider.yml vs .raider/ in the before/after comparison; caused by this change, fixed by leaving out layout.reason there) -- rerun of it and of t/48 (now -r tempdir; it ran config explain in the checkout) passes. Runtime probe over the full run: no test read the real ~/.claude. Follow-ups: /reload does not re-read memory/skills (context built once); -o claude=false is truthy (same as perl=); skills: type: file entries dropped silently (not listed as ignored in explain).
+
+Strom K fertig. Branch worktree-strom-k-kontext (Worktree .claude/worktrees/strom-k-kontext), auf main 3816898 rebased, 9 WIP-Commits ea6128e..77072f0. ADR 0019 (Layout-Modus, Memory-Hierarchie, Settings, progressive Skills) + Update-Notizen ADR 0004/0011/0014, CONTEXT.md, README. Neue Module: Context.pm (Fassade), Context/{Layout,Memory,Settings,Plugins,Skills}.pm, SkillTools.pm (skill-Tool), Plugin/NestedMemory.pm. Szenarien 23-33, Unit-Tests t/120-127. Volle Suite: PASS, 126 Dateien, 1173 Tests. Settings-Datenstruktur für P/H: Context::Settings->permissions {allow,ask,deny:[{rule,source}],default_mode,additional_directories} und ->hooks {Event:[{matcher,hooks,source}]}. Folgepunkte: /reload liest Memory/Skills nicht neu (Context einmal pro App); -o claude=false zählt als wahr (wie -o perl=false); skills:-Einträge type: file werden still verworfen statt in explain gelistet; verschachtelte .claude/skills und paths:-Frontmatter fehlen; Trust-Entscheidung ADR 0004 weiter offen; verify-binary für das neue NestedMemory-Plugin (per Name geladen) nicht gelaufen (schwerer Lauf, nur bei GO); WIP-Commits vom Orchestrator statt raider-release-manager (Brief verlangte WIP-Commits) — vor dem Merge ggf. vom Release-Manager zusammenfassen lassen.
+
+Koordinator 2026-10-19: geprüft (1173 Tests grün, neue Tests rot gegen alten Code, Rauchtest config explain im Hub ok), WIP-Commits zu dea227a zusammengefasst und gemerged. Folgepunkte -> Strom K2 (#157).
