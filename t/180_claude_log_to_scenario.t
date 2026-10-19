@@ -23,7 +23,13 @@ use Test::Raider::Scenario qw( run_scenario_files );
 # response with an unknown tool (ToolSearch) and an Edit, a sidechain record,
 # a response with a Read outside the project, a failing Bash and a Bash
 # carrying a secret, a closing text; prompt 2 -- a Read in the home, an Agent
-# call, a Read of a part of a file, a closing text. Secrets in it are fake.
+# call without a subagent log, a Read of a part of a file, a closing text;
+# prompt 3 -- two Agent calls in one response, each with its subagent log
+# under session/subagents/: a reviewer (found by its meta file) that reads
+# app.txt and starts a nested agent in one response, hands its report back
+# with SubagentHandback, closes with a text and gets a later SendMessage turn;
+# an Explore agent in the background (found by the agentId of its result)
+# that globs. Secrets in it are fake.
 
 my $script = path("$FindBin::Bin/../maint/claude-log-to-scenario")->realpath;
 my $log    = path("$FindBin::Bin/data/claude-log/session.jsonl")->realpath;
@@ -97,8 +103,103 @@ subtest 'the second prompt: the home, an agent, a partial read' => sub {
     [ read_file => { path => '{{HOME}}/.config/demo.conf' } ],
     [ agent     => { description => 'Check', prompt => 'Look at {{ROOT}}', subagent_type => 'general-purpose' } ],
   ] }, 'a home path as {{HOME}}, Agent as agent with the root a placeholder' );
-  is( $s->{script}[1], { tool_calls => [ [ read_file => { path => 'big.txt', offset => 10, limit => 5 } ] ] },
+  is( $s->{script}[1], { text => 'All fine.' }, 'without a subagent log the subagent answers what Claude Code returned' );
+  like( $run->{out}, qr/^  # subagent of Agent \(Check\): no log of its turns, it answers with what Claude Code returned$/m,
+    'which is noted' );
+  is( $s->{script}[2], { tool_calls => [ [ read_file => { path => 'big.txt', offset => 10, limit => 5 } ] ] },
     'the arguments raider does not know pass through' );
+  is( $s->{expect}{tools}, [
+    { name => 'read_file', text => 'name=demo' },
+    { name => 'agent', text => '\A\s*All fine\.' },
+    { name => 'read_file' },
+  ], 'the agent result is anchored on the answer' );
+};
+
+subtest 'the third prompt: each subagent replays its own log after the call that starts it' => sub {
+  my $run = convert( "$log", '--home', '/home/tester', '--from', 'u0000027' );
+  is( $run->{exit}, 0, 'converts' ) or diag $run->{err};
+  my $text = $run->{out};
+  my $s    = $yaml->load_string($text);
+  like( $text, qr/^# 2 model responses and 7 of subagents\./m, 'the head counts the subagent responses apart' )
+    or diag $text;
+  is( $s->{app}, { max_agent_depth => 2 }, 'a subagent of a subagent needs max_agent_depth 2' );
+  is( $s->{files}, { 'app.txt' => "one\n2\nthree\n\n" }, "files: rebuilt from the subagent's whole Read" );
+  is( $s->{script}, [
+    { tool_calls => [
+      [ agent => { description => 'Review app', prompt => 'Review {{ROOT}}/app.txt and report.', subagent_type => 'general-purpose' } ],
+      [ agent => { description => 'Find files', prompt => 'List the text files.', subagent_type => 'general-purpose', run_in_background => T() } ],
+    ] },
+    { tool_calls => [
+      [ read_file => { path => 'app.txt' } ],
+      [ agent     => { description => 'Count lines', prompt => 'Count the lines of app.txt.' } ],
+    ] },
+    { tool_calls => [ [ bash => { command => 'wc -l app.txt', description => 'Count lines' } ] ] },
+    { text => '4 lines' },
+    { text => "The file is fine.\nIt has 4 lines." },
+    { tool_calls => [ [ glob => { path => '.', pattern => '*.txt' } ] ] },
+    { text => 'app.txt' },
+    { text => 'Reviewer: fine. Explorer: app.txt.' },
+  ], 'script: the caller, the reviewer up to its handback with the nested agent inside, the explorer, the caller' );
+  is( $s->{expect}, {
+    answer => 'Reviewer: fine. Explorer: app.txt.',
+    tools  => [
+      { name => 'bash' },
+      { name => 'read_file', text => 'one' },
+      { name => 'agent', text => '\A\s*4 lines' },
+      { name => 'glob' },
+      { name => 'agent', text => '\A\s*The file is fine\.' },
+      { name => 'agent', text => '\A\s*app\.txt' },
+    ],
+  }, "expect: a subagent's results before those of the response that started it" );
+
+  like( $text, qr/^  # subagent_type reviewer: no such agent file in \.claude\/agents of the project .*, general-purpose stands in$/m,
+    'an agent file that is not there: general-purpose, noted' );
+  like( $text, qr/^  # subagent_type Explore: Claude Code's built-in agent, raider has no such agent, general-purpose stands in$/m,
+    'a built-in of Claude Code: general-purpose, noted' );
+  like( $text, qr/^  # subagent reviewer \(as general-purpose\) of Agent \(Review app\), from agent-a0000000000000001\.jsonl$/m,
+    'where a subagent starts is noted' );
+  like( $text, qr/^  # left out 1 later response of this run, after SubagentHandback$/m, 'the text after the handback is left out' );
+  like( $text, qr/^  # its log goes on after a later message to it \(SendMessage\): 1 more response not replayed$/m,
+    'and so is the later turn' );
+  like( $text, qr/from agent-a0000000000000002\.jsonl \(Claude Code ran it in the background, raider runs it to the end\)$/m,
+    'the background agent runs to the end' );
+  like( $text, qr/^    # Claude Code's result was only the launch notice: it ran the agent in the background$/m,
+    'and its different result is noted' );
+  unlike( $text, qr/SendMessage with to|<usage>|is it sorted|Briefing/, "neither Claude Code's appendix, the later turn nor the briefed prompt" );
+
+  my $dir  = Path::Tiny->tempdir;
+  my $file = $dir->child('agents-from-claude-log.yml');
+  $file->spew_utf8($text);
+  run_scenario_files("$file");
+};
+
+subtest "an agent file of the project goes into files:, without its skills" => sub {
+  # the session again, in a project that exists here
+  my $copy = Path::Tiny->tempdir;
+  my $root = Path::Tiny->tempdir->realpath;
+  my $from = $log->parent;
+  for my $f ( grep { $_->is_file } map { $from->child($_) } 'session.jsonl', map { 'session/subagents/'.$_->basename } $from->child( 'session', 'subagents' )->children ) {
+    ( my $content = $f->slurp_raw ) =~ s{/home/tester/work/demo}{$root}g;
+    $copy->child( $f->relative($from) )->touchpath->spew_raw($content);
+  }
+  $root->child( '.claude', 'agents', 'review', 'reviewer.md' )->touchpath->spew_utf8(
+    "---\nname: reviewer\ndescription: Reviews files, changes nothing.\nbriefing:\n  skills:\n    - review\n    - getty-perl-core\nmodel: sonnet\n---\n"
+    ."REVIEWER-BODY: read in $root, never write. Not sk-fake2222222222222222222.\n" );
+  my $run = convert( $copy->child('session.jsonl')->stringify, '--home', '/home/tester', '--from', 'u0000027' );
+  is( $run->{exit}, 0, 'converts' ) or diag $run->{err};
+  my $s = $yaml->load_string( $run->{out} );
+  is( $s->{files}{'.claude/agents/review/reviewer.md'},
+    "---\nname: reviewer\ndescription: Reviews files, changes nothing.\nmodel: sonnet\n---\nREVIEWER-BODY: read in {{ROOT}}, never write. Not REDACTED.\n",
+    'the agent file, its skills taken out, the root a placeholder, the secret redacted' );
+  like( $run->{out}, qr/^# \.claude\/agents\/review\/reviewer\.md: the agent reviewer, from the project, without its skills \(review, getty-perl-core\)$/m,
+    'noted' );
+  is( $s->{script}[0]{tool_calls}[0][1]{subagent_type}, 'reviewer', 'the call keeps its agent' );
+  is( $s->{script}[0]{tool_calls}[1][1]{subagent_type}, 'general-purpose', 'the built-in Explore does not' );
+
+  my $dir  = Path::Tiny->tempdir;
+  my $file = $dir->child('agent-file-from-claude-log.yml');
+  $file->spew_utf8( $run->{out} );
+  run_scenario_files("$file");
 };
 
 subtest '--turns runs on over the next prompt' => sub {
@@ -107,7 +208,7 @@ subtest '--turns runs on over the next prompt' => sub {
   my $s = $yaml->load_string( $run->{out} );
   is( $s->{prompts}, [ 'Change two to 2 in app.txt. My key is REDACTED.', 'Now look at my config.' ],
     'the prompt before the start, then the one met on the way' );
-  is( [ map { $_->{text} // 'calls' } @{ $s->{script} } ], [ 'calls', 'Done: two is now 2 in app.txt.', 'calls', 'done' ],
+  is( [ map { $_->{text} // 'calls' } @{ $s->{script} } ], [ 'calls', 'Done: two is now 2 in app.txt.', 'calls', 'All fine.', 'done' ],
     'a turn cut short ends on a text answer' );
   like( $run->{out}, qr/# the turn ends here without a text answer in the log/, 'which is noted' );
 };
@@ -124,6 +225,12 @@ subtest 'a session id is looked up in the Claude projects' => sub {
   my $listed = convert( '00000000-0000-4000-8000-000000000001', '--list' );
   like( $listed->{out}, qr/^u0000001-\S+  \S+  PROMPT  Change two .* My key is REDACTED\.$/m, '--list shows the prompts, redacted' );
   like( $listed->{out}, qr/^u0000003-\S+  \S+  MODEL   "I read the file first\." Read$/m, 'and the responses' );
+  like( $listed->{out}, qr/^u0000028-\S+  \S+  MODEL   "I hand both to agents\." Agent\[no subagent log\] Agent\[no subagent log\]$/m,
+    'an Agent call whose subagent log is not there' );
+  my $beside = convert( "$log", '--list' );
+  like( $beside->{out},
+    qr/^u0000028-\S+  \S+  MODEL   "I hand both to agents\." Agent\[agent-a0000000000000001\.jsonl, 3 responses\] Agent\[agent-a0000000000000002\.jsonl, 2 responses\]$/m,
+    'and with its subagent logs: each with the responses of its first run' );
 };
 
 subtest 'mistakes are refused with a message' => sub {

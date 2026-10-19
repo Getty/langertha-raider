@@ -11,6 +11,7 @@ use Path::Tiny;
 use Pod::Usage qw( pod2usage );
 use YAML::PP;
 use YAML::PP::Common qw( PRESERVE_FLOW_STYLE PRESERVE_ORDER YAML_FLOW_MAPPING_STYLE YAML_FLOW_SEQUENCE_STYLE );
+use Langertha::Raider::Context::Agents;
 use Langertha::Raider::ToolNames;
 
 binmode STDOUT, ':encoding(UTF-8)';
@@ -83,10 +84,43 @@ basic credentials, passwords in URLs and the value of every assignment whose
 name says key, token, secret, password or credential. It errs on the side of
 too much.
 
+=item * Subagents. Claude Code writes a subagent's turns into a log of its
+own, F<E<lt>sessionE<gt>/subagents/agent-E<lt>agentIdE<gt>.jsonl>, beside an
+F<agent-E<lt>agentIdE<gt>.meta.json> naming the C<Agent> call
+(C<toolUseId>); the C<agentId> of the call's result names it too. Raider's
+scripted model serves a subagent's requests from the same C<script:>, in the
+order they are made, and runs the C<agent> calls of one response one after
+the other. So after the response with the C<agent> call come the responses of
+that subagent's first run (up to the next message to it, a C<SendMessage> of
+the caller, which is left out and noted), then those of the next subagent,
+then the caller's next response; nested subagents the same way, with
+C<app: { max_agent_depth: N }> when they go deeper than raider's default of
+1. In C<expect: tools:> a subagent's calls come before those of the response
+that started it, as raider records them, and the C<agent> call is anchored on
+the subagent's answer. A subagent that hands its report back with
+C<SubagentHandback> answers with its message (raider's subagent answers with
+its last text); what it did after that is left out. One that ends without
+text answers C<done>.
+
+=item * Agent types. A C<subagent_type> that is an agent file in the
+project's F<.claude/agents/> (found the way raider finds it) goes into
+C<files:> through the same redaction, without its C<skills:> and
+C<briefing:> keys: their skills are not in the scenario, and raider refuses
+to start an agent whose skills it cannot resolve. Every other type -- Claude
+Code's own (C<Explore>, C<Plan>, ...), a user or plugin agent, an agent file
+that is gone or unreadable -- becomes C<general-purpose>, raider's one
+built-in agent, and is noted.
+
+=item * An C<Agent> call without a subagent log: run in the foreground, the
+subagent answers at once with what Claude Code returned (without the
+C<agentId>/C<usage> lines it appends); run in the background or failed, the
+call is left out and noted. A background agent with a log runs to its end in
+raider, at the call: raider has no background subagents.
+
 =back
 
-Sidechain records (a subagent's own turns) are skipped; given a subagent's
-log (F<E<lt>sessionE<gt>/subagents/agent-*.jsonl>) those are its turns.
+Sidechain records in the session's own log (C<isSidechain>, not tied to a
+call) are skipped; given a subagent's log those are its turns.
 
 =head1 OPTIONS
 
@@ -106,7 +140,9 @@ under F<projects/> (C<-home-getty-dev-skilletor>).
 =item --list
 
 Print the prompts and the model responses of the session, each with its
-record id, and exit.
+record id, and exit. An C<Agent> call shows its subagent log and how many
+responses its first run has (C<Agent[agent-a1b2.jsonl, 5 responses]>), or
+C<Agent[no subagent log]>.
 
 =item --from UUID
 
@@ -116,8 +152,9 @@ starts with it; the prompt is the last one before). Default: the first prompt.
 
 =item --turns N
 
-How many model responses to take. A user prompt among them starts the next
-of C<prompts:>. Default: up to the next user prompt.
+How many model responses of the session to take (the responses of the
+subagents they start come along and do not count). A user prompt among them
+starts the next of C<prompts:>. Default: up to the next user prompt.
 
 =item --title TEXT
 
@@ -148,8 +185,18 @@ before running a draft.
 =item * What a C<bash> command did to files is unknown: a file a command
 created or changed before the model read it is rebuilt as the model saw it.
 
-=item * C<agent> calls replay the call only: the subagent's own model turns
-are in its own log and not in C<script:>.
+=item * A subagent in the background ran beside its caller in Claude Code;
+in the draft it runs at the call, so a file it changed may be rebuilt as the
+caller saw it later, and the caller's C<agent> result is the subagent's
+answer, not Claude Code's launch notice (noted). The task notification that
+told Claude Code's model it finished stays a prompt.
+
+=item * A subagent Claude Code started in a worktree of its own runs in the
+root: its paths keep the worktree's place below the root
+(F<.claude/worktrees/NAME/...>), its relative C<bash> commands do not.
+
+=item * An agent file goes in without its skills; to test the briefing, add
+them (F<.claude/skills/E<lt>nameE<gt>/SKILL.md>) and the keys back.
 
 =item * Old logs (before C<toolUseResult>) carry a whole file only as the
 numbered result text; its last newline is assumed.
@@ -165,6 +212,10 @@ my $JSON  = JSON::MaybeXS->new( utf8 => 1, canonical => 1, convert_blessed => 1 
 my $YAML  = YAML::PP->new( boolean => 'JSON::PP', preserve => PRESERVE_FLOW_STYLE | PRESERVE_ORDER, width => 1000 );
 my $TRUE  = JSON::MaybeXS->true;
 my $tools = 'Langertha::Raider::ToolNames';
+my $agents = 'Langertha::Raider::Context::Agents';
+
+# Claude Code's own agent types besides general-purpose: raider has none of them.
+my %CLAUDE_AGENT = map { $_ => 1 } qw( Explore Plan claude claude-code-guide output-style-setup statusline-setup );
 
 # Keys written first in a flow mapping, the way the hand-written scenarios read.
 my %KEY_RANK = (
@@ -288,6 +339,71 @@ sub read_log {
   return { file => $file, events => \@events, event_of => \%event_of, result_of => \%result_of };
 }
 
+# Claude Code keeps a subagent's turns in a log of its own,
+# <session>/subagents/agent-<agentId>.jsonl, beside agent-<agentId>.meta.json
+# that names the Agent call (toolUseId). A subagent's log has its nested
+# subagents in the same directory.
+sub subagent_dir {
+  my ( $log ) = @_;
+  my $file = $log->{file};
+  return $file->parent if $file->parent->basename eq 'subagents';
+  return $file->parent->child( $file->basename('.jsonl'), 'subagents' );
+}
+
+sub subagent_logs {
+  my ( $log ) = @_;
+  return $log->{subagents} //= do {
+    my $dir = subagent_dir($log);
+    my %by_call;
+    for my $meta ( $dir->is_dir ? $dir->children(qr/\.meta\.json\z/) : () ) {
+      my $m = eval { $JSON->decode( $meta->slurp_raw ) };
+      next unless ref $m eq 'HASH' && defined $m->{toolUseId};
+      ( my $name = $meta->basename ) =~ s/\.meta\.json\z/.jsonl/;
+      $by_call{ $m->{toolUseId} } = $dir->child($name) if $dir->child($name)->is_file;
+    }
+    \%by_call;
+  };
+}
+
+# The log of the subagent an Agent call started: by its meta file, else by
+# the agentId of the call's result.
+sub subagent_log_file {
+  my ( $log, $use, $result ) = @_;
+  my $file = subagent_logs($log)->{ $use->{id} // '' };
+  return $file if $file;
+  my $data = $result ? $result->{data} : undef;
+  my $id   = ref $data eq 'HASH' ? $data->{agentId} : undef;
+  return unless defined $id && $id =~ /\A[\w-]+\z/;
+  $file = subagent_dir($log)->child( 'agent-'.$id.'.jsonl' );
+  return $file->is_file ? $file : undef;
+}
+
+# The model responses of a subagent's first run: those after its prompt, up
+# to the next message to it (a SendMessage of the caller), and whether more
+# came after.
+sub subagent_steps {
+  my ( $sub ) = @_;
+  my @events = @{ $sub->{events} };
+  shift @events while @events && $events[0]{kind} ne 'prompt';
+  shift @events;
+  my @steps;
+  while ( @events && $events[0]{kind} eq 'step' ) { push @steps, shift @events }
+  return ( \@steps, scalar grep { $_->{kind} eq 'step' } @events );
+}
+
+sub is_agent_call {
+  my ( $use ) = @_;
+  return ( $use->{type} // '' ) eq 'tool_use' && ( $tools->raider_name( $use->{name} // '?' ) // '' ) eq 'agent';
+}
+
+sub is_background {
+  my ( $use, $result ) = @_;
+  my $data = $result ? $result->{data} : undef;
+  my $flag = ref $use->{input} eq 'HASH' ? $use->{input}{run_in_background} : undef;
+  return 1 if $flag && "$flag" !~ /\A(?:false|0)\z/i;
+  return ref $data eq 'HASH' && ( $data->{isAsync} || ( $data->{status} // '' ) eq 'async_launched' ) ? 1 : 0;
+}
+
 sub prompt_text {
   my ( $r ) = @_;
   return if $r->{isMeta} || $r->{isCompactSummary} || $r->{isVisibleInTranscriptOnly};
@@ -317,10 +433,19 @@ sub list_events {
     my $what = $e->{kind} eq 'prompt'
       ? 'PROMPT  '.one_line( $e->{text}, 90 )
       : 'MODEL   '.join( ' ', map {
-          $_->{type} eq 'tool_use' ? $_->{name} : $_->{type} eq 'text' ? '"'.one_line( $_->{text}, 40 ).'"' : ()
+          is_agent_call($_) ? $_->{name}.'['.list_subagent( $log, $_ ).']'
+          : $_->{type} eq 'tool_use' ? $_->{name} : $_->{type} eq 'text' ? '"'.one_line( $_->{text}, 40 ).'"' : ()
         } @{ $e->{blocks} } );
     print join( '  ', $e->{uuid} // '-', $e->{time} // '-', redact($what) ), "\n";
   }
+}
+
+sub list_subagent {
+  my ( $log, $use ) = @_;
+  my $file = subagent_log_file( $log, $use, $log->{result_of}{ $use->{id} // '' } ) or return 'no subagent log';
+  my $sub  = eval { read_log($file) } or return $file->basename.', unreadable';
+  my ( $steps ) = subagent_steps($sub);
+  return $file->basename.', '.@$steps.' response'.( @$steps == 1 ? '' : 's' );
 }
 
 sub one_line {
@@ -386,6 +511,7 @@ sub context_for {
   return {
     root => $root, home => $home,
     files => {}, home_files => {}, decided => {}, file_notes => [],
+    depth => 0, sub_steps => 0, agent_types => {},
   };
 }
 
@@ -577,9 +703,17 @@ sub path_keys {
 }
 
 sub expectation {
-  my ( $ctx, $tool, $use, $result ) = @_;
+  my ( $ctx, $tool, $use, $result, $run ) = @_;
   my %want = ( name => $tool );
   my @notes;
+  if ($run) {
+    # raider's agent result is the subagent's last text, which the script gives.
+    my ($first) = $run->{answer} =~ /\A\s*([^\n]*)/;
+    $first =~ s/\s+\z//;
+    $want{text} = '\A\s*'.regex_quote( substr( $first, 0, 40 ) );
+    push @notes, "Claude Code's result was only the launch notice: it ran the agent in the background" if $run->{background};
+    return ( \%want, \@notes );
+  }
   unless ($result) {
     push @notes, 'no result in the log';
     return ( \%want, \@notes );
@@ -609,60 +743,239 @@ sub regex_quote {
   return $text;
 }
 
+#### Runs and subagents
+
+# What one run puts into the scenario: script items ({ step, comments }),
+# tool expectations ({ want, comments }), comments waiting for the next item,
+# the last text answer.
+sub new_acc { return { items => [], tools => [], pending => [], answer => undef } }
+
+sub push_item {
+  my ( $acc, $step, @comments ) = @_;
+  push @{ $acc->{items} }, { comments => [ splice( @{ $acc->{pending} } ), @comments ], step => $step };
+  $acc->{answer} = $step->{text} if exists $step->{text};
+  return;
+}
+
+# The model responses of one run (a span of the session, or a subagent's turn)
+# in the order raider's scripted model serves them: a response, then the whole
+# run of each subagent it starts, in call order, then the next response. A
+# subagent's tool results are recorded before those of the response that
+# started it, so its expectations come first. True when the run ends on a
+# text answer.
+sub emit_run {
+  my ( $ctx, $log, $steps, $acc, $depth ) = @_;
+  my $last_kind = '';
+  for my $n ( 0 .. $#$steps ) {
+    my $step   = $steps->[$n];
+    my @blocks = @{ $step->{blocks} };
+    my @texts  = map { $_->{text} } grep { ( $_->{type} // '' ) eq 'text' && defined $_->{text} && $_->{text} =~ /\S/ } @blocks;
+    my @uses   = grep { ( $_->{type} // '' ) eq 'tool_use' } @blocks;
+    my ($handback) = grep { ( $_->{name} // '' ) eq 'SubagentHandback' } @uses;
+    @uses = grep { ( $_->{name} // '' ) ne 'SubagentHandback' } @uses;
+    my $text = redact( plain_paths( $ctx, join "\n\n", @texts ) );
+    push @{ $acc->{pending} }, 'left out a '.$_->{type}.' block'
+      for grep { ( $_->{type} // '' ) =~ /\A(?:server_tool_use|.+_tool_result)\z/ } @blocks;
+    if ( !@uses && !$handback ) {
+      next unless @texts;
+      push_item( $acc, { text => $text } );
+      $last_kind = 'text';
+      next;
+    }
+    my ( @calls, @own, @runs );
+    my @comments = ( @texts ? 'model: '.one_line( $text, 100 ) : () );
+    for my $use (@uses) {
+      my $result = $log->{result_of}{ $use->{id} // '' };
+      learn_file( $ctx, $use, $result );
+      my ( $translated, $note ) = translate_call( $ctx, $use );
+      push @comments, plain_paths( $ctx, redact($note) ) if defined $note;
+      for my $call (@$translated) {
+        my $run;
+        if ( $call->[0] eq 'agent' ) {
+          ( $run, my @notes ) = subagent_run( $ctx, $log, $use, $result, $call, $depth + 1 );
+          push @comments, map { plain_paths( $ctx, redact($_) ) } @notes;
+          next unless $run;
+          push @runs, $run;
+        }
+        push @calls, $call;
+        my ( $want, $notes ) = expectation( $ctx, $call->[0], $use, $result, $run );
+        push @$notes, 'from MultiEdit: Claude Code applies its edits all or none' if $use->{name} eq 'MultiEdit';
+        push @own, { want => $want, comments => $notes };
+      }
+    }
+    if (@calls) {
+      push_item( $acc, { tool_calls => \@calls }, @comments );
+      $last_kind = 'calls';
+      for my $run (@runs) {
+        my ( $first, @rest ) = @{ $run->{items} };
+        push @{ $acc->{items} }, { %$first, comments => [ @{ $acc->{pending} }, @{ $first->{comments} } ] }, @rest;
+        @{ $acc->{pending} } = @{ $run->{pending} };
+        push @{ $acc->{tools} }, @{ $run->{tools} };
+      }
+      push @{ $acc->{pending} }, 'back in the caller' if @runs;
+      push @{ $acc->{tools} }, @own;
+    }
+    else {
+      push @{ $acc->{pending} }, @comments;
+    }
+    next unless $handback;
+    # Claude Code's subagents hand their report back with a tool; raider's
+    # subagent answers with its last text, which ends its run.
+    my $message = ref $handback->{input} eq 'HASH' ? $handback->{input}{message} : undef;
+    $message = redact( plain_paths( $ctx, defined $message && !ref $message && $message =~ /\S/ ? $message : 'done' ) );
+    my $left = $#$steps - $n;
+    push_item( $acc, { text => $message }, 'SubagentHandback: its message is the answer' );
+    push @{ $acc->{pending} }, 'left out '.$left.' later response'.( $left == 1 ? '' : 's' ).' of this run, after SubagentHandback' if $left;
+    return 1;
+  }
+  return $last_kind eq 'text';
+}
+
+# The run of the subagent an agent call starts, replayed from its own log:
+# ( { items, tools, pending, answer, background }, notes ), or ( undef, notes )
+# when the call is left out. The call's subagent_type may become
+# general-purpose (agent_type).
+sub subagent_run {
+  my ( $ctx, $log, $use, $result, $call, $depth ) = @_;
+  my $label = 'Agent ('.one_line( $use->{input}{description} // '', 50 ).')';
+  my $background = is_background( $use, $result );
+  my $file = subagent_log_file( $log, $use, $result );
+  my ( $sub, $steps, $later, $answer );
+  if ($file) {
+    $sub = eval { read_log($file) };
+    return ( undef, 'left out '.$label.': its subagent log '.$file->basename.' has no conversation' ) unless $sub;
+    ( $steps, $later ) = subagent_steps($sub);
+  }
+  elsif ( $background ) {
+    return ( undef, 'left out '.$label.': Claude Code ran it in the background and its subagent log is missing' );
+  }
+  elsif ( !$result || $result->{block}{is_error} ) {
+    return ( undef, 'left out '.$label.': '.( $result
+      ? 'it failed in Claude Code ('.one_line( result_text($result), 80 ).') and started no subagent'
+      : 'no result and no subagent log' ) );
+  }
+  else {
+    $answer = agent_answer($result)
+      // return ( undef, 'left out '.$label.': no subagent log and no answer in its result' );
+  }
+  $ctx->{depth} = $depth if $depth > $ctx->{depth};
+  my $type  = $call->[1]{subagent_type} // 'general-purpose';
+  my @notes = agent_type( $ctx, $call->[1] );
+  $type .= ' (as general-purpose)' if $type ne ( $call->[1]{subagent_type} // 'general-purpose' );
+
+  my $acc = new_acc();
+  if ($sub) {
+    my $source = 'subagent '.$type.' of '.$label.', from '.$file->basename;
+    push @{ $acc->{pending} }, $source.( $background ? ' (Claude Code ran it in the background, raider runs it to the end)' : '' );
+    $ctx->{sub_steps} += @$steps;
+    push_item( $acc, { text => 'done' }, 'the subagent ends here without a text answer in its log' )
+      unless emit_run( $ctx, $sub, $steps, $acc, $depth );
+    push @{ $acc->{pending} }, 'its log goes on after a later message to it (SendMessage): '.$later.' more response'.( $later == 1 ? '' : 's' ).' not replayed'
+      if $later;
+  }
+  else {
+    push_item( $acc, { text => redact( plain_paths( $ctx, $answer ) ) },
+      'subagent of '.$label.': no log of its turns, it answers with what Claude Code returned' );
+  }
+  return ( { %$acc, background => $background }, @notes );
+}
+
+# The subagent's text in an Agent result, without what Claude Code appends.
+sub agent_answer {
+  my ( $result ) = @_;
+  my $text = strip_reminders( result_text($result) );
+  $text =~ s/\n*agentId: .*\z//s;
+  $text =~ s/\n*<usage>.*\z//s;
+  $text =~ s/\A\s+|\s+\z//g;
+  return if $text eq '' || $text =~ /\AAsync agent launched|\(its SubagentHandback call\)/;
+  return $text;
+}
+
+# The agent a call names, as the scenario can give it: an agent file in the
+# project's .claude/agents goes into files: (redacted, without the skills it
+# declares -- they are not in the scenario and raider refuses a spawn whose
+# skills it cannot resolve); any other type becomes general-purpose, raider's
+# one built-in agent. Notes for the head of the scenario.
+sub agent_type {
+  my ( $ctx, $args ) = @_;
+  my $type = $args->{subagent_type};
+  return if !defined $type || ref $type || $type eq '' || $type eq 'general-purpose';
+  my $seen = exists $ctx->{agent_types}{$type};
+  my $how  = $ctx->{agent_types}{$type} //= carry_agent( $ctx, $type );
+  $args->{subagent_type} = 'general-purpose' unless $how->{keep};
+  push @{ $ctx->{file_notes} }, @{ $how->{file_notes} } unless $seen;
+  return $how->{keep} ? () : ( 'subagent_type '.$type.': '.$how->{why}.', general-purpose stands in' );
+}
+
+sub carry_agent {
+  my ( $ctx, $type ) = @_;
+  my $standin = sub { return { keep => 0, why => $_[0], file_notes => [] } };
+  my $dir   = path( $ctx->{root}, '.claude', 'agents' );
+  my $agent = $agents->new( roots => [ { dir => "$dir", source => '.claude/agents' } ] )->find($type);
+  return $standin->( $CLAUDE_AGENT{$type}
+    ? "Claude Code's built-in agent, raider has no such agent"
+    : 'no such agent file in .claude/agents of the project (a user or plugin agent, or gone)' )
+    unless $agent && $agent->{file};
+  my $file = path( $agent->{file} );
+  my $rel  = $file->relative( $ctx->{root} )->stringify;
+  my $text = eval { $file->slurp_utf8 } // return $standin->( $rel.' is not readable' );
+  my @dropped = @{ $agent->{skills} };
+  if (@dropped) {
+    $text = drop_skill_keys($text) // return $standin->( $rel.': its skills cannot be taken out of the frontmatter' );
+  }
+  $text = fill_placeholders( $ctx, redact($text) );
+  # what raider reads from the text as it goes into the scenario
+  my $check = Path::Tiny->tempdir;
+  $check->child( 'agents', $file->basename )->touchpath->spew_utf8($text);
+  my $back = $agents->new( roots => [ { dir => $check->child('agents')->stringify, source => 'check' } ] )->find($type);
+  return $standin->( $rel.' does not read back as the same agent once redacted' )
+    unless $back && $back->{file} && !@{ $back->{skills} } && $back->{description} eq $agent->{description};
+  $ctx->{files}{$rel} = $text;
+  $ctx->{decided}{ 'files/'.$rel } = 1;
+  return { keep => 1, file_notes => [
+    $rel.': the agent '.$type.', from the project'.( @dropped ? ', without its skills ('.join( ', ', @dropped ).')' : '' ),
+  ] };
+}
+
+# An agent file without its top-level skills: and briefing: keys.
+sub drop_skill_keys {
+  my ( $text ) = @_;
+  my ( $open, $fm, $rest ) = $text =~ /\A(---[ \t]*\r?\n)(.*?\r?\n)?(---[ \t]*(?:\r?\n.*)?)\z/s or return;
+  my ( @out, $dropping );
+  for my $line ( split /(?<=\n)/, $fm // '' ) {
+    if ( $line =~ /\A(?:skills|briefing)[ \t]*:/ ) { $dropping = 1; next }
+    next if $dropping && $line =~ /\A(?:[ \t]|-(?:[ \t]|\r?\n)|\r?\n)/;
+    $dropping = 0;
+    push @out, $line;
+  }
+  return $open.join( '', @out ).$rest;
+}
+
 #### The scenario
 
 sub scenario_yaml {
   my ( $log, $section, $opt ) = @_;
   my $ctx = context_for( $log, $section, $opt );
 
-  my ( @prompts, @items, @tools, @pending, $answer );
+  my @prompts;
+  my $acc = new_acc();
   for my $span ( @{ $section->{spans} } ) {
     push @prompts, defined $span->{prompt} ? redact( plain_paths( $ctx, $span->{prompt} ) ) : undef;
-    my $last_kind = '';
-    for my $step ( @{ $span->{steps} } ) {
-      my @texts = map { $_->{text} } grep { ( $_->{type} // '' ) eq 'text' && defined $_->{text} && $_->{text} =~ /\S/ } @{ $step->{blocks} };
-      my @uses  = grep { ( $_->{type} // '' ) eq 'tool_use' } @{ $step->{blocks} };
-      my $text  = redact( plain_paths( $ctx, join "\n\n", @texts ) );
-      push @pending, 'left out a '.$_->{type}.' block' for grep { ( $_->{type} // '' ) =~ /\A(?:server_tool_use|.+_tool_result)\z/ } @{ $step->{blocks} };
-      unless (@uses) {
-        next unless @texts;
-        push @items, { comments => [ splice @pending ], step => { text => $text } };
-        $answer    = $text;
-        $last_kind = 'text';
-        next;
-      }
-      my @calls;
-      my @comments = ( @texts ? 'model: '.one_line( $text, 100 ) : () );
-      for my $use (@uses) {
-        my $result = $log->{result_of}{ $use->{id} // '' };
-        learn_file( $ctx, $use, $result );
-        my ( $translated, $note ) = translate_call( $ctx, $use );
-        push @comments, plain_paths( $ctx, redact($note) ) if defined $note;
-        for my $call (@$translated) {
-          push @calls, $call;
-          my ( $want, $notes ) = expectation( $ctx, $call->[0], $use, $result );
-          push @$notes, 'from MultiEdit: Claude Code applies its edits all or none' if $use->{name} eq 'MultiEdit';
-          push @tools, { want => $want, comments => $notes };
-        }
-      }
-      unless (@calls) {
-        push @pending, @comments;
-        next;
-      }
-      push @items, { comments => [ splice( @pending ), @comments ], step => { tool_calls => \@calls } };
-      $last_kind = 'calls';
-    }
-    next if $last_kind eq 'text';
+    next if emit_run( $ctx, $log, $span->{steps}, $acc, 0 );
     # raider ends a run on a text answer; a turn that stopped elsewhere gets one.
-    push @items, { comments => [ splice( @pending ), 'the turn ends here without a text answer in the log' ], step => { text => 'done' } };
-    $answer = 'done';
+    push_item( $acc, { text => 'done' }, 'the turn ends here without a text answer in the log' );
   }
+  my @items   = @{ $acc->{items} };
+  my @tools   = @{ $acc->{tools} };
+  my @pending = @{ $acc->{pending} };
+  my $answer  = $acc->{answer};
 
   my %doc;
   $doc{title} = $opt->{title} // default_title( $ctx, $log, \@prompts );
   my $no_prompt = !defined $prompts[0];
   $prompts[0] //= 'go';
   if ( @prompts > 1 ) { $doc{prompts} = \@prompts } else { $doc{prompt} = $prompts[0] }
+  $doc{app}    = { max_agent_depth => $ctx->{depth} } if $ctx->{depth} > 1;
   $doc{files}  = $ctx->{files}      if %{ $ctx->{files} };
   $doc{home}   = $ctx->{home_files} if %{ $ctx->{home_files} };
   $doc{script} = [ map { $_->{step} } @items ];
@@ -672,6 +985,10 @@ sub scenario_yaml {
   $out .= dump_key( 0, title => $doc{title} );
   $out .= "# no user prompt before the section: a placeholder\n" if $no_prompt;
   $out .= exists $doc{prompts} ? dump_key( 0, prompts => $doc{prompts} ) : dump_key( 0, prompt => $doc{prompt} );
+  if ( $doc{app} ) {
+    $out .= "# subagents of subagents: raider allows that only above its default depth of 1\n";
+    $out .= dump_key( 0, app => $doc{app} );
+  }
   $out .= join '', map { '# '.$_."\n" } map { redact( plain_paths( $ctx, $_ ) ) } @{ $ctx->{file_notes} };
   $out .= dump_key( 0, files => $doc{files} ) if $doc{files};
   $out .= dump_key( 0, home => $doc{home} )   if $doc{home};
@@ -725,9 +1042,11 @@ sub header {
   my @lines = (
     'DRAFT -- written by maint/claude-log-to-scenario from Claude Code session',
     $log->{file}->basename('.jsonl').', from record '.( $start->{uuid} // '?' ).' ('.( $start->{time} // '?' ).'),',
-    $section->{taken}.' model response'.( $section->{taken} == 1 ? '' : 's' ).'. Curate it before it goes into t/scenarios/:',
+    $section->{taken}.' model response'.( $section->{taken} == 1 ? '' : 's' )
+      .( $ctx->{sub_steps} ? ' and '.$ctx->{sub_steps}.' of subagents' : '' ).'. Curate it before it goes into t/scenarios/:',
     '- files: holds what the session showed in full of each file before changing it;',
     '- tool calls raider has no counterpart for are left out (noted where they were);',
+    ( $ctx->{depth} ? '- a subagent replays its own log right after the call that starts it;' : () ),
     '- the expect: anchors are guesses, raider words results and errors its own way;',
     '- secrets are REDACTED, the project path is {{ROOT}}, the home {{HOME}};',
     '- the bash commands run for real when the scenario runs: read them first.',

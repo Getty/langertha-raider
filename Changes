@@ -91,6 +91,15 @@ Revision history for Langertha-Raider
       progress, edits after a read, a failing bash command and the retry,
       exploring before an edit, a hook steering the model, a refused call
       (k156).
+    - Subagents in Claude Code sessions: maint/claude-log-to-scenario replays
+      a subagent's turns from Claude Code's subagent log right after the
+      agent call, in the order raider serves them (nested agents raise
+      max_agent_depth), takes project agent files into files: (without their
+      skills) and maps other agent types to general-purpose. Two more
+      curated scenarios: a briefed agent sees its skill body before the task
+      and its last text reaches the caller; a read-only explore agent
+      (disallowedTools) searches, finds no write tool, and the caller edits
+      (k156).
 
   [Distribution]
     - Langertha-Raider is the merge of the App-Raider distribution with the
