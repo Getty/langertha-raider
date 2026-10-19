@@ -36,8 +36,12 @@ L</root>, which layout it reads:
 =item * C<native> -- L</root> is the home directory (the assistant home,
 ADR 0002), whatever is there.
 
-=item * C<raider> -- F<.raider/> in L</root>, or a legacy F<.raider.yml> /
-F<.raider.md> (ADR 0011).
+=item * C<raider> -- F<.raider/> in L</root> holding a project file:
+F<config.yml>, F<instructions.md>, or one of the directories F<skills/>,
+F<agents/>, F<packs/> (what raider writes there itself -- F<sessions/>,
+F<lib/>, F<.gitignore> -- does not count, nor does F<raiders/>, which
+nothing reads since ADR 0020); or a legacy F<.raider.yml> / F<.raider.md>
+(ADR 0011).
 
 =item * C<claude> -- no raider files, but F<CLAUDE.md>, F<CLAUDE.local.md>
 or a F<.claude/> directory in L</root> or in a directory of L</walk_dirs>.
@@ -205,7 +209,7 @@ The layout mode, decided once per object (see L</DESCRIPTION>).
 
 What decided L</mode>, for C<config explain>: C<--bare>,
 C<root is the home directory>, C<.raider/config.yml in root> (or another
-project file in C<.raider/>, see below), C<.raider.yml in root>,
+project file in C<.raider/>, see L</DESCRIPTION>), C<.raider.yml in root>,
 C<.raider.md in root>, C<CLAUDE.md in root> (or C<CLAUDE.local.md>,
 C<.claude/>; an ancestor of the walk is named by its absolute path, as in
 C<CLAUDE.md in /abs/dir>), or C<no raider or Claude files>.
@@ -336,9 +340,10 @@ sub project_dir {
 # files. raider itself creates .raider/sessions (the journal, ADR 0015), its
 # .gitignore and .raider/lib (perl_cpanm's local::lib) in any project it runs
 # in; counting those turned a Claude Code project native from its second run
-# on.
+# on. Only what raider reads counts: raiders/ (ADR 0011's named agents) is
+# not read since ADR 0020 replaced it by agents/.
 my @RAIDER_PROJECT_FILES = qw( config.yml instructions.md );
-my @RAIDER_PROJECT_DIRS  = qw( skills agents raiders packs );
+my @RAIDER_PROJECT_DIRS  = qw( skills agents packs );
 
 sub _raider_marker {
   my ( $self, $root ) = @_;

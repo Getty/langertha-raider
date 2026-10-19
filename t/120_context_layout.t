@@ -61,6 +61,13 @@ subtest 'mode table' => sub {
     '.raider/instructions.md');
   is_mode(dir($out, '.raider/', '.raider/skills/'), raider => '.raider/skills/ in root', '.raider/skills/');
   is_mode(dir($out, '.raider/', '.raider/agents/'), raider => '.raider/agents/ in root', '.raider/agents/');
+  is_mode(dir($out, '.raider/', '.raider/packs/'), raider => '.raider/packs/ in root', '.raider/packs/');
+  # ADR 0020 replaced ADR 0011's raiders/<name>.yml by agents/<name>.md:
+  # nothing reads .raider/raiders/, so it must not switch the Claude layout off.
+  is_mode(dir($out, '.raider/', '.raider/raiders/', '.raider/raiders/Oli.yml', 'CLAUDE.md'),
+    claude => 'CLAUDE.md in root', '.raider/raiders/ is no project marker');
+  is_mode(dir($out, '.raider/', '.raider/raiders/'), native => 'no raider or Claude files',
+    '.raider/ with only raiders/ is no raider project');
   # raider writes these itself in any project it runs in (journal, local::lib):
   # they must not turn a Claude Code project native (found by stream A).
   is_mode(dir($out, '.raider/', '.raider/sessions/', '.raider/.gitignore', '.raider/lib/', 'CLAUDE.md'),
