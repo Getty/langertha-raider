@@ -1,9 +1,9 @@
 # Real pattern: in default mode the person rejects a Bash call ("The user doesn't
 # want to proceed with this tool use"); the model does not repeat it, it asks
 # what to do instead (AskUserQuestion), takes the answer and goes the other way.
-# Abweichung: raider's refusal text is "denied: The user refused this call ..."
-# plus "Do not try the same call again"; Claude Code's is the "doesn't want to
-# proceed" text (and an interrupt note when the person pressed Esc).
+# The refusal is Claude Code's "doesn't want to proceed" text with the reason the
+# person gave. Abweichung: Claude Code also has an interrupt note for a person
+# who pressed Esc; raider's question has no such answer.
 title: the person refuses a command, the model asks what to do instead and follows the answer
 permission_mode: default
 approve: [ "no: not in this directory", once ]
@@ -30,7 +30,7 @@ expect:
     - { tool: bash }
     - { tool: write_file }
   tools:
-    - { name: bash, error: true, text: 'The user refused this call: not in this directory\. Do not try the same call again' }
+    - { name: bash, error: true, text: "^The user doesn't want to proceed with this tool use\\. The tool use was rejected \\(eg\\. if it was a file edit, the new_string was NOT written to the file\\)\\. To tell you how to proceed, the user said:\nnot in this directory$" }
     - { name: ask_user, text: '^User answered: Write a script file$' }
     - { name: write_file }
   events:

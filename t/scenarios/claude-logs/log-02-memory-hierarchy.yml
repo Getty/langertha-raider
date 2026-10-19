@@ -33,4 +33,4 @@ expect:
     - { name: grep, text: 'services/api/handler\.txt' }
     - { name: read_file, text: 'handler: render html.*Contents of \S+/services/api/CLAUDE\.md.*NESTED-MARKER' }
     - { name: read_file, text: 'render html', not_text: NESTED-MARKER }
-    - { name: read_file, text: '^page', not_text: NESTED-MARKER }
+    - { name: read_file, text: '^1\tpage', not_text: NESTED-MARKER }

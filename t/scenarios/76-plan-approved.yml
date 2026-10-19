@@ -19,8 +19,8 @@ expect:
     - { tool: write_file }
   tools:
     - { name: write_file, error: true, text: "plan mode: write_file changes files" }
-    - { name: exit_plan_mode, text: "User approved the plan\\. You can now start editing files and running commands" }
+    - { name: exit_plan_mode, text: "^User has approved your plan\\. You can now start coding\\. Start with updating your todo list if applicable\n\nThe permission mode is now default\\.\n\n## Approved Plan:\n1\\. write a\\.txt$" }
     - { name: write_file }
-    - { name: exit_plan_mode, error: true, text: "not in plan mode \\(the permission mode is default\\)" }
+    - { name: exit_plan_mode, error: true, text: "^<tool_use_error>You are not in plan mode\\. To enter plan mode, call the enter_plan_mode tool first\\. If your plan was already approved, continue with implementation\\.</tool_use_error>$" }
   events:
     - { type: permission.mode, from: plan, to: default, why: exit_plan_mode }

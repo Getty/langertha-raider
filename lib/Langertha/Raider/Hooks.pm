@@ -97,7 +97,7 @@ The event's input is written to stdin as JSON: what the caller passes, plus
 C<hook_event_name> and C<cwd> (L</root> unless given). For tool events
 C<tool_name> is turned into the Claude name and C<tool_input> into the
 Claude form (L<Langertha::Raider::ToolNames/claude_input>); the C<file_path>
-of C<Read>, C<Write> and C<Edit> is made absolute against L</root>, as
+of C<Read>, C<Write>, C<Edit> and C<MultiEdit> is made absolute against L</root>, as
 Claude Code hands it.
 
 C<timeout> is in seconds; the default is 600, 30 on C<UserPromptSubmit>. A
@@ -401,7 +401,7 @@ my %DEFAULT_TIMEOUT = ( UserPromptSubmit => 30, PreModelSwitch => 30, PostModelS
 
 my %DECISION_RANK = ( deny => 3, ask => 2, allow => 1 );
 
-my %FILE_TOOL = map { $_ => 1 } qw( read_file write_file edit_file );
+my %FILE_TOOL = map { $_ => 1 } qw( read_file write_file edit_file multi_edit );
 
 sub _json { JSON::MaybeXS->new( utf8 => 1, canonical => 1, allow_blessed => 1, convert_blessed => 1, allow_nonref => 1 ) }
 

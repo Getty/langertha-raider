@@ -84,7 +84,7 @@ subtest 'frontmatter: tools, disallowedTools, model, skills, ignored keys' => su
   put($d, 'list.md', agent_md(name => 'list', description => 'd',
     tools => [qw( Read Grep Bash mcp__github__create_issue perl_eval NotebookEdit Read read_file )]));
   put($d, 'string.md', agent_md(name => 'string', description => 'd', tools => 'Read, Edit,MultiEdit , WebFetch',
-    disallowedTools => 'Write, KillShell'));
+    disallowedTools => 'Write, KillShell, SendMessage'));
   put($d, 'star.md', agent_md(name => 'star', description => 'd', tools => '*', disallowedTools => [ 'Bash', 'ask_user' ]));
   put($d, 'empty.md', agent_md(name => 'empty', description => 'd', tools => ''));
   put($d, 'none.md', agent_md(name => 'none', description => 'd', tools => [ 'NotebookEdit' ]));
@@ -105,10 +105,10 @@ subtest 'frontmatter: tools, disallowedTools, model, skills, ignored keys' => su
     unknown_tools => [ 'NotebookEdit' ],
   }, 'list: Claude names mapped, raider and mcp names kept, unknown reported, each once');
   like($c->find('string'), {
-    tools         => [qw( read_file edit_file web_fetch )],
-    disallowed    => [ 'write_file' ],
-    unknown_tools => [ 'KillShell' ],
-  }, 'comma-separated string; Edit and MultiEdit are one tool; disallowed mapped');
+    tools         => [qw( read_file edit_file multi_edit web_fetch )],
+    disallowed    => [qw( write_file kill_shell )],
+    unknown_tools => [ 'SendMessage' ],
+  }, 'comma-separated string; MultiEdit and KillShell mapped (ADR 0025); disallowed mapped, unknown reported');
   like($c->find('star'), { tools => undef, disallowed => [qw( bash ask_user )] }, '* means every tool');
   is($c->find('empty')->{tools}, undef, 'empty tools: every tool');
   is($c->find('none')->{tools}, [], 'only unknown names: no tool');

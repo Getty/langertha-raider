@@ -47,6 +47,7 @@ use Langertha::Raider::WebTools qw( build_web_tools_server );
   package TestHTTPResponse;
   sub new { bless {}, shift }
   sub is_success { 1 }
+  sub is_redirect { 0 }
   sub status_line { '200 OK' }
   sub decoded_content { '<html><body><p>Hello</p><script>bad()</script></body></html>' }
   sub header { 'text/html' }

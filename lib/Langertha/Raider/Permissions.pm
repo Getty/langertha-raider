@@ -63,10 +63,12 @@ without a rule the mode decides:
 and the person-facing control tools (C<ask_user>, C<raider_ask_user>,
 C<todo_write>, C<skill>, C<exit_plan_mode>) are allowed; everything that
 writes, runs code, talks to the network or sends messages asks, and so does
-every tool raider does not know (a foreign MCP tool).
+every tool raider does not know (a foreign MCP tool). C<enter_plan_mode>
+asks too, in every mode but C<plan> and C<bypassPermissions>: the person
+agrees to plan mode, as in Claude Code (ADR 0025).
 
-=item C<acceptEdits> -- as C<default>, and C<write_file> / C<edit_file> are
-allowed inside the root or an additional directory.
+=item C<acceptEdits> -- as C<default>, and C<write_file> / C<edit_file> /
+C<multi_edit> are allowed inside the root or an additional directory.
 
 =item C<auto> -- as C<acceptEdits>, and bash commands that only read are
 allowed without asking: a fixed list
@@ -96,6 +98,11 @@ my %MODE  = map { $_ => 1 } @MODES;
 # Tools that face the person or only steer the run: allowed without a rule,
 # in plan mode too.
 my %CONTROL = map { $_ => 1 } qw( ask_user raider_ask_user todo_write skill exit_plan_mode );
+
+# The file tools that write, those that read, and every tool with a path.
+my %WRITER    = map { $_ => 1 } qw( write_file edit_file multi_edit );
+my %READER    = map { $_ => 1 } qw( read_file list_files glob grep );
+my %PATH_TOOL = ( %WRITER, %READER );
 
 my %EFFECT_TEXT = (
   write   => 'changes files',
@@ -185,6 +192,22 @@ the session and the other way round. Lives in memory only.
 
 =cut
 
+has ask_outside_roots => ( is => 'ro', isa => 'Bool', default => 0 );
+
+=attr ask_outside_roots
+
+False by default: the file and search tools are confined to the root and
+the L</additional_directories> and refuse every other path themselves (the
+raider layout). True in the Claude layout (ADR 0023), where those tools are
+not confined: a call of C<read_file>, C<list_files>, C<write_file>,
+C<edit_file>, C<multi_edit>, C<glob> or C<grep> whose path -- as written or
+as real path -- leaves the allowed roots is then not allowed by the mode in
+C<default>, C<acceptEdits>, C<auto> and C<plan>: it asks, unless an allow
+rule (C<Read(//tmp/**)>, C<Edit(~/notes/**)>) covers it. Deny rules and
+C<plan> refuse first; C<bypassPermissions> allows it, as Claude Code does.
+
+=cut
+
 has ignored_modes => ( is => 'ro', isa => 'ArrayRef', default => sub { [] } );
 
 =attr ignored_modes
@@ -245,6 +268,7 @@ sub from_sources {
     ignored_modes          => \@ignored,
     ( $arg{source_servers} ? ( source_servers => $arg{source_servers} ) : () ),
     ( $arg{session_rules}  ? ( session_rules  => $arg{session_rules} )  : () ),
+    ( $arg{ask_outside_roots} ? ( ask_outside_roots => 1 ) : () ),
   );
 }
 
@@ -261,8 +285,8 @@ L<Langertha::Raider::Context::Settings/permissions>. The rules and
 additional directories of all sources are concatenated. The mode is the
 first of C<cli_mode> and the sources' C<default_mode> in the order given
 that is a mode; a C<default_mode> that is none is skipped and kept in
-L</ignored_modes>. Without any, C<default>. C<session_rules> and
-C<source_servers> are passed on as they are (a policy read again keeps the
+L</ignored_modes>. Without any, C<default>. C<session_rules>, C<source_servers>
+and C<ask_outside_roots> are passed on as they are (a policy read again keeps the
 session's rules). Croaks on an invalid C<cli_mode> -- the command line
 refuses it before.
 
@@ -431,6 +455,7 @@ sub policy_revision {
     rules   => [ map { [ $_->kind, $_->text, $_->source ] } @{ $self->_file_rules } ],
     session => [ map { $_->text } @{ $self->session_rules } ],
     dirs    => [ $self->additional_directory_paths ],
+    ( $self->ask_outside_roots ? ( outside => 1 ) : () ),
   }) );
 }
 
@@ -454,6 +479,7 @@ sub for_subrun {
     additional_directories => $self->additional_directories,
     source_servers         => $self->source_servers,
     session_rules          => $self->session_rules,
+    ask_outside_roots      => $self->ask_outside_roots,
   );
 }
 
@@ -506,7 +532,7 @@ sub _call_class {
 }
 
 sub decide {
-  my ( $self, $call ) = @_;
+  my ( $self, $call, %opt ) = @_;
   croak __PACKAGE__.'->decide needs a call hash' unless ref $call eq 'HASH';
   my $name = $call->{name} // '';
   my ( $builtin, $server ) = $self->_call_origin($call);
@@ -544,6 +570,18 @@ sub decide {
     };
   }
 
+  # Plan mode is entered with the person's consent, as in Claude Code (ADR 0025).
+  return $self->_by_mode( ask => $mode.' mode asks before this call: enter_plan_mode switches the session to '
+    .'plan mode (read and plan only, no changes until a plan is approved)' )
+    if $builtin && $name eq 'enter_plan_mode' && $mode ne 'plan';
+  # A path outside the root and the additional directories, in the Claude layout (ADR 0023).
+  if ( $self->ask_outside_roots && $builtin && !$opt{skip_roots} ) {
+    if ( my ( $outside ) = $self->outside_paths($call) ) {
+      return $self->_by_mode( ask => $mode.' mode asks before this call: '.$name.' requested permissions to '
+        .( $class eq 'change' ? 'write to ' : 'read from ' ).$outside
+        .", which is outside the project root and the additional directories, but you haven't granted it yet" );
+    }
+  }
   return $self->_by_mode( allow => $mode.' mode' ) if $class eq 'read' || $class eq 'control';
   return $self->_by_mode( allow => 'auto mode, a read-only bash command' )
     if $mode eq 'auto' && $builtin && $name eq 'bash' && $self->_read_only_bash($call);
@@ -566,6 +604,11 @@ or the model), C<mode>, and for a rule C<rule> (its text) and C<source>; for
 the mode C<source> is L</mode_source>. A command of several parts that
 several allow rules cover together names all of them. The shape is the one
 the tool gate of L<Langertha::Raider> takes.
+
+With L</ask_outside_roots> a call of a file or search tool whose path leaves
+the root and the additional directories asks (after deny, plan, ask and
+allow rules, before the mode allows a read or an edit); C<< skip_roots => 1 >>
+as a further argument leaves that check out (L</hides_read> does).
 
 =method rule_matches
 
@@ -642,18 +685,41 @@ sub _read_only_bash {
 sub _edit_in_allowed_roots {
   my ( $self, $call, $ctx ) = @_;
   my $name = $call->{name} // '';
-  return 0 unless $name eq 'write_file' || $name eq 'edit_file';
+  return 0 unless $WRITER{$name};
   my $path = ref $call->{arguments} eq 'HASH' ? $call->{arguments}{path} : undef;
   return 0 unless defined $path && !ref $path && length $path;
+  return $self->outside_paths($call) ? 0 : 1;
+}
+
+sub outside_paths {
+  my ( $self, $call ) = @_;
+  my $name = $call->{name} // '';
+  return unless $PATH_TOOL{$name};
+  my $path = ref $call->{arguments} eq 'HASH' ? $call->{arguments}{path} : undef;
+  $path = '.' if ( !defined $path || ( !ref $path && !length $path ) ) && ( $name eq 'glob' || $name eq 'grep' );
+  return unless defined $path && !ref $path && length $path;
   my @roots = map {
     my $real = realpath($_);
     ( $_, ( defined $real ? $real : () ) );
   } $self->allowed_roots;
-  for my $p ( Langertha::Raider::Permissions::Rule->call_paths( $path, $ctx ) ) {
-    return 0 unless first { $p eq $_ || index( $p, ( $_ eq '/' ? '/' : $_.'/' ) ) == 0 } @roots;
-  }
-  return 1;
+  return grep {
+    my $p = $_;
+    !first { $p eq $_ || index( $p, ( $_ eq '/' ? '/' : $_.'/' ) ) == 0 } @roots;
+  } Langertha::Raider::Permissions::Rule->call_paths( $path, $self->_ctx_base );
 }
+
+=method outside_paths
+
+    my @outside = $policy->outside_paths($call);
+
+For a call of a file or search tool (C<read_file>, C<list_files>,
+C<write_file>, C<edit_file>, C<multi_edit>, C<glob>, C<grep>): the
+absolute forms of its C<path> -- as written, and as real path with
+symbolic links followed -- that lie outside the root and the additional
+directories. Empty when the path stays inside (or the call is of another
+tool). A symbolic link inside the root that points out of it is outside.
+
+=cut
 
 #### Reading below a search root
 
@@ -671,8 +737,10 @@ C<read_file>): only then can L</hides_read> hide anything.
 
 sub hides_read {
   my ( $self, $path ) = @_;
-  return $self->decide( { name => 'read_file', source => 'raider', arguments => { path => $path } } )->{verdict} ne 'allow'
-    ? 1 : 0;
+  # A search the gate let reach a directory outside the roots shows what
+  # it finds there: only the rules decide here (ADR 0023).
+  return $self->decide( { name => 'read_file', source => 'raider', arguments => { path => $path } }, skip_roots => 1 )
+    ->{verdict} ne 'allow' ? 1 : 0;
 }
 
 =method hides_read
@@ -705,7 +773,12 @@ sub suggest_rule {
       || Langertha::Raider::Permissions::Rule->shell_parts($trimmed)->{opaque};
     return 'Bash('.$trimmed.')';
   }
-  if ( $name eq 'write_file' || $name eq 'edit_file' ) {
+  if ( $READER{$name} && $self->outside_paths($call) ) {
+    my ( $abs ) = Langertha::Raider::Permissions::Rule->call_paths( $args->{path} // '.', $self->_ctx_base );
+    my $dir = $name eq 'read_file' ? path($abs)->parent->stringify : $abs;
+    return 'Read(/'.$dir.( $dir eq '/' ? '' : '/' ).'**)';
+  }
+  if ( $WRITER{$name} ) {
     my $path = $args->{path};
     return 'Edit' unless defined $path && !ref $path && length $path;
     my $ctx  = $self->_ctx_base;
@@ -730,9 +803,11 @@ sub suggest_rule {
     my $text = $policy->suggest_rule($call);   # 'Bash(make test)'
 
 The rule the person would allow with "yes, for this session": C<bash> ->
-C<Bash(EXACT COMMAND)>; C<write_file> / C<edit_file> -> C<Edit(DIR/**)> for
-the directory of the file (C<Edit(/**)> in the root, C<Edit(//ABS/**)>
-outside it); C<web_fetch> -> C<WebFetch(domain:HOST)>; a foreign tool ->
+C<Bash(EXACT COMMAND)>; C<write_file> / C<edit_file> / C<multi_edit> ->
+C<Edit(DIR/**)> for the directory of the file (C<Edit(/**)> in the root,
+C<Edit(//ABS/**)> outside it); a reading file or search tool whose path
+leaves the root and the additional directories (L</outside_paths>) ->
+C<Read(//DIR/**)> for the directory of the file, or the directory searched; C<web_fetch> -> C<WebFetch(domain:HOST)>; a foreign tool ->
 C<mcp__SERVER__TOOL>; any other tool -> its name. Returns nothing when no
 rule can name the call safely: a command with substitutions, redirections
 into files or heredocs, or a foreign tool whose server has no

@@ -27,6 +27,7 @@ script:
       - [ read_file, { path: generated/page.out } ]
       - [ edit_file, { path: generated/page.out, old_string: OLD, new_string: NEW } ]
   - tool_calls:
+      - [ read_file, { path: templates/page.tpl } ]
       - [ edit_file, { path: templates/page.tpl, old_string: OLD, new_string: NEW } ]
       - [ bash, { command: cat templates/page.tpl } ]
   - text: Template changed; regenerate to update the output.
@@ -38,8 +39,9 @@ expect:
   tools:
     - { name: read_file, text: 'title: OLD' }
     - { name: edit_file, error: true, text: 'denied: PreToolUse hook: generated/ is built from templates/; edit the template instead' }
-    - { name: edit_file, text: '^Edited ' }
-    - { name: bash, text: 'Exit code: 0.*title: NEW' }
+    - { name: read_file, text: "\\A1\\ttitle: OLD" }
+    - { name: edit_file, text: '^The file \S+ has been updated successfully\.' }
+    - { name: bash, text: '\Atitle: NEW\z' }
   events:
     - { type: hook.ran, hook_event: PreToolUse, outcome: block, exit: 2, source: .claude/settings.json }
     - { type: hook.ran, hook_event: PreToolUse, outcome: success, exit: 0 }

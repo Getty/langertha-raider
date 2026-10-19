@@ -219,3 +219,11 @@ only there; ADR 0022 records how. In the same step `disableAllHooks` became a ke
 uses (the last settings file that sets it wins), so `config explain` no longer lists it as
 unused. The workspace trust of ADR 0004 still does not exist: hooks run without asking,
 like the instruction files, until it does (ADR 0022, "Workspace trust").
+
+## Addendum 4 — the skill is a message of its own (karr #159, 2026-10-19)
+
+The `skill` tool of §4 no longer returns the skill as its result: the result is Claude
+Code's `Launching skill: NAME`, and the text §4 describes (base directory, body,
+`$ARGUMENTS`) follows the tool results as a user message of its own, kept in the history and
+the journal. ADR 0026 §6 records how; an unknown name is `<tool_use_error>Unknown skill: NAME.
+Available skills: ...</tool_use_error>`.

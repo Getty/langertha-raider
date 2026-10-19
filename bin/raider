@@ -51,7 +51,7 @@ exit Langertha::Raider::CLI::Main->new->run(@ARGV);
 F<raider> is the command line of L<Langertha::Raider::CLI>: it runs
 L<Langertha::Raider::CLI::Main>, which parses the options below and builds
 a L<Langertha::Raider::CLI> for the working directory. That wires an LLM engine
-(via L<Langertha>) to the file tools, C<bash> (L<MCP::Run::Bash>) and the web tools,
+(via L<Langertha>) to the file tools, C<bash> (L<Langertha::Raider::BashTools>) and the web tools,
 then runs the L<Langertha::Raider> multi-turn agent loop on your prompt.
 Optional profile, pack, and Perl-native tool flags let the same CLI load
 project agent instructions, persona/power bundles, and C<perl_eval> /
@@ -159,11 +159,18 @@ generated from exactly the tools the engine is offered:
 
 =over
 
-=item * C<list_files>, C<read_file>, C<write_file>, C<edit_file>
-(L<Langertha::Raider::FileTools>), confined to C<-r>.
+=item * C<list_files>, C<read_file>, C<write_file>, C<edit_file>, C<multi_edit>
+(L<Langertha::Raider::FileTools>), answering as Claude Code's Read, Write,
+Edit and MultiEdit (ADR 0023): C<read_file> in C<cat -n> form with
+C<offset> / C<limit>; an existing file must have been read in the run before
+it is written or edited. Confined to C<-r> and the additional directories;
+in the Claude layout a path outside them is asked about instead (allow rules
+such as C<Read(//tmp/**)> open it).
 
-=item * C<bash> (L<MCP::Run::Bash>), a real shell started in C<-r>,
-120 seconds per command by default. It is not confined to C<-r>. A heavy
+=item * C<bash> (L<Langertha::Raider::BashTools>), a real shell started in C<-r>,
+120 seconds per command by default (at most 600); a command still running
+then goes on in the background, as does one started with
+C<run_in_background>; C<bash_output> reads it and C<kill_shell> stops it. It is not confined to C<-r>. A heavy
 command (C<prove>, C<make test>, C<dzil test>, C<cpanm>, C<podman run>, ...)
 is refused with the reason while the host is under memory pressure or its
 heavy slots are taken (L<Langertha::Raider::Loadguard>, the C<LOADGUARD_*>
@@ -177,12 +184,15 @@ scope; off by default.
 =item * C<glob>, C<grep> (L<Langertha::Raider::SearchTools>), confined to
 C<-r>; C<grep> uses ripgrep when it is installed.
 
-=item * C<todo_write> (L<Langertha::Raider::TodoTools>), the task list of
-the run, and C<ask_user> (L<Langertha::Raider::AskTools>), a question to
-the person at the REPL -- refused in a run nobody can answer.
+=item * C<task_create>, C<task_update>, C<task_list>, C<task_get>
+(L<Langertha::Raider::TodoTools>), the task list of the conversation --
+C<todo_write>, the task list of the run, instead with
+C<RAIDER_ENABLE_TASKS=0> -- and C<ask_user> (L<Langertha::Raider::AskTools>),
+a question to the person at the REPL -- refused in a run nobody can answer.
 
-=item * C<exit_plan_mode> (L<Langertha::Raider::PlanTools>) once the run
-has been in the C<plan> permission mode (see L</PERMISSIONS>).
+=item * C<enter_plan_mode> (L<Langertha::Raider::PlanTools>), which switches
+to the C<plan> permission mode once the person agrees, and C<exit_plan_mode>
+once the run has been in that mode (see L</PERMISSIONS>).
 
 =item * C<perl_eval>, C<perl_check>, C<perl_cpanm>
 (L<Langertha::Raider::PerlTools>) when granted: by C<--perl>, by C<perl:>
@@ -275,7 +285,7 @@ An engine attribute (repeatable), e.g. C<-o temperature=0.2 -o
 response_size=4096>, merged over F<.raider.yml>; the command line wins.
 Integers, decimals and C<true> / C<false> become numbers. raider's own
 F<.raider.yml> keys (C<engine>, C<perl>, C<packs=a,b>, C<skills=a,b>,
-C<detect>, C<no_detect=a,b>, C<preferred_lib_target>) configure raider
+C<detect>, C<no_detect=a,b>, C<preferred_lib_target>, C<web_fetch_model>) configure raider
 instead and never reach the engine.
 
 =opt -r, --root DIR
@@ -1002,6 +1012,13 @@ The Custom Search engine id for L</GOOGLE_API_KEY>.
 Colon-separated directories searched for packs after the project's
 F<.raider/packs/>, F<~/.raider/packs/> and the bundled ones; see
 L<Langertha::Raider::Packs/build_packs>.
+
+=env RAIDER_ENABLE_TASKS
+
+C<0> (or C<false>, C<no>, C<off>) mounts C<todo_write> instead of the task
+tools C<task_create>, C<task_update>, C<task_list> and C<task_get>, like
+Claude Code's C<CLAUDE_CODE_ENABLE_TASKS>; see
+L<Langertha::Raider::Application/task_tools>.
 
 =env HOME
 

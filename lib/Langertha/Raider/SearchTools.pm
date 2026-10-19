@@ -26,8 +26,9 @@ B<Internal module.> Its interface may change without notice.
 The two search tools of raider, named and shaped after Claude Code's
 C<Glob> and C<Grep> (L<Langertha::Raider::ToolNames>), confined to one
 directory the way L<Langertha::Raider::FileTools> is: every path argument
-is resolved with C<realpath> and must stay inside L</root>. Paths in the
-results are relative to L</root>, so they go straight into C<read_file>.
+is resolved with C<realpath> and must stay inside L</root> (unless
+L</confine> is off). Paths in the results are relative to L</root>, so they
+go straight into C<read_file>.
 
 Both tools see the same files. They walk the tree without following
 symbolic links, skip the version control directories (F<.git>, F<.hg>,
@@ -110,6 +111,23 @@ directories of ADR 0021). Results inside them are shown as absolute paths.
 One that does not exist is left out. A CodeRef returning the list (or an
 ArrayRef) is called on every call, so the roots can change while the tools
 are mounted (C</reload>).
+
+=cut
+
+has confine => (
+  is      => 'ro',
+  isa     => 'Bool|CodeRef',
+  default => 1,
+);
+
+=attr confine
+
+True by default: a C<path> must stay inside L</root> and the
+L</extra_roots>. False (or a CodeRef answering false, asked on every
+call) lets a search start anywhere -- the application does so in the
+Claude layout, where the permission gate asks before a search outside the
+root and the additional directories (ADR 0023). Results outside L</root>
+are absolute paths; the walk still follows no symbolic link.
 
 =cut
 
@@ -238,8 +256,14 @@ sub _resolve {
   my $real = realpath("$abs");
   croak 'no such path: '.$path unless defined $real && -e $real;
   croak 'path escapes root: '.$path
-    unless grep { $real eq $_ || index( $real, $_.'/' ) == 0 } $root, @{ $self->_real_extra_roots };
+    unless !$self->_confined || grep { $real eq $_ || index( $real, $_.'/' ) == 0 } $root, @{ $self->_real_extra_roots };
   return $real;
+}
+
+sub _confined {
+  my ( $self ) = @_;
+  my $c = $self->confine;
+  return ref $c eq 'CODE' ? ( $c->() ? 1 : 0 ) : ( $c ? 1 : 0 );
 }
 
 # $abs as the path the results show: relative below the root, else absolute

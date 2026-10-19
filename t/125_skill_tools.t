@@ -11,9 +11,11 @@ use Langertha::Raider::Context::Skills;
 use Langertha::Raider::SkillTools qw( build_skill_tools_server );
 use Langertha::Raider::ToolEffects;
 
-# One MCP tool, `skill`, in the shape of Claude Code's Skill tool: the body
-# under "Base directory for this skill: DIR", arguments substituted; unknown
-# or not model-invocable names are error results naming the listed skills.
+# One MCP tool, `skill`, in the shape of Claude Code's Skill tool: the result
+# says "Launching skill: NAME", the body under "Base directory for this skill:
+# DIR", arguments substituted, rides _meta 'raider/messages' for the raid to
+# add as a user message (ADR 0026); unknown or not model-invocable names are
+# error results "Unknown skill: NAME" naming the listed skills.
 
 local $ENV{HOME} = tempdir(CLEANUP => 1);
 local $ENV{CLAUDE_CONFIG_DIR} = tempdir(CLEANUP => 1);
@@ -30,6 +32,9 @@ my $cat = Langertha::Raider::Context::Skills->new(
   plugins => [ { name => 'sp', dirs => [ "$w/plug/skills/brainstorm" ] } ],
 );
 my $server = build_skill_tools_server(skills => $cat);
+
+# The skill body the result hands the raid.
+sub body_of { my ( $res ) = @_; return $res->{_meta}{'raider/messages'}[0] }
 
 sub call_tool {
   my ( $name, $args ) = @_;
@@ -50,19 +55,21 @@ subtest 'one tool with the schema' => sub {
 subtest 'loads a skill' => sub {
   my $res = call_tool('skill', { skill => 'pdf', args => 'report.pdf' });
   ok(!$res->{isError}, 'no error');
-  is($res->{content}[0]{text}, "Base directory for this skill: $w/skills/pdf\n\nRead report.pdf with pdftotext.\n",
-    'tool text with arguments');
-  is(call_tool('skill', { skill => ' /plain ' })->{content}[0]{text},
-    "Base directory for this skill: $w/skills/plain\n\nPlain body.\n", 'slash and blanks tolerated');
-  is(call_tool('skill', { skill => 'plain', args => 'more' })->{content}[0]{text},
+  is($res->{content}, [ { type => 'text', text => 'Launching skill: pdf' } ], 'the result only says so, as Claude Code');
+  is($res->{_meta}{'raider/messages'}, [ "Base directory for this skill: $w/skills/pdf\n\nRead report.pdf with pdftotext.\n" ],
+    'the body with arguments, as the one message to add');
+  my $plain = call_tool('skill', { skill => ' /plain ' });
+  is($plain->{content}[0]{text}, 'Launching skill: plain', 'named as the catalogue names it');
+  is(body_of($plain), "Base directory for this skill: $w/skills/plain\n\nPlain body.\n", 'slash and blanks tolerated');
+  is(body_of(call_tool('skill', { skill => 'plain', args => 'more' })),
     "Base directory for this skill: $w/skills/plain\n\nPlain body.\n\nARGUMENTS: more", 'args appended');
-  like(call_tool('skill', { skill => 'sp:brainstorm' })->{content}[0]{text}, qr/Think first\./, 'plugin skill');
+  like(body_of(call_tool('skill', { skill => 'sp:brainstorm' })), qr/Think first\./, 'plugin skill');
 };
 
 subtest 'errors name the listed skills' => sub {
   my $res = call_tool('skill', { skill => 'nope' });
   ok($res->{isError}, 'unknown is an error');
-  is($res->{content}[0]{text}, 'Error: unknown skill: nope. Available skills: pdf, plain, sp:brainstorm',
+  is($res->{content}[0]{text}, '<tool_use_error>Unknown skill: nope. Available skills: pdf, plain, sp:brainstorm</tool_use_error>',
     'names the listed skills');
   my $hidden = call_tool('skill', { skill => 'secret' });
   ok($hidden->{isError}, 'not model-invocable is an error');
@@ -72,7 +79,7 @@ subtest 'errors name the listed skills' => sub {
 
   my $empty = build_skill_tools_server(skills => Langertha::Raider::Context::Skills->new(roots => []));
   my ( $t ) = @{ $empty->tools };
-  is($t->code->($t, { skill => 'x' })->{content}[0]{text}, 'Error: unknown skill: x. No skills are available.',
+  is($t->code->($t, { skill => 'x' })->{content}[0]{text}, '<tool_use_error>Unknown skill: x. No skills are available.</tool_use_error>',
     'empty catalogue');
   like(dies { build_skill_tools_server() }, qr/needs skills/, 'croaks without skills');
 };
@@ -85,7 +92,8 @@ subtest 'end to end over MCP' => sub {
   my $tools = $mcp->list_tools->get;
   is([ map { $_->{name} } @$tools ], [ 'skill' ], 'listed over MCP');
   my $res = $mcp->call_tool('skill', { skill => 'pdf', args => 'x.pdf' })->get;
-  is($res->{content}[0]{text}, "Base directory for this skill: $w/skills/pdf\n\nRead x.pdf with pdftotext.\n", 'called over MCP');
+  is($res->{content}[0]{text}, 'Launching skill: pdf', 'called over MCP');
+  is(body_of($res), "Base directory for this skill: $w/skills/pdf\n\nRead x.pdf with pdftotext.\n", 'the body survives MCP in _meta');
   my $err = $mcp->call_tool('skill', { skill => 'secret' })->get;
   ok($err->{isError}, 'error flag survives MCP');
 };

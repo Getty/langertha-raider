@@ -30,7 +30,7 @@ sub run_tool {
 subtest 'file tools: extra roots' => sub {
   my $files = build_file_tools_server( root => "$root", extra_roots => [ "$extra", "$tmp/missing" ] );
   my ( $text, $err ) = run_tool( $files, read_file => { path => $extra->child('notes.txt')->stringify } );
-  is [ $text, $err ], [ "token=extra\n", 0 ], 'reads in an extra root';
+  is [ $text, $err ], [ "1\ttoken=extra\n2\t", 0 ], 'reads in an extra root';
   ( $text, $err ) = run_tool( $files, write_file => { path => $extra->child('new.txt')->stringify, content => 'n' } );
   is $err, 0, 'writes in an extra root';
   is $extra->child('new.txt')->slurp, 'n', '... really';
@@ -38,7 +38,7 @@ subtest 'file tools: extra roots' => sub {
   is $err, 1, 'another directory is still refused';
   like $text, qr/Path escapes root/, '... as before';
   ( $text, $err ) = run_tool( $files, read_file => { path => 'lib/a.txt' } );
-  is $text, "token=public\n", 'relative paths stay under the root';
+  is $text, "1\ttoken=public\n2\t", 'relative paths stay under the root';
 };
 
 subtest 'search tools: extra roots' => sub {

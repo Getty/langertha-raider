@@ -581,9 +581,9 @@ sub _advice {
 
 =method validator
 
-    my $code = $guard->validator;     # for MCP::Run::Bash
+    my $code = $guard->validator;     # for Langertha::Raider::BashTools
 
-A code reference for the C<validator> of L<MCP::Run>: it gets the command and
+A code reference for the C<validator> of L<Langertha::Raider::BashTools>: it gets the command and
 returns C<1> to run it or the reason of L</check>.
 
 =cut

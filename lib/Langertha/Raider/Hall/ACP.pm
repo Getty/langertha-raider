@@ -487,7 +487,7 @@ sub _session_cancel {
 
 # The kind of tool call ACP knows for a raider tool.
 my %TOOL_KIND = (
-  bash => 'execute', write_file => 'edit', edit_file => 'edit', web_fetch => 'fetch',
+  bash => 'execute', write_file => 'edit', edit_file => 'edit', multi_edit => 'edit', web_fetch => 'fetch',
   read_file => 'read', list_files => 'read', glob => 'search', grep => 'search', web_search => 'fetch',
 );
 

@@ -10,6 +10,8 @@ use Path::Tiny;
 use YAML::PP;
 use Test::Raider::MockAI qw( mock_app );
 use Test::Raider::FakeProc qw( fake_proc );
+use Test::Raider::LocalHTTP;
+use IO::Async::Loop;
 use Langertha::Raider::Loadguard;
 
 our @EXPORT_OK = qw( run_scenario_files );
@@ -33,6 +35,10 @@ our @EXPORT_OK = qw( run_scenario_files );
 #   title:   what the scenario shows
 #   files:   { path => content }        written to the root before the run
 #   age:     { path => seconds }        how long ago the file was last modified (default: now)
+#   http:    { /path => { status, type, body, location } }  a local web server
+#            (Test::Raider::LocalHTTP) on the application's loop; {{HTTP}} in
+#            the strings of `script:` (and in a location) is its base URL,
+#            {{HTTP_OTHER}} the same server under another host name
 #   proc:    { memory_full, swap, cpus, processes }  a fake /proc the loadguard gate measures
 #            (Test::Raider::FakeProc); with it the gate is on, without it off
 #   env:     { LOADGUARD_* => value }   the environment of that gate
@@ -71,8 +77,10 @@ our @EXPORT_OK = qw( run_scenario_files );
 #            context and permissions again (/reload)
 #   script:  the model's answers, one per request:
 #              - tool_calls: [ [ tool_name, { arguments } ], ... ]
-#              - text: the final answer
+#              - text: the final answer (or the answer of a tool's own model
+#                call, e.g. web_fetch with a prompt)
 #              - error: [ status, message ]   the request fails with that HTTP status
+#            either of the first two with usage: { prompt_tokens, completion_tokens } reported
 #   expect:
 #     answer:      the final answer, exactly
 #     outcome:     { status, error } of the last run_prompt (error: a regex)
@@ -82,7 +90,9 @@ our @EXPORT_OK = qw( run_scenario_files );
 #                  conversation the model saw in request N (0-based); with
 #                  offers: [ tool, ... ] the tools that request offered, exactly (any
 #                  order), with lacks: [ tool, ... ] tools it must not offer, with
-#                  tool_text: text the descriptions of the offered tools must contain. A
+#                  tool_text: text the descriptions of the offered tools must contain, with
+#                  tail: [ { role, contains }, ... ] its last messages, in order
+#                  (the role on the wire: user, assistant, tool). A
 #                  subagent's requests count in the same sequence, in the order made
 #                  (the caller's agent call, the subagent's requests, the caller's next)
 #     request_count: how many model requests were made in all
@@ -121,7 +131,12 @@ sub run_scenario_file {
     my ( $root, $home ) = map { $_->realpath } @tmp;
     $ENV{HOME} = "$home";
     delete $ENV{CLAUDE_CONFIG_DIR};
-    my $fill = sub { ( my $t = $_[0] ) =~ s/\{\{HOME\}\}/$home/g; $t =~ s/\{\{ROOT\}\}/$root/g; $t };
+    # A local web server for web_fetch, on the loop the application uses (held: stops at the end).
+    my $http = $s->{http} ? Test::Raider::LocalHTTP->new( loop => IO::Async::Loop->new, routes => $s->{http} ) : undef;
+    my $fill = sub {
+      ( my $t = $_[0] ) =~ s/\{\{HOME\}\}/$home/g; $t =~ s/\{\{ROOT\}\}/$root/g;
+      $http ? $http->fill($t) : $t;
+    };
     $root->child($_)->touchpath->spew_utf8( $fill->( $s->{files}{$_} ) ) for keys %{ $s->{files} // {} };
     $home->child($_)->touchpath->spew_utf8( $fill->( $s->{home}{$_} ) ) for keys %{ $s->{home} // {} };
     ( m{\A~/(.+)\z}s ? $home->child($1) : $root->child($_) )->chmod(0755) for @{ $s->{executable} // [] };
@@ -213,6 +228,19 @@ sub run_scenario_file {
       if ( defined $r->{tool_text} ) {
         my $texts = join "\n", map { $_->{function}{description} // $_->{description} // '' } @{ $req->{tools} // [] };
         like( $texts, qr/\Q$r->{tool_text}\E/, "request $r->{index} tool texts contain '$r->{tool_text}'" );
+      }
+      if ( my $tail = $r->{tail} ) {
+        my @msgs = @{ $req->{body}{messages} // [] };
+        @msgs = @msgs > @$tail ? @msgs[ -@$tail .. -1 ] : @msgs;
+        is( scalar @msgs, scalar @$tail, "request $r->{index} has the tail's messages" );
+        for my $i ( 0 .. $#$tail ) {
+          my ( $w, $m ) = ( $tail->[$i], $msgs[$i] // {} );
+          is( $m->{role}, $w->{role}, "request $r->{index}, tail message $i: role" ) if defined $w->{role};
+          my $c = $m->{content};
+          my $text = ref $c ? join( ' ', map { $_->{text} // '' } @$c ) : ( $c // '' );
+          like( $text, qr/\Q$w->{contains}\E/, "request $r->{index}, tail message $i contains '$w->{contains}'" )
+            if defined $w->{contains};
+        }
       }
     }
 

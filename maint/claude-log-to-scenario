@@ -52,8 +52,10 @@ with text only becomes C<text:>.
 
 =item * Tool names and arguments are translated by
 L<Langertha::Raider::ToolNames> (C<Read> becomes C<read_file> with C<path>,
-C<Agent> becomes C<agent>, the C<Bash> timeout becomes seconds, ...).
-C<MultiEdit> becomes one C<edit_file> per edit. A tool raider does not have
+C<Agent> becomes C<agent>, C<MultiEdit> C<multi_edit>, C<TaskCreate>
+C<task_create>, the C<Bash> timeout becomes seconds, ...). A section with
+C<TodoWrite> gets C<app: { task_tools: false }>, so the scenario mounts
+C<todo_write> instead of the task tools. A tool raider does not have
 (C<ToolSearch>, C<SendMessage>, C<Monitor>, ...) and every C<mcp__*> tool (a
 scenario mounts no MCP server) is left out and noted in a comment.
 
@@ -211,6 +213,7 @@ Read the draft before committing it.
 my $JSON  = JSON::MaybeXS->new( utf8 => 1, canonical => 1, convert_blessed => 1 );
 my $YAML  = YAML::PP->new( boolean => 'JSON::PP', preserve => PRESERVE_FLOW_STYLE | PRESERVE_ORDER, width => 1000 );
 my $TRUE  = JSON::MaybeXS->true;
+my $FALSE = JSON::MaybeXS->false;
 my $tools = 'Langertha::Raider::ToolNames';
 my $agents = 'Langertha::Raider::Context::Agents';
 
@@ -676,28 +679,21 @@ sub translate_call {
   return ( [], 'left out '.$name.': an MCP tool, the scenario mounts no MCP server' ) if $tools->is_mcp($name);
   my $tool = $tools->raider_name($name);
   return ( [], 'left out '.$name.': raider has no such tool' ) unless defined $tool;
-  my @inputs = $name eq 'MultiEdit'
-    ? map { +{ file_path => $input->{file_path}, %$_ } } grep { ref $_ eq 'HASH' } @{ $input->{edits} // [] }
-    : ($input);
-  my @calls;
-  for my $in (@inputs) {
-    my $args = $tools->raider_input( $tool, $in );
-    my %mapped;
-    for my $key ( path_keys( $tool, $args ) ) {
-      my $p = map_path( $ctx, $args->{$key} );
-      return ( [], 'left out '.$name.' '.$args->{$key}.': outside the project and the home' ) unless defined $p;
-      $mapped{$key} = $p;
-    }
-    $args = deep( sub { fill_placeholders( $ctx, redact( $_[0] ) ) }, $args );
-    $args->{$_} = $mapped{$_} for keys %mapped;
-    push @calls, [ $tool, $args ];
+  my $args = $tools->raider_input( $tool, $input );
+  my %mapped;
+  for my $key ( path_keys( $tool, $args ) ) {
+    my $p = map_path( $ctx, $args->{$key} );
+    return ( [], 'left out '.$name.' '.$args->{$key}.': outside the project and the home' ) unless defined $p;
+    $mapped{$key} = $p;
   }
-  return ( \@calls );
+  $args = deep( sub { fill_placeholders( $ctx, redact( $_[0] ) ) }, $args );
+  $args->{$_} = $mapped{$_} for keys %mapped;
+  return ( [ [ $tool, $args ] ] );
 }
 
 sub path_keys {
   my ( $tool, $args ) = @_;
-  my @keys = $tool =~ /\A(?:read_file|write_file|edit_file|list_files|glob|grep)\z/ ? ('path') : ();
+  my @keys = $tool =~ /\A(?:read_file|write_file|edit_file|multi_edit|list_files|glob|grep)\z/ ? ('path') : ();
   push @keys, 'pattern' if $tool eq 'glob';
   return grep { defined $args->{$_} && !ref $args->{$_} && $args->{$_} =~ m{\A/} } @keys;
 }
@@ -798,8 +794,8 @@ sub emit_run {
           push @runs, $run;
         }
         push @calls, $call;
+        $ctx->{todo_write} = 1 if $call->[0] eq 'todo_write';
         my ( $want, $notes ) = expectation( $ctx, $call->[0], $use, $result, $run );
-        push @$notes, 'from MultiEdit: Claude Code applies its edits all or none' if $use->{name} eq 'MultiEdit';
         push @own, { want => $want, comments => $notes };
       }
     }
@@ -975,7 +971,9 @@ sub scenario_yaml {
   my $no_prompt = !defined $prompts[0];
   $prompts[0] //= 'go';
   if ( @prompts > 1 ) { $doc{prompts} = \@prompts } else { $doc{prompt} = $prompts[0] }
-  $doc{app}    = { max_agent_depth => $ctx->{depth} } if $ctx->{depth} > 1;
+  $doc{app}{max_agent_depth} = $ctx->{depth} if $ctx->{depth} > 1;
+  # A session of the TodoWrite era: raider mounts todo_write instead of the task tools.
+  $doc{app}{task_tools}      = $FALSE        if $ctx->{todo_write};
   $doc{files}  = $ctx->{files}      if %{ $ctx->{files} };
   $doc{home}   = $ctx->{home_files} if %{ $ctx->{home_files} };
   $doc{script} = [ map { $_->{step} } @items ];
@@ -986,7 +984,10 @@ sub scenario_yaml {
   $out .= "# no user prompt before the section: a placeholder\n" if $no_prompt;
   $out .= exists $doc{prompts} ? dump_key( 0, prompts => $doc{prompts} ) : dump_key( 0, prompt => $doc{prompt} );
   if ( $doc{app} ) {
-    $out .= "# subagents of subagents: raider allows that only above its default depth of 1\n";
+    $out .= "# subagents of subagents: raider allows that only above its default depth of 1\n"
+      if exists $doc{app}{max_agent_depth};
+    $out .= "# a session of the TodoWrite era: todo_write instead of the task tools (ADR 0025)\n"
+      if exists $doc{app}{task_tools};
     $out .= dump_key( 0, app => $doc{app} );
   }
   $out .= join '', map { '# '.$_."\n" } map { redact( plain_paths( $ctx, $_ ) ) } @{ $ctx->{file_notes} };

@@ -98,7 +98,7 @@ overwrite it.
 =cut
 
 # Keys that configure raider itself and never reach the engine constructor.
-my %APP_KEY = map { $_ => 1 } qw( agent_models claude detect engine max_agent_depth no_detect packs permissions perl preferred_lib_target project_tools providers skills );
+my %APP_KEY = map { $_ => 1 } qw( agent_models claude detect engine max_agent_depth no_detect packs permissions perl preferred_lib_target project_tools providers skills web_fetch_model );
 
 my %PROFILE_KEYWORD = (
   claude => 'claude',
@@ -619,7 +619,7 @@ sub normalize_bools {
 L</options> without raider's own keys (C<agent_models>, C<claude>, C<detect>, C<engine>,
 C<max_agent_depth>, C<no_detect>,
 C<packs>, C<perl>, C<preferred_lib_target>, C<project_tools>, C<providers>,
-C<skills>): what goes to the engine constructor.
+C<skills>, C<web_fetch_model>): what goes to the engine constructor.
 
 =cut
 
@@ -637,7 +637,7 @@ sub engine_options {
 True for the keys that configure raider itself (C<agent_models>, C<claude>,
 C<detect>, C<engine>, C<max_agent_depth>,
 C<no_detect>, C<packs>, C<permissions>, C<perl>, C<preferred_lib_target>, C<project_tools>,
-C<providers>, C<skills>) and never reach the engine constructor.
+C<providers>, C<skills>, C<web_fetch_model>) and never reach the engine constructor.
 
 =cut
 

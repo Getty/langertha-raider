@@ -108,7 +108,10 @@ subtest 'the gate asks through on_permission_request' => sub {
   $app->on_permission_request( sub { { answer => 'no', reason => 'no network' } } );
   my $v = $app->_permission_gate( { name => 'web_fetch', source => 'engine:3', arguments => { url => 'https://x.org' } } );
   is [ @{$v}{qw( verdict by )} ], [ 'deny', 'user' ], 'no: refused by the user';
-  like $v->{reason}, qr/\AThe user refused this call: no network\. Do not try the same call again/, 'with the reason';
+  is $v->{message}, "The user doesn't want to proceed with this tool use. The tool use was rejected "
+    ."(eg. if it was a file edit, the new_string was NOT written to the file). To tell you how to proceed, the user said:\nno network",
+    'with the reason, in the words of Claude Code';
+  is $v->{reason}, $v->{message}, 'the event reason is what the model reads';
 };
 
 subtest '/permissions' => sub {

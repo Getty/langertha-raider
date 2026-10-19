@@ -14,4 +14,4 @@ expect:
     - { index: 0, contains: "- greet: Greets people." }
     - { index: 0, absent: "Deploys to production." }
   tools:
-    - { name: skill, error: true, text: 'unknown skill: deploy.*Available skills: greet', not_text: DEPLOY-BODY-MARKER }
+    - { name: skill, error: true, text: '^<tool_use_error>Unknown skill: deploy\. Available skills: greet</tool_use_error>$', not_text: DEPLOY-BODY-MARKER }

@@ -45,6 +45,10 @@ C<failed> when the tool reported an error, else C<succeeded>),
 C<ok> (the same as a boolean), C<size> (characters of the text) and
 C<content> (the whole text).
 
+=item C<message> -- C<role> (C<user>) and C<content>, right after the
+C<tool.result> of a call whose result hands the raid a user message (the
+body of a skill, L<Langertha::Raider/TOOL RESULTS THAT ADD MESSAGES>).
+
 =back
 
 =cut
@@ -89,7 +93,19 @@ async sub plugin_after_tool_call {
     size    => length $text,
     content => $text,
   );
+  $self->on_event->('message', role => 'user', content => $_) for $self->_result_messages($result);
   return $result;
+}
+
+# The user messages a result hands the raider (the _meta key of
+# Langertha::Raider, ADR 0026): the raid adds them after the tool results,
+# so they are reported -- and journalled -- as messages right after the
+# tool.result.
+sub _result_messages {
+  my ( $self, $result ) = @_;
+  my $meta = ref $result eq 'HASH' ? $result->{_meta} : undef;
+  my $list = ref $meta eq 'HASH' ? $meta->{'raider/messages'} : undef;
+  return ref $list eq 'ARRAY' ? grep { defined && !ref && length } @$list : ();
 }
 
 __PACKAGE__->meta->make_immutable;

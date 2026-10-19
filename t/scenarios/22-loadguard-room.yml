@@ -11,4 +11,4 @@ script:
 expect:
   answer: gesehen
   tools:
-    - { name: bash, text: 'Exit code: 0.*TAP::Harness', not_text: 'loadguard' }
+    - { name: bash, text: '\ATAP::Harness', not_text: 'loadguard' }

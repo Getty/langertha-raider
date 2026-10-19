@@ -25,7 +25,7 @@ expect:
     - { name: read_file, error: true, text: "denied by rule 'Read\\(\\.env\\)' from \\.claude/settings\\.json", not_text: do-not-leak }
     - { name: read_file, text: 'API_KEY=changeme' }
     - { name: bash, error: true, text: "denied by rule 'Bash\\(rm:\\*\\)' from \\.claude/settings\\.json" }
-    - { name: bash, text: 'Exit code: 0' }
+    - { name: bash, text: '\A\(Bash completed with no output\)\z' }
   events:
     - { type: permission.denied, tool: read_file, by: rule, rule: "Read(.env)", source: .claude/settings.json }
     - { type: permission.denied, tool: bash, by: rule, rule: "Bash(rm:*)", source: .claude/settings.json }

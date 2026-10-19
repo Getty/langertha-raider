@@ -32,6 +32,144 @@ Revision history for Langertha-Raider
       to it in the release audit; knarr's floor moves to the same Langertha.
     - Then this release; the standalone binaries are built from it.
 
+  [File tools]
+    - INCOMPATIBLE: read_file, write_file and edit_file answer like Claude
+      Code's Read, Write and Edit (ADR 0023): "File created successfully at:
+      P", "The file P has been updated successfully.", "String to replace
+      not found in file.", "Found N matches of the string to replace, but
+      replace_all is false. ...", "File does not exist. Note: your current
+      working directory is ROOT.", "EISDIR: ...", with Claude Code's error
+      flags and <tool_use_error> frame. The old "Wrote N bytes" / "Edited" /
+      "Error: not a file" texts are gone.
+    - INCOMPATIBLE: read before write. write_file, edit_file and multi_edit
+      refuse an existing file that was not read in the run ("File has not
+      been read yet. Read it first before writing to it.") or that changed
+      on disk since ("File has been modified since read, ..."). New files
+      need no read; what the tools wrote counts as read; a read with
+      offset/limit counts. The record is per run (begin_run empties it) and
+      holds in every layout.
+    - INCOMPATIBLE: read_file returns cat -n lines ("N<TAB>line") and takes
+      offset (1-based) and limit; at most 2000 lines by default with a note
+      where the rest is, lines over 2000 characters cut, files over 256 KB
+      need offset/limit. Empty files and an offset behind the end give
+      Claude Code's system reminders. Binary files, devices and directories
+      are refused with a message. Images (PNG, JPEG, GIF, WebP) and PDFs go
+      back as image/document content when the model sees images and its wire
+      carries them in a tool result, else a clear refusal; Jupyter notebooks
+      come back as their cells with outputs.
+    - New tool multi_edit(path, edits) like Claude Code's MultiEdit: edits
+      applied in order on the content in memory, atomic, the failing edit
+      named by its number. Edit/Write/MultiEdit rules, acceptEdits and the
+      plan-mode refusal cover it as they cover edit_file.
+    - INCOMPATIBLE: in the Claude layout the file and search tools are no
+      longer confined to the root and the additional directories: a path
+      outside them asks (refused with how to allow it when nobody can
+      answer), allow rules such as Read(//tmp/**) open it, acceptEdits does
+      not cover edits outside, bypassPermissions reaches it, deny rules hold.
+      A symbolic link out of the root counts as outside. Every other layout
+      stays confined ("Path escapes root"), also in bypassPermissions.
+
+  [Shell tools]
+    - INCOMPATIBLE: bash answers like Claude Code's Bash (ADR 0024): on exit
+      0 only the output -- stdout and stderr as one stream in the order
+      written -- or "(Bash completed with no output)"; otherwise an error
+      result "Exit code N" followed by the output. The "Exit code: 0" line and
+      the === STDOUT === / === STDERR === blocks are gone, and so is MCP-Run's
+      `compress` argument. Output over 30000 characters keeps its start and
+      its end around "... [N characters truncated] ...".
+    - INCOMPATIBLE: a command still running after its timeout (seconds,
+      default 120, at most 600) is no longer killed: it is moved to the
+      background with an ID, as in Claude Code.
+    - run_in_background: true starts a command in the background and answers
+      at once with its ID (bash_1, bash_2, ...). New tools bash_output
+      (bash_id, filter, block, timeout: new output, status
+      running/completed/killed, exit code) and kill_shell (shell_id: SIGTERM
+      to the process group, SIGKILL after 2 s). Background shells are
+      supervised by the application's event loop, live across the runs of a
+      session, survive a cancelled turn and are stopped when raider ends.
+      bash_output is a read tool, kill_shell has no effect class; both run in
+      every permission mode. The loadguard gate and allowed_commands are asked
+      before a background command starts, too.
+    - bash runs through Langertha::Raider::BashTools instead of MCP::Run::Bash;
+      the MCP::Run::Bash requirement is dropped. A working_directory is entered
+      with chdir: with MCP-Run's "cd DIR && COMMAND", a command such as
+      `x & y` ran y in raider's own directory.
+
+  [Task tools, plan mode and Claude Code tool names]
+    - INCOMPATIBLE: the task list is kept with task_create, task_update,
+      task_list and task_get, shaped after Claude Code's TaskCreate,
+      TaskUpdate, TaskList and TaskGet (ADR 0025): one task per call, ids
+      "1", "2", ..., statuses pending/in_progress/completed/deleted, owner,
+      metadata, blocks/blockedBy, and Claude Code's answers ("Task #1 created
+      successfully: ...", "Updated task #1 status", "Task not found"). They
+      replace todo_write in the default tool set, as in Claude Code;
+      RAIDER_ENABLE_TASKS=0 mounts todo_write instead. The task list lasts for
+      the conversation (todo_write's stays run state); /clear empties it; both
+      report it as todo.updated.
+    - New tool enter_plan_mode (Claude Code's EnterPlanMode): switches the
+      session to plan mode and answers Claude Code's instructions. The
+      permission gate asks the person first in default, acceptEdits and auto
+      mode ("for this session" adds the rule EnterPlanMode); it runs without a
+      question in bypassPermissions and is refused when nobody can agree.
+    - INCOMPATIBLE: MultiEdit now means multi_edit, not edit_file, in rules,
+      agent files and hook matchers; a hook gets it as MultiEdit with an
+      absolute file_path. TaskStop, KillShell and KillBash mean kill_shell
+      (task_id <-> shell_id); TaskOutput and BashOutput mean bash_output
+      (task_id <-> bash_id, timeout ms <-> s, TaskOutput's default block
+      true written down); TaskCreate & co. and EnterPlanMode have their
+      raider tools. ADR 0025 lists every known Claude Code tool name and why
+      the others (NotebookEdit, ToolSearch, SendMessage, Monitor,
+      EnterWorktree, ...) stay unknown.
+    - maint/claude-log-to-scenario: a MultiEdit becomes one multi_edit call;
+      a section with TodoWrite gets `app: { task_tools: false }`.
+
+  [Refusals, web tools and skills like Claude Code]
+    - INCOMPATIBLE: refusals read as in Claude Code (ADR 0026). The person's
+      no: "The user doesn't want to proceed with this tool use. The tool use
+      was rejected ... STOP what you are doing ..." or, with a reason, "... To
+      tell you how to proceed, the user said:\n<reason>". A deny rule, plan
+      mode and an ask nobody can approve: "Permission to use bash with command
+      CMD has been denied." (other tools by name), then raider's reason and,
+      for an ask, how to allow the call. "The user refused this call" and the
+      application's "Tool call 'X' was denied: ..." are gone; the events keep
+      their reasons. The gate's verdict may carry `message`, the whole text
+      the model gets (Langertha::Raider).
+    - INCOMPATIBLE: exit_plan_mode answers in Claude Code's words: "User has
+      approved your plan. You can now start coding. ...", the mode and
+      "## Approved Plan:" with the plan; a refused plan is an error result with
+      the rejection text and the feedback; with nobody to review it is an error
+      result ("Permission to use exit_plan_mode has been denied. ..."); outside
+      plan mode "<tool_use_error>You are not in plan mode. ...".
+    - INCOMPATIBLE: the skill tool answers "Launching skill: NAME"; the skill
+      itself (base directory, body, arguments) follows the tool results as a
+      user message of its own, as Claude Code adds it. It stays when in-raid
+      compaction drops its exchange, is kept in history (the next raid no
+      longer loads it again), and is journalled as a user message right after
+      its tool.result, so a resumed session has it in the same place. An
+      unknown name is "<tool_use_error>Unknown skill: NAME. Available skills:
+      ...</tool_use_error>".
+    - A tool result may hand the raid user messages under _meta
+      'raider/messages' (Langertha::Raider, TOOL RESULTS THAT ADD MESSAGES):
+      added after the batch's tool results, from raider's own tool sources
+      only -- a catalog MCP server's result loses the key.
+    - web_fetch takes prompt (Claude Code's WebFetch(url, prompt)): the page
+      text and the question go to a model call of its own, the tool returns
+      its answer; the page stays out of the conversation. The run's engine
+      answers, or the model web_fetch_model names (a new raider config key,
+      also -o web_fetch_model=). The call's tokens are the new journal event
+      model.usage (purpose web_fetch).
+    - INCOMPATIBLE: web_fetch follows a redirect only on the same host (www.
+      aside), scheme and port; one to another host is not fetched, the result
+      says where it points (Claude Code's "REDIRECT DETECTED" text), so domain
+      rules see the new host. A response that is not a success is "The server
+      returned HTTP <status>. ..." and, as in Claude Code, no error result.
+    - web_search takes allowed_domains and blocked_domains (subdomains
+      included): the results are filtered, site: / -site: go into the query,
+      both at once is an error.
+    - Tests: t/203-t/206, scenarios t/scenarios/130-135;
+      Test::Raider::LocalHTTP serves web pages to scenarios (http:), and
+      scenario requests check their last messages (tail:).
+
   [Status]
     - Marked as in development (POD and README): a developer release, not yet
       covered end to end. Release it with `dzil release --trial`.
@@ -353,6 +491,14 @@ Revision history for Langertha-Raider
       with agent_id and agent_type, a subagent's tool calls run PreToolUse
       and PostToolUse, and the briefing plugin's briefing-preload is skipped
       because raider briefs agents itself.
+    - Subagents and the Claude Code tools (ADR 0023, ADR 0025): a subagent
+      reads a file itself before it writes it (a read state of its own, as
+      Claude Code gives a subagent with a fresh context), keeps a task list
+      of its own (task_create & co. or todo_write), and is never offered
+      enter_plan_mode -- only the main session enters plan mode. In an agent
+      file's tools / disallowedTools, TodoWrite and the Task* names are one
+      family, Edit and MultiEdit are one, and Bash brings bash_output and
+      kill_shell.
 
   [Permissions]
     - INCOMPATIBLE: every tool call of raider now passes a permission policy

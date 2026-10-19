@@ -16,5 +16,6 @@ expect:
     - { index: 0, contains: "- style: Write short sentences." }
     - { index: 0, absent: STYLE-BODY-MARKER }
     - { index: 1, contains: STYLE-BODY-MARKER }
+    - { index: 1, tail: [ { role: tool }, { role: user, contains: "/docs\n\nWrite short sentences.\n\nSTYLE-BODY-MARKER" } ] }
   tools:
-    - { name: skill, text: 'Base directory for this skill: \S+/docs\n\nWrite short sentences\.\n\nSTYLE-BODY-MARKER' }
+    - { name: skill, text: '^Launching skill: style$' }

@@ -1,4 +1,6 @@
 title: todo_write keeps the list in the run state and reports every change as todo.updated
+# todo_write is mounted instead of the task tools (RAIDER_ENABLE_TASKS=0, ADR 0025)
+app: { task_tools: false }
 prompt: Do three things.
 script:
   - tool_calls:

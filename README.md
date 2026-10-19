@@ -295,7 +295,8 @@ Two kinds of keys live in the file:
   the engine constructor. `-o key=value` on the command line overrides them (values
   are auto-coerced: `0.2` → Float, `4096` → Int, `true`/`false` → 1/0).
 - **Raider's own keys** — `engine`, `perl`, `packs`, `skills`, `detect`,
-  `no_detect`, `preferred_lib_target`, `project_tools` (home file only),
+  `no_detect`, `preferred_lib_target`, `web_fetch_model` (the model that answers
+  `web_fetch` prompts), `project_tools` (home file only),
   `max_agent_depth`, `agent_models` (subagents, ADR 0020) — configure
   raider itself and never reach the engine. `skills` is merged across layers instead
   of replaced.
@@ -506,14 +507,18 @@ is not described. The built-ins:
 | `web_fetch(url, [as_html])`                                 | HTML flattened to text by default         |
 | `glob(pattern, [path])`                                     | Files by pattern, newest first            |
 | `grep(pattern, [path], [glob], [type], [output_mode], …)`   | Contents by regex; ripgrep if installed   |
-| `todo_write(todos)`                                         | The model's task list for the run         |
+| `task_create`, `task_update`, `task_list`, `task_get`        | The model's task list, by id              |
 | `ask_user(question, [options])`                             | Asks you in the REPL; refused elsewhere   |
+| `enter_plan_mode()`                                         | Plan mode, once you agree                 |
 
 `glob` and `grep` follow Claude Code's `Glob` and `Grep` (`output_mode`
 `files_with_matches`/`content`/`count`, `-i`, `-A`/`-B`/`-C`, `glob`, `type`, `multiline`,
 `head_limit`, `offset`); they skip `.git`, symbolic links, binary files and files over
-10 MB, and do not read `.gitignore`. `todo_write` keeps the list in the run and reports
-each change as a `todo.updated` event (journal and `--stream-json`). `ask_user` works
+10 MB, and do not read `.gitignore`. The task tools follow Claude Code's `TaskCreate`,
+`TaskUpdate`, `TaskList` and `TaskGet`, keep the list for the conversation and report
+each change as a `todo.updated` event (journal and `--stream-json`);
+`RAIDER_ENABLE_TASKS=0` offers Claude Code's older `TodoWrite` as `todo_write(todos)`
+instead. `ask_user` works
 where a person can answer — the REPL on a terminal. In a one-shot run, the Hall, cron
 or ACP the call is refused and the model decides itself.
 

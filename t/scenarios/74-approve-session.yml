@@ -15,6 +15,6 @@ expect:
   tools:
     - { name: bash, text: hi }
     - { name: bash, text: hi }
-    - { name: bash, error: true, text: "The user refused this call" }
+    - { name: bash, error: true, text: "^The user doesn't want to proceed with this tool use\\." }
   events:
     - { type: permission.granted, tool: bash, scope: session, rule: "Bash(echo hi)" }

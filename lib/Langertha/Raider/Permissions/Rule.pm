@@ -40,7 +40,7 @@ The forms:
 L<Langertha::Raider::ToolNames>; raider names (C<write_file>) are accepted
 as well. C<Read> stands for every reading file tool (C<read_file>,
 C<list_files>, C<glob>, C<grep>), C<Edit> / C<Write> / C<MultiEdit> for
-every writing one (C<write_file>, C<edit_file>).
+every writing one (C<write_file>, C<edit_file>, C<multi_edit>).
 
 =item C<Bash(command)> exact, C<Bash(prefix:*)> prefix at a word boundary,
 C<Bash(git * --dry-run)> glob (C<*> is any text). The command is split into
@@ -123,7 +123,7 @@ sub BUILD {
 }
 
 my @READERS = qw( read_file list_files glob grep );
-my @WRITERS = qw( write_file edit_file );
+my @WRITERS = qw( write_file edit_file multi_edit );
 
 # The family of a rule name decides what a specifier means and which tools
 # the rule applies to.
@@ -135,6 +135,7 @@ my %FAMILY = (
   MultiEdit  => [ path   => @WRITERS ],
   write_file => [ path   => @WRITERS ],
   edit_file  => [ path   => @WRITERS ],
+  multi_edit => [ path   => @WRITERS ],
   LS         => [ path   => 'list_files' ],
   list_files => [ path   => 'list_files' ],
   Glob       => [ path   => 'glob' ],

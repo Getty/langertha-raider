@@ -43,9 +43,9 @@ expect:
     - { index: 3, contains: "Fixed a crash on empty input in the parser." }
     - { index: 3, absent: "CHANGELOG-STYLE-BODY" }
   tools:
-    - { name: read_file, text: 'parser: fixed crash on empty input' }
+    - { name: read_file, text: '1\tparser: fixed crash on empty input' }
     - { name: agent, text: '\AFixed a crash on empty input in the parser\. Added a --quiet flag to the CLI\.\z' }
-    - { name: write_file }
+    - { name: write_file, text: '\AFile created successfully at: \S+/RELEASE-NOTES\.md' }
   events:
     - { type: agent.started, call: c1, agent: notes-writer }
     - { type: agent.finished, call: c1, agent: notes-writer, status: completed }

@@ -21,5 +21,6 @@ expect:
   requests:
     - { index: 0, contains: "- helper:tidy: Tidies things up." }
     - { index: 0, absent: "Disabled plugin skill." }
+    - { index: 1, tail: [ { role: tool }, { role: user, contains: "skills/tidy\n\nPLUGIN-BODY-MARKER" } ] }
   tools:
-    - { name: skill, text: 'skills/tidy\n\nPLUGIN-BODY-MARKER' }
+    - { name: skill, text: '^Launching skill: helper:tidy$' }

@@ -12,6 +12,7 @@ use Time::HiRes ();
 use Langertha::Raider;
 use Langertha::Raider::AgentTools;
 use Langertha::Raider::Briefing;
+use Langertha::Raider::FileTools::ReadState;
 use Langertha::Raider::PlanTools;
 use Langertha::Raider::TodoTools;
 
@@ -57,9 +58,16 @@ what C<-M> replaces (ADR 0014).
 
 =item * B<Own tool set> (L</tool_servers>). The caller's active set, each
 tool kept when the agent's C<tools> allows it and C<disallowedTools> does
-not; C<ask_user> always goes (nobody can answer a subagent). C<todo_write>
-gets an instance of its own, so the subagent's list never overwrites the
-caller's, and C<agent> gets one for this depth -- or goes, when this run is
+not. A name there stands for its family (ADR 0025): the task-list tools
+(C<todo_write>, C<task_create>, C<task_update>, C<task_list>, C<task_get>)
+are one, so are C<edit_file> and C<multi_edit>, and C<bash> brings
+C<bash_output> and C<kill_shell>. C<ask_user> always goes (nobody can
+answer a subagent), and so does C<enter_plan_mode> (only the main session
+enters plan mode). The task-list tools get an instance of their own, so the
+subagent's list never overwrites the caller's; the file tools get one over
+the subagent's own L</file_read_state>, so it reads a file before it writes
+it, as the caller must (ADR 0023); background shells stay the
+application's. C<agent> gets one for this depth -- or goes, when this run is
 at L<Langertha::Raider::Application/max_agent_depth>. A server whose tools
 all stay is mounted as it is; otherwise a new L<MCP::Server> carries the
 tools that stay. Prompt and catalogue derive from this set alone; the skill
@@ -455,9 +463,30 @@ has todos => (
 
 =attr todos
 
-The subagent's own task list, as its C<todo_write> last sent it.
+The subagent's own task list, as its task tools (or C<todo_write>) last
+left it.
 
 =cut
+
+has file_read_state => (
+  is       => 'ro',
+  isa      => 'Langertha::Raider::FileTools::ReadState',
+  init_arg => undef,
+  lazy     => 1,
+  builder  => '_build_file_read_state',
+);
+
+=attr file_read_state
+
+The subagent's own record of the files it has read
+(L<Langertha::Raider::FileTools::ReadState>, ADR 0023): its C<write_file>,
+C<edit_file> and C<multi_edit> hold against it, so a file the caller read
+counts as unread until the subagent reads it itself.
+
+=cut
+
+has _own_todos       => ( is => 'ro', init_arg => undef, lazy => 1, builder => '_build_own_todos' );
+has _own_file_server => ( is => 'ro', init_arg => undef, lazy => 1, builder => '_build_own_file_server' );
 
 has _mcps    => ( is => 'ro', init_arg => undef, lazy => 1, builder => '_build_mcps', predicate => '_has_mcps' );
 has _call    => ( is => 'rw', init_arg => undef );
@@ -811,17 +840,55 @@ sub _report_journal_error {
   return;
 }
 
-sub _build_tool_servers {
+# Tools an agent file's tools / disallowedTools name together (ADR 0025):
+# each name of a family stands for all of it -- the task-list family is one
+# whichever of its two shapes is mounted, multi_edit is edit_file with more
+# edits -- and bash brings the tools that read and stop its background
+# shells (those alone do not bring bash).
+my @FAMILY = (
+  [ [qw( todo_write task_create task_update task_list task_get )] => [qw( todo_write task_create task_update task_list task_get )] ],
+  [ [qw( edit_file multi_edit )] => [qw( edit_file multi_edit )] ],
+  [ [qw( bash )] => [qw( bash_output kill_shell )] ],
+);
+
+# Tools a subagent never has: nobody can answer it (ask_user), and only the
+# main session can enter plan mode (enter_plan_mode).
+my @NEVER = qw( ask_user enter_plan_mode );
+
+sub _with_families {
+  my ( $self, @names ) = @_;
+  my %set = map { $_ => 1 } @names;
+  for my $f (@FAMILY) {
+    my ( $by, $brings ) = @$f;
+    next unless grep { $set{$_} } @$by;
+    $set{$_} = 1 for @$brings;
+  }
+  return %set;
+}
+
+# The file tools are the subagent's own, over its own read state; the
+# task-list tools its own, over its own list.
+sub _own_tools {
   my ( $self ) = @_;
-  my $agent = $self->agent;
-  my %allow = map { $_ => 1 } @{ $agent->{tools} // [] };
-  my %deny  = map { $_ => 1 } @{ $agent->{disallowed} // [] }, 'ask_user';
-  my $all   = !defined $agent->{tools};
-  my %own   = (
-    todo_write     => sub { $self->_own_todo_tool },
+  my %own = (
     exit_plan_mode => sub { $self->_own_plan_tool },
     agent          => sub { $self->depth < $self->app->max_agent_depth ? $self->_own_agent_tool : undef },
   );
+  for my $server ( $self->_own_file_server, $self->_own_todos->server, $self->_own_todos->task_server ) {
+    for my $tool ( @{ $server->tools } ) {
+      $own{ $tool->name } = sub { $tool };
+    }
+  }
+  return %own;
+}
+
+sub _build_tool_servers {
+  my ( $self ) = @_;
+  my $agent = $self->agent;
+  my %allow = $self->_with_families( @{ $agent->{tools} // [] } );
+  my %deny  = ( $self->_with_families( @{ $agent->{disallowed} // [] } ), map { $_ => 1 } @NEVER );
+  my $all   = !defined $agent->{tools};
+  my %own   = $self->_own_tools;
   my @servers;
   for my $server ( @{ $self->caller_servers } ) {
     my @tools = @{ $server->tools };
@@ -834,17 +901,27 @@ sub _build_tool_servers {
   return \@servers;
 }
 
-sub _own_todo_tool {
+sub _build_own_todos {
   my ( $self ) = @_;
   weaken( my $weak = $self );
-  my $todo = Langertha::Raider::TodoTools->new( on_update => sub {
+  return Langertha::Raider::TodoTools->new( on_update => sub {
     my ( $list ) = @_;
     my $sub = $weak or return;
     $sub->_set_todos($list);
     $sub->event( 'todo.updated', todos => [ map { { %$_ } } @$list ] );
   } );
-  return $todo->server->tools->[0];
 }
+
+sub _build_own_file_server {
+  my ( $self ) = @_;
+  weaken( my $weak = $self );
+  return $self->app->_file_tools_server(
+    read_state  => $self->file_read_state,
+    sees_images => sub { $weak && $weak->app ? $weak->app->_engine_sees_images( $weak->engine ) : 0 },
+  );
+}
+
+sub _build_file_read_state { Langertha::Raider::FileTools::ReadState->new }
 
 sub _own_agent_tool {
   my ( $self ) = @_;
@@ -869,9 +946,11 @@ sub _own_plan_tool {
   weaken( my $weak = $self );
   return Langertha::Raider::PlanTools->new( handler => sub {
     my $sub = $weak or return ( 'the subagent is gone', 1 );
-    my $mode = $sub->permissions->mode;
-    return ( 'exit_plan_mode: not in plan mode (the permission mode is '.$mode.'); go on with the work.', 1 )
-      unless $mode eq 'plan';
+    # Claude Code's words (ADR 0026), without its pointer to enter_plan_mode,
+    # which a subagent does not have.
+    return ( '<tool_use_error>You are not in plan mode. If your plan was already approved, continue with '
+      .'implementation.</tool_use_error>', 1 )
+      unless $sub->permissions->mode eq 'plan';
     return ( 'Nobody can approve the plan in a subagent. Stay in plan mode and give the plan as your final'
       .' answer; the caller gets it.', 0 );
   } )->server->tools->[0];

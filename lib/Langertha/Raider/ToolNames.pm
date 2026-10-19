@@ -4,6 +4,7 @@ our $VERSION = '0.504';
 use strict;
 use warnings;
 use Carp qw( croak );
+use JSON::MaybeXS ();
 
 =description
 
@@ -15,22 +16,39 @@ agent file's C<tools:> and C<disallowedTools:> list, a permission rule such as
 C<Bash(npm run test:*)>, a hook matcher, a Claude Code session converted into
 a scenario.
 
-    Read -> read_file        Write -> write_file     Edit, MultiEdit -> edit_file
-    Bash -> bash             Glob -> glob            Grep -> grep
-    LS -> list_files         WebFetch -> web_fetch   WebSearch -> web_search
-    TodoWrite -> todo_write  Task, Agent -> agent    Skill -> skill
-    AskUserQuestion -> ask_user                      ExitPlanMode -> exit_plan_mode
+    Read -> read_file            Write -> write_file
+    Edit -> edit_file            MultiEdit -> multi_edit
+    Bash -> bash                 TaskOutput, BashOutput -> bash_output
+    TaskStop, KillShell, KillBash -> kill_shell
+    Glob -> glob                 Grep -> grep
+    LS -> list_files             WebFetch -> web_fetch
+    WebSearch -> web_search      Skill -> skill
+    TodoWrite -> todo_write      TaskCreate -> task_create
+    TaskUpdate -> task_update    TaskList -> task_list
+    TaskGet -> task_get          Task, Agent -> agent
+    AskUserQuestion -> ask_user  EnterPlanMode -> enter_plan_mode
+    ExitPlanMode -> exit_plan_mode
 
 A name C<mcp__server__tool> is an MCP tool and passes through unchanged:
 raider addresses MCP tools the same way. Any other name is unknown --
-L</raider_name> returns undef; the table never guesses.
+L</raider_name> returns undef; the table never guesses. ADR 0025 lists every
+Claude Code tool name known and why those without a raider tool have none
+(C<NotebookEdit>, C<ToolSearch>, C<SendMessage>, C<Monitor>,
+C<EnterWorktree>, ...).
 
-The table says nothing about whether the raider tool exists yet (C<agent>,
-C<skill>, C<exit_plan_mode> and the web tools arrive with their own steps);
-it names the target a Claude Code tool will have. C<MultiEdit> and C<Edit>
-both mean C<edit_file> and C<Task> and C<Agent> both mean C<agent>, so the
-way back (L</claude_name>) answers with the current name: C<Edit> and
-C<Agent>.
+The table names the raider tool a Claude Code tool stands for; it does not
+say that the tool is mounted in a run. raider mounts one task-list family at
+a time, as Claude Code offers one (L<Langertha::Raider::TodoTools>):
+C<task_create>, C<task_update>, C<task_list> and C<task_get> by default,
+C<todo_write> instead with C<RAIDER_ENABLE_TASKS=0>.
+
+Some raider tools have more than one Claude Code name: C<Task> and C<Agent>
+mean C<agent>; C<TaskStop>, C<KillShell> and C<KillBash> (the names Claude
+Code has given the tool that stops a background shell) mean C<kill_shell>;
+C<TaskOutput> and the older C<BashOutput> mean C<bash_output>. The way back
+(L</claude_name>) answers with the current name: C<Agent>, C<TaskStop>,
+C<TaskOutput>. C<LS>, C<BashOutput> and C<TaskOutput> are gone from current
+Claude Code; they stay for older sessions and agent files.
 
 =cut
 
@@ -38,37 +56,55 @@ my %RAIDER = (
   Read            => 'read_file',
   Write           => 'write_file',
   Edit            => 'edit_file',
-  MultiEdit       => 'edit_file',
+  MultiEdit       => 'multi_edit',
   Bash            => 'bash',
+  BashOutput      => 'bash_output',
+  TaskOutput      => 'bash_output',
+  TaskStop        => 'kill_shell',
+  KillShell       => 'kill_shell',
+  KillBash        => 'kill_shell',
   Glob            => 'glob',
   Grep            => 'grep',
   LS              => 'list_files',
   WebFetch        => 'web_fetch',
   WebSearch       => 'web_search',
   TodoWrite       => 'todo_write',
+  TaskCreate      => 'task_create',
+  TaskUpdate      => 'task_update',
+  TaskList        => 'task_list',
+  TaskGet         => 'task_get',
   Task            => 'agent',
   Agent           => 'agent',
   Skill           => 'skill',
   AskUserQuestion => 'ask_user',
+  EnterPlanMode   => 'enter_plan_mode',
   ExitPlanMode    => 'exit_plan_mode',
 );
 
 # The way back: the current Claude Code name of each raider tool.
 my %CLAUDE = (
-  read_file      => 'Read',
-  write_file     => 'Write',
-  edit_file      => 'Edit',
-  bash           => 'Bash',
-  glob           => 'Glob',
-  grep           => 'Grep',
-  list_files     => 'LS',
-  web_fetch      => 'WebFetch',
-  web_search     => 'WebSearch',
-  todo_write     => 'TodoWrite',
-  agent          => 'Agent',
-  skill          => 'Skill',
-  ask_user       => 'AskUserQuestion',
-  exit_plan_mode => 'ExitPlanMode',
+  read_file       => 'Read',
+  write_file      => 'Write',
+  edit_file       => 'Edit',
+  multi_edit      => 'MultiEdit',
+  bash            => 'Bash',
+  bash_output     => 'TaskOutput',
+  kill_shell      => 'TaskStop',
+  glob            => 'Glob',
+  grep            => 'Grep',
+  list_files      => 'LS',
+  web_fetch       => 'WebFetch',
+  web_search      => 'WebSearch',
+  todo_write      => 'TodoWrite',
+  task_create     => 'TaskCreate',
+  task_update     => 'TaskUpdate',
+  task_list       => 'TaskList',
+  task_get        => 'TaskGet',
+  agent           => 'Agent',
+  skill           => 'Skill',
+  ask_user        => 'AskUserQuestion',
+  enter_plan_mode => 'EnterPlanMode',
+  exit_plan_mode  => 'ExitPlanMode',
 );
 
 # The arguments that carry another name: raider name => Claude name.
@@ -76,6 +112,9 @@ my %ARG_NAME = (
   read_file  => { path => 'file_path' },
   write_file => { path => 'file_path' },
   edit_file  => { path => 'file_path' },
+  multi_edit => { path => 'file_path' },
+  kill_shell => { shell_id => 'task_id' },
+  bash_output => { bash_id => 'task_id' },
 );
 
 =head2 Arguments
@@ -85,13 +124,30 @@ raider tool's arguments into the Claude Code tool's (what a hook gets as
 C<tool_input>), L</raider_input> goes the way back (a hook's
 C<updatedInput>):
 
-    read_file, write_file, edit_file   path <-> file_path
-    bash                               timeout: seconds <-> milliseconds
+    read_file, write_file, edit_file, multi_edit   path <-> file_path
+    kill_shell                                     shell_id <-> task_id
+    bash                                           timeout: seconds <-> milliseconds
+    bash_output                                    bash_id <-> task_id,
+                                                   timeout: seconds <-> milliseconds,
+                                                   block: false <-> true when not given
+
+C<kill_shell> answers to C<TaskStop>'s C<task_id> and to the C<shell_id> of
+C<KillShell> and C<KillBash> (which C<TaskStop> still takes, deprecated):
+the way back turns C<task_id> into C<shell_id> and lets C<shell_id> through.
+
+C<bash_output> goes out as C<TaskOutput> (C<task_id>, C<block>, C<timeout>
+in milliseconds). C<TaskOutput> waits for the command by default and
+raider's C<bash_output> does not, so a C<block> left out is written down:
+C<false> on the way to Claude Code, C<true> on the way back from a
+C<TaskOutput> input. An input with C<bash_id> and no C<task_id> is the older
+C<BashOutput> (C<bash_id>, C<filter>) and passes unchanged.
 
 Every other key passes through unchanged under its own name, in both
 directions: raider's tools took Claude Code's names where they have the same
-argument (C<content>, C<old_string>, C<new_string>, C<pattern>, C<glob>,
-C<output_mode>, C<-i>, C<command>, C<url>, C<query>, C<todos>, C<skill>,
+argument (C<content>, C<old_string>, C<new_string>, C<edits>, C<pattern>,
+C<glob>, C<output_mode>, C<-i>, C<command>, C<bash_id>, C<filter>, C<url>,
+C<query>, C<todos>, C<subject>, C<description>, C<activeForm>, C<taskId>,
+C<status>, C<addBlocks>, C<addBlockedBy>, C<owner>, C<metadata>, C<skill>,
 C<args>, C<prompt>, C<subagent_type>, C<plan>, ...). Keys only one side knows
 (C<offset> of C<Read>, C<description> of C<Bash>, C<as_html> of
 C<web_fetch>, C<working_directory> of C<bash>) pass through too; the
@@ -108,7 +164,8 @@ carry both names of one argument (C<path> and C<file_path>): then the
 translated key wins and the other is dropped. The C<bash> C<timeout> is
 lossless from raider (whole seconds) and back; milliseconds that are not
 whole seconds become the next whole second, as raider's C<bash> takes
-integers.
+integers; the same for the C<timeout> of C<bash_output>. A C<bash_output>
+input without C<block> comes back with C<block> false, which is what it meant.
 
 =method is_mcp
 
@@ -176,10 +233,14 @@ sub _translate_input {
   croak __PACKAGE__.'->'.$method.' needs the arguments as a hash ref' unless ref $args eq 'HASH';
   my %names = %{ $ARG_NAME{$tool} // {} };
   %names = reverse %names if $back;
+  # bash_output in the form of TaskOutput (task_id) or of the older BashOutput (bash_id).
+  my $task_output = $tool eq 'bash_output' && ( !$back || exists $args->{task_id} );
   my %out = map { $_ => $args->{$_} } grep { !exists $names{$_} } keys %$args;
   $out{ $names{$_} } = $args->{$_} for grep { exists $args->{$_} } sort keys %names;
   $out{timeout} = $self->_bash_timeout( $out{timeout}, $back )
-    if $tool eq 'bash' && exists $out{timeout};
+    if ( $tool eq 'bash' || $task_output ) && exists $out{timeout};
+  # TaskOutput waits by default, raider's bash_output does not: say it.
+  $out{block} //= $back ? JSON::MaybeXS->true : JSON::MaybeXS->false if $task_output;
   return \%out;
 }
 

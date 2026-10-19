@@ -50,9 +50,19 @@ C<raider_ask_user>: it puts a question to a person.
 
 C<skill> is C<read>: it returns a skill file from the local skill directories.
 
+C<bash_output> is C<read>: it returns what a background shell of the session
+wrote. C<kill_shell> has no effect class: it can only stop a shell raider
+itself started with C<bash> (which was C<code> and passed the gate then); it
+starts nothing, and asking before stopping would make stopping harder than
+starting (ADR 0024).
+
 C<exit_plan_mode> has no effect class: it hands a plan to the person and
 may switch the permission mode of the run (ADR 0021), which changes nothing
-outside it.
+outside it. Neither has C<enter_plan_mode>, which switches the mode to
+C<plan>; the permission gate asks the person before it runs (ADR 0025).
+
+C<task_create>, C<task_update>, C<task_list> and C<task_get> keep the task
+list of the conversation, like C<todo_write>; no effect outside it.
 
 C<agent> has no class of its own (ADR 0020): it starts a subagent, whose
 tool calls carry their effects in the subagent's journal.
@@ -67,15 +77,23 @@ my %EFFECTS = (
   grep                   => [qw( read )],
   write_file             => [qw( write )],
   edit_file              => [qw( write )],
+  multi_edit             => [qw( write )],
   # run state
   todo_write             => [],
+  task_create            => [],
+  task_update            => [],
+  task_list              => [],
+  task_get               => [],
   agent                  => [],
   ask_user               => [qw( message )],
+  enter_plan_mode        => [],
   exit_plan_mode         => [],
   # skills
   skill                  => [qw( read )],
   # shell
   bash                   => [qw( code )],
+  bash_output            => [qw( read )],
+  kill_shell             => [],
   # web
   web_search             => [qw( network )],
   web_fetch              => [qw( network )],

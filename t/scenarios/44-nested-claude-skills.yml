@@ -20,7 +20,8 @@ expect:
     - { index: 1, absent: pkgskill }
     - { index: 2, contains: "- pkgskill: Builds the pkg module." }
     - { index: 3, contains: PKG-BODY-MARKER }
+    - { index: 3, tail: [ { role: tool }, { role: user, contains: "/pkg/.claude/skills/pkgskill\n\nRun make in pkg. PKG-BODY-MARKER" } ] }
   tools:
     - { name: read_file, text: elsewhere, not_text: 'skills are available' }
     - { name: read_file, text: 'payload.*<system-reminder>\nThe following skills are available for use with the Skill tool:\n\n- pkgskill: Builds the pkg module\.\n</system-reminder>' }
-    - { name: skill, text: 'Base directory for this skill: \S+/pkg/\.claude/skills/pkgskill\n\nRun make in pkg\. PKG-BODY-MARKER' }
+    - { name: skill, text: '^Launching skill: pkgskill$' }

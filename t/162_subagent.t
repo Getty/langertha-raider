@@ -37,38 +37,74 @@ sub child {
 
 sub agent { +{ name => 'x', description => 'x', body => 'X-BODY', tools => undef, disallowed => [], @_ } }
 
-subtest 'the tool set: the caller\'s, filtered, without ask_user, agent only below the limit' => sub {
+subtest 'the tool set: the caller\'s, filtered, without ask_user and enter_plan_mode, agent only below the limit' => sub {
   my $root = root();
   $root->child('.raider/skills/notes/SKILL.md')->touchpath->spew_utf8("---\ndescription: Notes.\n---\nbody\n");
   my $app = mock_app( root => "$root", max_agent_depth => 2 );
   my @parent = @{ names( $app->_tool_servers ) };
   ok( ( grep { $_ eq 'ask_user' } @parent ), 'the caller has ask_user' );
+  ok( ( grep { $_ eq 'enter_plan_mode' } @parent ), 'and enter_plan_mode' );
   ok( ( grep { $_ eq 'agent' } @parent ), 'and agent' );
+  my %never = map { $_ => 1 } qw( ask_user enter_plan_mode );
 
   my $gp = child( $app, $app->context->agent_catalog->find('general-purpose'), depth => 1 );
-  is( names( $gp->tool_servers ), [ grep { $_ ne 'ask_user' } @parent ], 'all tools: every tool but ask_user, in order' );
+  is( names( $gp->tool_servers ), [ grep { !$never{$_} } @parent ],
+    'all tools: every tool but ask_user and enter_plan_mode, in order' );
   my $deep = child( $app, agent(), depth => 2 );
-  is( names( $deep->tool_servers ), [ grep { $_ ne 'ask_user' && $_ ne 'agent' } @parent ], 'at the depth limit: no agent' );
+  is( names( $deep->tool_servers ), [ grep { !$never{$_} && $_ ne 'agent' } @parent ], 'at the depth limit: no agent' );
+  is( names( child( $app, agent( tools => [qw( read_file enter_plan_mode )] ) )->tool_servers ), ['read_file'],
+    'enter_plan_mode goes even when listed: only the main session enters plan mode' );
 
   my %parent_tool = map { $_->name => $_ } map { @{ $_->tools } } @{ $app->_tool_servers };
   my %child_tool  = map { $_->name => $_ } map { @{ $_->tools } } @{ $gp->tool_servers };
-  isnt( refaddr $child_tool{todo_write}, refaddr $parent_tool{todo_write}, 'todo_write: an instance of its own' );
+  isnt( refaddr $child_tool{$_}, refaddr $parent_tool{$_}, $_.': an instance of its own (own task list)' )
+    for qw( task_create task_update task_list task_get );
+  isnt( refaddr $child_tool{$_}, refaddr $parent_tool{$_}, $_.': an instance of its own (own read state)' )
+    for qw( read_file write_file edit_file multi_edit );
   isnt( refaddr $child_tool{agent}, refaddr $parent_tool{agent}, 'agent: one of its own depth' );
-  is( refaddr $child_tool{read_file}, refaddr $parent_tool{read_file}, 'stateless tools are the same' );
-  is( refaddr $gp->tool_servers->[0], refaddr $app->_tool_servers->[0], 'a server whose tools all stay is reused' );
+  is( refaddr $child_tool{$_}, refaddr $parent_tool{$_}, $_.': the caller\'s' ) for qw( grep web_fetch bash bash_output );
+  is( refaddr $gp->tool_servers->[1], refaddr $app->_tool_servers->[1], 'a server whose tools all stay is reused (bash)' );
+  isnt( refaddr $gp->file_read_state, refaddr $app->file_read_state, 'a read state of its own' );
 
   is( names( child( $app, agent( tools => [qw( read_file grep )] ) )->tool_servers ), [qw( read_file grep )],
     'tools: only those, in the caller\'s order' );
   is( names( child( $app, agent( tools => [qw( grep ask_user )] ) )->tool_servers ), ['grep'],
     'ask_user goes even when listed' );
   my $no_bash = names( child( $app, agent( disallowed => ['bash'] ) )->tool_servers );
-  ok( !( grep { $_ eq 'bash' } @$no_bash ) && ( grep { $_ eq 'write_file' } @$no_bash ), 'disallowed removes just those' );
+  ok( !( grep { /\A(?:bash|bash_output|kill_shell)\z/ } @$no_bash ) && ( grep { $_ eq 'write_file' } @$no_bash ),
+    'disallowed bash removes bash and its shell tools, nothing else' );
   is( names( child( $app, agent( tools => [] ) )->tool_servers ), [], 'an empty allow-list: no tools' );
+
+  # Families (ADR 0025): a name of an agent file stands for its family.
+  is( names( child( $app, agent( tools => ['todo_write'] ) )->tool_servers ),
+    [qw( task_create task_update task_list task_get )], 'tools: TodoWrite brings the mounted task tools' );
+  is( names( child( $app, agent( tools => ['task_list'] ) )->tool_servers ),
+    [qw( task_create task_update task_list task_get )], 'tools: one task tool brings the family' );
+  my $no_tasks = names( child( $app, agent( disallowed => ['todo_write'] ) )->tool_servers );
+  ok( !( grep { /\Atask_|\Atodo_write\z/ } @$no_tasks ) && ( grep { $_ eq 'read_file' } @$no_tasks ),
+    'disallowed TodoWrite removes the task tools' );
+  is( names( child( $app, agent( tools => ['edit_file'] ) )->tool_servers ), [qw( edit_file multi_edit )],
+    'tools: edit_file brings multi_edit' );
+  my $no_multi = names( child( $app, agent( disallowed => ['multi_edit'] ) )->tool_servers );
+  ok( !( grep { /\A(?:edit_file|multi_edit)\z/ } @$no_multi ) && ( grep { $_ eq 'write_file' } @$no_multi ),
+    'disallowed multi_edit removes edit_file too' );
+  is( names( child( $app, agent( tools => ['bash'] ) )->tool_servers ), [qw( bash bash_output kill_shell )],
+    'tools: bash brings bash_output and kill_shell' );
+  is( names( child( $app, agent( tools => ['bash_output'] ) )->tool_servers ), ['bash_output'],
+    'tools: bash_output alone does not bring bash' );
+
+  my $legacy = mock_app( root => "$root", task_tools => 0 );
+  my %legacy_parent = map { $_->name => $_ } map { @{ $_->tools } } @{ $legacy->_tool_servers };
+  my $legacy_child = child( $legacy, agent( tools => ['task_create'] ) );
+  is( names( $legacy_child->tool_servers ), ['todo_write'], 'RAIDER_ENABLE_TASKS=0: a task tool name brings todo_write' );
+  isnt( refaddr $legacy_child->tool_servers->[0]->tools->[0], refaddr $legacy_parent{todo_write},
+    'todo_write: an instance of its own' );
 
   my $mission = $gp->mission;
   like( $mission, qr/\AYou are an agent for raider/, 'the agent body in the place of the persona' );
   unlike( $mission, qr/viking shield-maiden/, 'no persona' );
-  like( $mission, qr/^  - todo_write\(todos\)$/m, 'tool lines from its own set' );
+  like( $mission, qr/^  - task_create\(subject, description/m, 'tool lines from its own set' );
+  unlike( $mission, qr/enter_plan_mode\(/, 'without enter_plan_mode' );
   unlike( $mission, qr/ask_user\(/, 'without ask_user' );
   like( $mission, qr/- notes: Notes\./, 'with the skill tool: the skill listing' );
   my $reader = child( $app, agent( tools => ['read_file'] ) )->mission;
@@ -83,9 +119,9 @@ subtest 'a run: own todo list, child session, agent.* events in the caller only'
     root     => "$root",
     on_event => sub { my ( $type, %p ) = @_; push @events, { type => $type, %p } },
     script   => [
-      { tool_calls => [ [ todo_write => { todos => [ { content => 'Parent step', status => 'in_progress' } ] } ] ] },
+      { tool_calls => [ [ task_create => { subject => 'Parent step', description => 'the caller\'s' } ] ] },
       { tool_calls => [ [ agent => { description => 'Sub task', prompt => 'CHILD-PROMPT' } ] ] },
-      { tool_calls => [ [ todo_write => { todos => [ { content => 'Child step', status => 'completed' } ] } ] ] },
+      { tool_calls => [ [ task_create => { subject => 'Child step', description => 'the subagent\'s' } ] ] },
       { text => 'child done' },
       { text => 'all done' },
     ],
@@ -95,8 +131,11 @@ subtest 'a run: own todo list, child session, agent.* events in the caller only'
   is( $outcome->{status}, 'completed', 'the run completes' );
   is( $outcome->{response}, 'all done', 'the caller answers' );
   is( [ map { $_->{content} } @{ $app->todos } ], ['Parent step'], 'the caller\'s list is untouched' );
+  is( [ map { $_->{result}{content}[0]{text} } grep { $_->{tool_call}{name} eq q(task_create) } @{ $app->mock_engine->results } ],
+    [ 'Task #1 created successfully: Parent step', 'Task #1 created successfully: Child step' ],
+    'the subagent\'s list counts from 1: a list of its own' );
 
-  is( [ map { $_->{name} } grep { $_->{type} eq 'tool.call' } @events ], [qw( todo_write agent )],
+  is( [ map { $_->{name} } grep { $_->{type} eq 'tool.call' } @events ], [qw( task_create agent )],
     'the caller\'s stream has its own tool calls only' );
   is( scalar( grep { $_->{type} eq 'todo.updated' } @events ), 1, 'and its own todo.updated only' );
   my ($started)  = grep { $_->{type} eq 'agent.started' } @events;
@@ -134,6 +173,34 @@ subtest 'a run: own todo list, child session, agent.* events in the caller only'
   like( $sessions->summary($child_id), { parent => $session->id, agent => 'general-purpose' }, 'summary names the parent' );
   ok( !exists $sessions->summary( $session->id )->{parent}, 'the caller\'s summary does not' );
   ok( !$app->_live_subagents->{$_}, 'no live subagent left' ) for keys %{ $app->_live_subagents };
+};
+
+subtest 'read before write: the subagent has a read state of its own (ADR 0023)' => sub {
+  my $root = root();
+  $root->child(q(a.txt))->touchpath->spew_utf8("one\n");
+  my $app = mock_app(
+    root            => "$root",
+    permission_mode => 'bypassPermissions',   # only the read state may stop the edit
+    script          => [
+      { tool_calls => [ [ read_file => { path => 'a.txt' } ] ] },
+      { tool_calls => [ [ agent => { description => 'd', prompt => 'edit a.txt' } ] ] },
+      { tool_calls => [ [ edit_file => { path => 'a.txt', old_string => 'one', new_string => 'two too' } ] ] },
+      { tool_calls => [ [ read_file => { path => 'a.txt' } ] ] },
+      { tool_calls => [ [ edit_file => { path => 'a.txt', old_string => 'one', new_string => 'two too' } ] ] },
+      { text => 'child done' },
+      { tool_calls => [ [ edit_file => { path => 'a.txt', old_string => 'two', new_string => 'three' } ] ] },
+      { text => 'all done' },
+    ],
+  );
+  is( '' . $app->run('go'), 'all done', 'runs' );
+  my @edits = grep { $_->{tool_call}{name} eq q(edit_file) } @{ $app->mock_engine->results };
+  is( scalar @edits, 3, 'three edits' );
+  ok( $edits[0]{result}{isError}, 'the subagent\'s edit before its own read is refused' );
+  like( $edits[0]{result}{content}[0]{text}, qr/File has not been read yet/, 'with Claude Code\'s words' );
+  ok( !$edits[1]{result}{isError}, 'after its own read it edits' );
+  ok( $edits[2]{result}{isError}, 'the caller\'s read does not cover what the subagent changed since' );
+  like( $edits[2]{result}{content}[0]{text}, qr/modified since read/, 'the caller is told to read again' );
+  is( $root->child('a.txt')->slurp_utf8, "two too\n", 'the file has the subagent\'s edit only' );
 };
 
 subtest 'no caller session: no child session, events still' => sub {

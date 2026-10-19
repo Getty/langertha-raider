@@ -41,7 +41,7 @@ subtest write_and_edit => sub {
   my $edit = call_tool('edit_file', {
     path => 'new.txt', old_string => 'two', new_string => 'TWO',
   });
-  like($edit->{content}[0]{text}, qr/Edited/, 'edit reports success');
+  like($edit->{content}[0]{text}, qr/\AThe file \S+new\.txt has been updated successfully\./, 'edit reports success as Claude Code does');
   is(path($dir, 'new.txt')->slurp_utf8, "one\nTWO\n", 'content edited');
 
   my $miss = call_tool('edit_file', {
@@ -54,7 +54,7 @@ subtest edit_replace_all => sub {
   call_tool('write_file', { path => 'many.txt', content => "a b a b a\n" });
   my $twice = call_tool('edit_file', { path => 'many.txt', old_string => 'a', new_string => 'x' });
   ok($twice->{isError}, 'an old_string found more than once is an error');
-  like($twice->{content}[0]{text}, qr/matches 3 times, must be unique \(or set replace_all\)/, 'naming the way out');
+  like($twice->{content}[0]{text}, qr/Found 3 matches of the string to replace, but replace_all is false\. To replace all occurrences, set replace_all to true\./, 'naming the way out, in Claude Code\'s words');
   is(path($dir, 'many.txt')->slurp_utf8, "a b a b a\n", 'and changes nothing');
 
   my $all = call_tool('edit_file', { path => 'many.txt', old_string => 'a', new_string => 'x', replace_all => 1 });

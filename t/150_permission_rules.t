@@ -37,9 +37,9 @@ subtest 'parsing' => sub {
   is $r->specifier, 'npm run test:*', 'specifier';
 
   is rule('Read')->tools, [qw( read_file list_files glob grep )], 'Read covers every reading tool';
-  is rule('Edit(src/**)')->tools, [qw( write_file edit_file )], 'Edit covers every writing tool';
-  is rule('Write')->tools, [qw( write_file edit_file )], 'Write as well';
-  is rule('write_file')->tools, [qw( write_file edit_file )], 'raider name accepted';
+  is rule('Edit(src/**)')->tools, [qw( write_file edit_file multi_edit )], "Edit covers every writing tool";
+  is rule('Write')->tools, [qw( write_file edit_file multi_edit )], "Write as well";
+  is rule('write_file')->tools, [qw( write_file edit_file multi_edit )], "raider name accepted";
   is rule('TodoWrite')->tools, ['todo_write'], 'Claude name through ToolNames';
   is rule('perl_eval')->tools, ['perl_eval'], 'raider-only tool by its name';
 

@@ -8,4 +8,4 @@ script:
   - text: ok
 expect:
   tools:
-    - { name: bash, text: 'Exit code: 0.*marker\.txt' }
+    - { name: bash, text: '\Amarker\.txt\z' }

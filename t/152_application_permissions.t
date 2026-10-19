@@ -106,7 +106,7 @@ subtest 'the gate in a run: refused with a reason, events, journal' => sub {
   is $end->{status}, 'completed', 'the run completes';
   ok $root->child('keep.txt')->exists, 'bash did not run';
   my $text = $app->mock_engine->results->[0]{result}{content}[0]{text};
-  like $text, qr/\ATool call 'bash' was denied: default mode asks before this call: bash runs code; nobody can approve it in this run\. To allow it, add a rule such as 'Bash\(rm keep\.txt\)' to \.raider\/config\.yml \(permissions: allow:\), or run raider with --permission-mode bypassPermissions\. Do not retry the same call/,
+  like $text, qr/\APermission to use bash with command rm keep\.txt has been denied\. Reason: default mode asks before this call: bash runs code; nobody can approve it in this run\. To allow it, add a rule such as 'Bash\(rm keep\.txt\)' to \.raider\/config\.yml \(permissions: allow:\), or run raider with --permission-mode bypassPermissions\. Do not retry the same call/,
     'the model is told why and how to allow it';
   my ($denied) = grep { $_->{type} eq 'permission.denied' } @events;
   like $denied, { tool => 'bash', tool_source => qr/\Aengine:/, mode => 'default', by => 'noninteractive',

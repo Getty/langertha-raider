@@ -101,13 +101,16 @@ subtest 'the answerer is asked on every call' => sub {
 };
 
 sub cli {
+  my ( %arg ) = @_;
   return Langertha::Raider::CLI->new(
     root => tempdir( CLEANUP => 1 ), engine => 'openai', api_key => 'test', model => 'gpt-4o-mini', trace => 0, detect => 0,
+    %arg,
   );
 }
 
 subtest 'the application keeps the list as run state and reports every change' => sub {
-  my $app = cli();
+  # todo_write is the family of RAIDER_ENABLE_TASKS=0; the task tools: t/197.
+  my $app = cli( task_tools => 0 );
   is( $app->todos, [], 'empty to begin with' );
   my @events;
   $app->begin_run( on_event => sub { push @events, [@_] } );

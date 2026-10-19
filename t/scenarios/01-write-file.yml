@@ -9,4 +9,4 @@ expect:
   files:
     notes/a.txt: "hello\n"
   tools:
-    - { name: write_file, text: 'Wrote 6 bytes' }
+    - { name: write_file, text: '\AFile created successfully at: \S+/notes/a\.txt \(file state is current in your context' }

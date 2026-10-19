@@ -8,7 +8,6 @@ use Future;
 use Future::AsyncAwait;
 use JSON::MaybeXS ();
 use Net::Async::MCP;
-use MCP::Run::Bash;
 use Carp qw( croak );
 use Path::Tiny;
 use Scalar::Util qw( blessed refaddr weaken );
@@ -16,6 +15,7 @@ use Time::HiRes ();
 use Langertha::Raider::HallTools qw( build_hall_tools_server );
 
 use Langertha::Raider::FileTools qw( build_file_tools_server );
+use Langertha::Raider::FileTools::ReadState;
 use Langertha::Raider::WebTools  qw( build_web_tools_server );
 use Langertha::Raider::PerlTools qw( build_perl_tools_server );
 use Langertha::Raider::SearchTools;
@@ -24,6 +24,7 @@ use Langertha::Raider::AskTools;
 use Langertha::Raider::PlanTools;
 use Langertha::Raider::Approval;
 use Langertha::Raider::Loadguard;
+use Langertha::Raider::BashTools;
 use Langertha::Raider::SkillTools qw( build_skill_tools_server );
 use Langertha::Raider::Packs     qw( build_packs );
 use Langertha::Raider::Config;
@@ -63,7 +64,8 @@ F<~/.raider/config.yml>), picks
 the engine through L<Langertha::Raider::EngineResolver>, activates the
 packs (L<Langertha::Raider::Packs>, ADR 0012), compiles the mission (ADR
 0004, ADR 0014), mounts the tool servers -- files
-(L<Langertha::Raider::FileTools>), C<bash> (L<MCP::Run::Bash>), web
+(L<Langertha::Raider::FileTools>), C<bash> with C<bash_output> and C<kill_shell>
+(L<Langertha::Raider::BashTools>), web
 (L<Langertha::Raider::WebTools>), the Perl tools
 (L<Langertha::Raider::PerlTools>) when granted, the Hall tools when
 spawned by a Hall, the C<agent> tool (L<Langertha::Raider::AgentTools>,
@@ -726,6 +728,8 @@ sub _build_permissions {
     cli_mode => $cli,
     ( $self->_permissions_session_rules ? ( session_rules => $self->_permissions_session_rules ) : () ),
     sources  => [ $self->config->permissions, ( $settings ? $settings->permissions : () ) ],
+    # Claude layout: the file tools reach outside the root, the gate asks (ADR 0023).
+    ask_outside_roots => ( $self->context->mode eq 'claude' ? 1 : 0 ),
   );
 }
 
@@ -817,7 +821,8 @@ sub tool_gate {
 # The tool gate of the raider (ADR 0005, ADR 0021): the policy decides; an
 # ask without anyone to approve it is refused with a reason that says how to
 # allow it. Emits permission.denied for every call that does not run. %for
-# is what tool_gate got: policy, on_event, binding.
+# is what tool_gate got: policy, on_event, binding. The model reads Claude
+# Code's sentence first, then raider's reason (ADR 0026).
 sub _permission_gate {
   my ($self, $call, %for) = @_;
   my $policy = $for{policy} // $self->permissions;
@@ -825,7 +830,7 @@ sub _permission_gate {
   return $verdict if $verdict->{verdict} eq 'allow';
   if ($verdict->{verdict} eq 'deny') {
     $self->_permission_event(\%for, 'permission.denied', $call, $verdict, by => $verdict->{by});
-    return $verdict;
+    return { %$verdict, message => $self->_denied_text($call, $verdict->{reason}) };
   }
   if (my $ask = $self->on_permission_request) {
     return $self->_ask_permission($ask, $call, $verdict, \%for);
@@ -835,7 +840,32 @@ sub _permission_gate {
     .( ( $verdict->{by} // '' ) eq 'hook' ? '' : $self->_how_to_allow($call, $policy).' ' )
     .'Do not retry the same call; go on without it or say what you need.';
   $self->_permission_event(\%for, 'permission.denied', $call, $verdict, by => 'noninteractive', reason => $reason);
-  return { %$verdict, verdict => 'deny', by => 'noninteractive', reason => $reason };
+  return { %$verdict, verdict => 'deny', by => 'noninteractive', reason => $reason,
+    message => $self->_denied_text($call, $reason) };
+}
+
+# Claude Code's words for a call that is refused without the person saying
+# no -- "Permission to use Bash with command CMD has been denied." -- with the
+# tool named as the model knows it, then raider's reason.
+sub _denied_text {
+  my ($self, $call, $reason) = @_;
+  my $name = $call->{name} // '';
+  my $command = ref $call->{arguments} eq 'HASH' ? $call->{arguments}{command} : undef;
+  my $text = 'Permission to use '.$name
+    .( $name eq 'bash' && defined $command && !ref $command ? ' with command '.$command : '' )
+    .' has been denied.';
+  return $text unless defined $reason && length $reason;
+  return $text.' Reason: '.$reason.( $reason =~ /[.!?]\z/ ? '' : '.' );
+}
+
+# Claude Code's words for a call the person said no to; the reason they gave
+# follows as Claude Code puts it (ADR 0026).
+sub _rejected_text {
+  my ($self, $why) = @_;
+  my $text = "The user doesn't want to proceed with this tool use. The tool use was rejected "
+    .'(eg. if it was a file edit, the new_string was NOT written to the file). ';
+  return $text.'To tell you how to proceed, the user said:'."\n".$why if defined $why && length $why;
+  return $text.'STOP what you are doing and wait for the user to tell you how to proceed.';
 }
 
 # Puts a call the policy asks about to the person (on_permission_request):
@@ -874,10 +904,9 @@ sub _ask_permission {
     }
   }
   my $why = ref $answer eq 'HASH' ? $answer->{reason} : undef;
-  my $text = 'The user refused this call'.( defined $why && length $why ? ': '.$why : '' )
-    .'. Do not try the same call again; ask the user what they want or change your plan.';
+  my $text = $self->_rejected_text($why);
   $self->_permission_event($for, 'permission.denied', $call, $verdict, by => 'user', reason => $text);
-  return { %$verdict, verdict => 'deny', by => 'user', reason => $text };
+  return { %$verdict, verdict => 'deny', by => 'user', reason => $text, message => $text };
 }
 
 # Session, run and policy revision an approval is bound to. A run without a
@@ -906,12 +935,17 @@ sub _build__local_session_id { 'local-'.$$.'-'.refaddr($_[0]) }
 # config file, or a mode.
 sub _how_to_allow {
   my ($self, $call, $policy) = @_;
-  my $rule = ( $policy // $self->permissions )->suggest_rule($call);
+  $policy //= $self->permissions;
+  my $rule = $policy->suggest_rule($call);
   my @files = ( '.raider/config.yml (permissions: allow:)',
     ( $self->context->claude_layout ? '.claude/settings.json (permissions.allow)' : () ) );
+  # A path outside the root: acceptEdits does not reach it, an additional directory does (ADR 0023).
+  my $outside = $policy->ask_outside_roots && $policy->outside_paths($call) ? 1 : 0;
   return 'To allow it, add '.( defined $rule ? "a rule such as '".$rule."'" : 'an allow rule' )
-    .' to '.join(' or ', @files).', or run raider with --permission-mode '
-    .( ( $call->{name} // '' ) =~ /\A(?:write_file|edit_file)\z/ ? 'acceptEdits' : 'bypassPermissions' ).'.';
+    .' to '.join(' or ', @files)
+    .( $outside ? ', add the directory to additionalDirectories (additional_directories)' : '' )
+    .', or run raider with --permission-mode '
+    .( !$outside && ( $call->{name} // '' ) =~ /\A(?:write_file|edit_file|multi_edit)\z/ ? 'acceptEdits' : 'bypassPermissions' ).'.';
 }
 
 sub _permission_event {
@@ -1127,7 +1161,7 @@ has _hook_config_reported => (is => 'rw', isa => 'Bool', default => 0, init_arg 
     $app->note_history_cleared;   # /clear
 
 The conversation starts over: the next run fires C<SessionStart> again
-with source C<clear>.
+with source C<clear>, and the task list (L</todos>) is empty.
 
 =cut
 
@@ -1135,6 +1169,8 @@ sub note_history_cleared {
   my ($self) = @_;
   $self->_hook_session(undef);
   $self->_hook_session_source('clear');
+  $self->_todo_tools->clear_tasks;
+  $self->_todos([]);
   return;
 }
 
@@ -1273,6 +1309,34 @@ has loadguard => (
 );
 
 sub _build_loadguard { Langertha::Raider::Loadguard->new }
+
+=attr bash_tools
+
+The L<Langertha::Raider::BashTools> behind C<bash>, C<bash_output> and
+C<kill_shell>, built once with L</root>, L</allowed_commands>, the
+L</loadguard> gate and L</loop>. Its background shells belong to the
+application: they live across the runs of a session and are stopped when the
+application goes away.
+
+=cut
+
+has bash_tools => (
+  is       => 'ro',
+  isa      => 'Langertha::Raider::BashTools',
+  lazy     => 1,
+  builder  => '_build_bash_tools',
+  init_arg => undef,
+);
+
+sub _build_bash_tools {
+  my ($self) = @_;
+  return Langertha::Raider::BashTools->new(
+    loop              => $self->loop,
+    working_directory => $self->root,
+    ( $self->has_allowed_commands ? ( allowed_commands => $self->allowed_commands ) : () ),
+    validator         => $self->loadguard->validator,
+  );
+}
 
 =attr perl
 
@@ -1810,6 +1874,7 @@ sub _build_tool_servers {
     ( $self->perl_tools_enabled ? $self->_perl_tool_server : () ),
     ( $self->_hall_tool_server // () ),
     ( $self->_skill_tool_server // () ),
+    $self->_enter_plan_tool_server,
     ( $self->_agent_tool_server // () ),
     ( $self->_plan_tool_wanted ? $self->_plan_tool_server : () ),
   ];
@@ -1817,8 +1882,11 @@ sub _build_tool_servers {
 
 # exit_plan_mode (ADR 0021): mounted once the application has been in plan
 # mode, and kept mounted after (it then answers "not in plan mode").
+# enter_plan_mode (ADR 0025): always mounted.
 has _plan_mode_seen => (is => 'rw', isa => 'Bool', default => 0, init_arg => undef);
+has _plan_tools => (is => 'ro', lazy => 1, builder => '_build_plan_tools');
 has _plan_tool_server => (is => 'ro', lazy => 1, builder => '_build_plan_tool_server');
+has _enter_plan_tool_server => (is => 'ro', lazy => 1, builder => '_build_enter_plan_tool_server');
 
 sub _plan_tool_wanted {
   my ($self) = @_;
@@ -1826,34 +1894,58 @@ sub _plan_tool_wanted {
   return $self->_plan_mode_seen;
 }
 
-sub _build_plan_tool_server {
+sub _build_plan_tools {
   my ($self) = @_;
   weaken(my $app = $self);
   return Langertha::Raider::PlanTools->new(
-    handler => sub { $app ? $app->_exit_plan_mode(@_) : ( 'the application is gone', 1 ) },
-  )->server;
+    handler       => sub { $app ? $app->_exit_plan_mode(@_) : ( 'the application is gone', 1 ) },
+    enter_handler => sub { $app ? $app->_enter_plan_mode : ( 'the application is gone', 1 ) },
+  );
+}
+
+sub _build_plan_tool_server { $_[0]->_plan_tools->server }
+
+sub _build_enter_plan_tool_server { $_[0]->_plan_tools->enter_server }
+
+# What enter_plan_mode answers once the gate let it run (the person agreed,
+# a rule allows it, or bypassPermissions): the mode becomes plan; Claude
+# Code's words, with raider's tool names.
+sub _enter_plan_mode {
+  my ($self) = @_;
+  $self->set_permission_mode('plan', 'enter_plan_mode') unless $self->permissions->mode eq 'plan';
+  return ( "Entered plan mode. You should now focus on exploring the codebase and designing an implementation approach.\n\n"
+    ."In plan mode, you should:\n"
+    ."1. Thoroughly explore the codebase to understand existing patterns\n"
+    ."2. Identify similar features and architectural approaches\n"
+    ."3. Consider multiple approaches and their trade-offs\n"
+    ."4. Use ask_user if you need to clarify the approach\n"
+    ."5. Design a concrete implementation strategy\n"
+    ."6. When ready, use exit_plan_mode to present your plan for approval\n\n"
+    .'Remember: DO NOT write or edit any files yet. This is a read-only exploration and planning phase.', 0 );
 }
 
 # What exit_plan_mode answers: the plan put to the person (on_plan_review),
-# approved -> mode default; refused -> stays in plan with the feedback;
-# nobody to ask -> stays in plan, the plan is the final answer.
+# approved -> mode default; refused -> stays in plan, an error result with
+# the feedback; nobody to ask -> stays in plan, an error result: the plan is
+# the final answer. In Claude Code's words where it has them (ADR 0026).
 sub _exit_plan_mode {
   my ($self, $plan) = @_;
   my $mode = $self->permissions->mode;
-  return ( 'exit_plan_mode: not in plan mode (the permission mode is '.$mode.'); go on with the work.', 1 )
+  return ( '<tool_use_error>You are not in plan mode. To enter plan mode, call the enter_plan_mode tool first. '
+    .'If your plan was already approved, continue with implementation.</tool_use_error>', 1 )
     unless $mode eq 'plan';
   my $review = $self->on_plan_review;
-  return ( 'Nobody can approve the plan in this run. Stay in plan mode and give the plan as your final answer.', 0 )
+  return ( $self->_denied_text({ name => 'exit_plan_mode' },
+    'nobody can approve the plan in this run. Stay in plan mode and give the plan as your final answer.'), 1 )
     unless $review;
   $self->event('permission.asked', tool => 'exit_plan_mode', mode => $mode, reason => 'review of the plan');
   my $answer = $review->($plan) // {};
   if ($answer->{approve}) {
     $self->set_permission_mode('default', 'exit_plan_mode');
-    return ( 'User approved the plan. You can now start editing files and running commands (permission mode: default).', 0 );
+    return ( 'User has approved your plan. You can now start coding. Start with updating your todo list if applicable'
+      ."\n\nThe permission mode is now default.\n\n## Approved Plan:\n".( $plan // '' ), 0 );
   }
-  my $feedback = $answer->{feedback};
-  return ( 'The user did not approve the plan'.( defined $feedback && length $feedback ? ': '.$feedback : '' )
-    .'. Stay in plan mode: revise the plan and present it again with exit_plan_mode.', 0 );
+  return ( $self->_rejected_text($answer->{feedback}), 1 );
 }
 
 # The hider of the search tools: hides the files a Read deny or ask rule
@@ -1909,6 +2001,48 @@ has _current_call => (
   init_arg => undef,
 );
 
+# The model call of web_fetch's prompt (ADR 0026): the page and the
+# question as one user message to web_fetch_engine, on the run's loop;
+# its tokens are the event model.usage (purpose web_fetch). A Future of the
+# answer text.
+sub _web_fetch_answer_f {
+  my ($self, $text) = @_;
+  my $engine = $self->web_fetch_engine;
+  weaken(my $app = $self);
+  return $engine->chat_f(messages => [ { role => 'user', content => $text } ])->then(sub {
+    my ($response) = @_;
+    if ($app && blessed $response && $response->can('has_usage') && $response->has_usage) {
+      my $usage = $response->usage;
+      $app->event('model.usage',
+        purpose       => 'web_fetch',
+        model         => ( $response->can('model') && defined $response->model ? $response->model : $engine->chat_model ),
+        input_tokens  => $usage->input_tokens,
+        output_tokens => $usage->output_tokens,
+      );
+    }
+    return Future->done("$response");
+  });
+}
+
+=attr web_fetch_engine
+
+The engine that answers the C<prompt> of C<web_fetch> (ADR 0026): the run's
+own engine, or -- with C<web_fetch_model> in the config (F<.raider/config.yml>,
+the engine's section, C<-o web_fetch_model=>) -- the same engine, provider
+and key with that model, e.g. a smaller one. Built when first needed.
+
+=cut
+
+has web_fetch_engine => (is => 'ro', lazy => 1, builder => '_build_web_fetch_engine', init_arg => undef);
+
+sub _build_web_fetch_engine {
+  my ($self) = @_;
+  my $model = $self->_load_yml_options->{web_fetch_model};
+  return $self->_engine unless defined $model && !ref $model && length $model;
+  my $resolver = $self->engine_resolver;
+  return $resolver->meta->clone_object($resolver, model => $model)->build_engine;
+}
+
 # The skill tool (ADR 0019 §4), when the context lists a skill.
 sub _build_skill_tool_server {
   my ($self) = @_;
@@ -1922,25 +2056,27 @@ sub _build_stock_tool_servers {
   # The roots are asked on every call, so /reload (reload_permissions) reaches the mounted tools.
   weaken(my $app = $self);
   my $extra = sub { $app ? [ $app->permissions->additional_directory_paths ] : [] };
-  my $files = build_file_tools_server(root => $self->root, extra_roots => $extra);
-
-  my $bash = MCP::Run::Bash->new(
-    tool_name         => 'bash',
-    tool_description  => 'Run a shell command with bash -c. Returns exit code, stdout, and stderr. Use this for ls, grep, find, git, cat, running tests, any shell pipeline — anything you would type at a terminal.',
-    working_directory => $self->root,
-    ($self->has_allowed_commands ? (allowed_commands => $self->allowed_commands) : ()),
-    validator => $self->loadguard->validator,
-    timeout   => 120,
+  # Confined unless the policy asks for paths outside the roots (Claude layout, ADR 0023).
+  my $confine = sub { $app ? !$app->permissions->ask_outside_roots : 1 };
+  my $files = $self->_file_tools_server(
+    read_state  => $self->file_read_state,
+    sees_images => sub { $app ? $app->_engine_sees_images : 0 },
   );
 
-  my $web = build_web_tools_server(loop => $self->loop);
+  my $bash = $self->bash_tools->server;
+
+  my $web = build_web_tools_server(
+    loop   => $self->loop,
+    answer => sub { $app ? $app->_web_fetch_answer_f(@_) : Future->fail("the application is gone\n") },
+  );
 
   my $search = Langertha::Raider::SearchTools->new(
     root        => $self->root,
     extra_roots => $extra,
+    confine     => $confine,
     hider       => sub { $app ? $app->_search_hider : undef },
   )->server;
-  my $todo   = Langertha::Raider::TodoTools->new(on_update => sub { $app->_todos_updated(@_) if $app })->server;
+  my $todo   = $self->task_tools ? $self->_todo_tools->task_server : $self->_todo_tools->server;
   my $ask    = Langertha::Raider::AskTools->new(
     answerer => sub { $app && $app->has_on_ask_user ? $app->on_ask_user : undef },
   )->server;
@@ -1948,15 +2084,99 @@ sub _build_stock_tool_servers {
   return [ $files, $bash, $web, $search, $todo, $ask ];
 }
 
+# A new server with the file tools over the root, with the additional
+# directories and the confinement of the policy -- both asked on every call --
+# and the given read_state and sees_images. The application mounts one over
+# file_read_state; a subagent one over a read state of its own (ADR 0023).
+sub _file_tools_server {
+  my ($self, %o) = @_;
+  weaken(my $app = $self);
+  return build_file_tools_server(
+    root        => $self->root,
+    extra_roots => sub { $app ? [ $app->permissions->additional_directory_paths ] : [] },
+    # Confined unless the policy asks for paths outside the roots (Claude layout, ADR 0023).
+    confine     => sub { $app ? !$app->permissions->ask_outside_roots : 1 },
+    ( $o{read_state} ? ( read_state => $o{read_state} ) : () ),
+    ( exists $o{sees_images} ? ( sees_images => $o{sees_images} ) : () ),
+  );
+}
+
+=attr file_read_state
+
+The record of the files read in the run in progress
+(L<Langertha::Raider::FileTools::ReadState>), which the file tools hold
+C<write_file>, C<edit_file> and C<multi_edit> against: an existing file must
+have been read in this run, and not changed on disk since (ADR 0023).
+L</begin_run> empties it. A surface that shows the model a file's content
+itself (the prompt builder) records it here.
+
+=cut
+
+has file_read_state => (
+  is         => 'ro',
+  isa        => 'Langertha::Raider::FileTools::ReadState',
+  lazy_build => 1,
+  init_arg   => undef,
+);
+
+sub _build_file_read_state { Langertha::Raider::FileTools::ReadState->new }
+
+# Whether an image or a PDF that read_file finds can go back to the model as
+# content: the model sees images and its wire carries them in a tool result
+# (Langertha::ToolResult: anthropic, responses, gemini; ADR 0023).
+my %IMAGE_WIRE = map { $_ => 1 } qw( anthropic responses gemini );
+
+sub _engine_sees_images {
+  my ($self, $engine) = @_;
+  $engine //= $self->_has_raider ? $self->_raider->active_engine : $self->_engine;
+  return 0 unless $engine && $engine->can('supports') && $engine->supports('image_input');
+  my $wire = $engine->can('tool_wire_format') ? $engine->tool_wire_format : '';
+  return $IMAGE_WIRE{ $wire // '' } ? 1 : 0;
+}
+
+=attr task_tools
+
+Which task-list family the application mounts (ADR 0025), one of the two
+of L<Langertha::Raider::TodoTools>, as Claude Code offers one: true (the
+default) for C<task_create>, C<task_update>, C<task_list> and C<task_get>
+(Claude Code's C<TaskCreate> & co.), false for C<todo_write> (C<TodoWrite>).
+Defaults to C<RAIDER_ENABLE_TASKS> when set (C<0> or C<false> turns the task
+tools off, like Claude Code's C<CLAUDE_CODE_ENABLE_TASKS>).
+
+=cut
+
+has task_tools => (
+  is      => 'ro',
+  isa     => 'Bool',
+  lazy    => 1,
+  builder => '_build_task_tools',
+);
+
+sub _build_task_tools {
+  my $v = $ENV{RAIDER_ENABLE_TASKS};
+  return 1 unless defined $v && length $v;
+  return $v =~ /\A(?:0|false|no|off)\z/i ? 0 : 1;
+}
+
+has _todo_tools => (is => 'ro', lazy => 1, builder => '_build_todo_tools', init_arg => undef);
+
+sub _build_todo_tools {
+  my ($self) = @_;
+  weaken(my $app = $self);
+  return Langertha::Raider::TodoTools->new(on_update => sub { $app->_todos_updated(@_) if $app });
+}
+
 =method todos
 
-    my $list = $app->todos;     # [ { content, status, activeForm }, ... ]
+    my $list = $app->todos;     # [ { content, status, activeForm, ... }, ... ]
 
-The task list of the run in progress, as the model last sent it with
-C<todo_write> (L<Langertha::Raider::TodoTools>): a copy; empty when the model
-sent none. It is state of the run: L</begin_run> empties it. Every change
-is the event C<todo.updated> with the whole list as C<todos>, which the
-session journal records.
+The task list, as the model last left it (L<Langertha::Raider::TodoTools>):
+a copy; empty when the model kept none. With L</task_tools> it is the list of
+C<task_create> & co., kept for the conversation: runs go on with it,
+L</note_history_cleared> (C</clear>) empties it. With C<todo_write> it is
+state of the run: L</begin_run> empties it. Every change is the event
+C<todo.updated> with the whole list as C<todos>, which the session journal
+records.
 
 =cut
 
@@ -2170,7 +2390,10 @@ Runs C<$text> as one run (L</run>) and records it, whichever surface
 asks: in the journal of the L<Langertha::Raider::Session> as the
 session's next run (ADR 0015) -- C<run.started>, the user input as
 C<message>, every C<tool.call> and C<tool.result> with the whole result
-text, the final answer as C<message>, and C<run.finished> with the end
+text (and after it a user C<message> a result hands the raid, such as a
+loaded skill, ADR 0026), the tokens of a model call a tool makes as
+C<model.usage> (C<purpose>, C<model>, C<input_tokens>, C<output_tokens>;
+C<web_fetch> with a C<prompt>), the final answer as C<message>, and C<run.finished> with the end
 state and the raider's metrics, also when the run failed. A journal write
 that fails goes to L</on_journal_error>; the run goes on.
 
@@ -2201,7 +2424,7 @@ one. An empty C<$text> runs nothing and returns nothing.
 # run.finished is written by end_run.
 my %JOURNAL_TYPE = map { $_ => 1 } qw( run.started message tool.call tool.result todo.updated
   permission.asked permission.granted permission.denied permission.mode hook.ran hook.message
-  agent.started agent.finished agent.warning );
+  model.usage agent.started agent.finished agent.warning );
 
 =method is_journal_type
 
@@ -2211,7 +2434,8 @@ Whether the journal records events of that type from a run (ADR 0015):
 C<run.started>, C<message>, C<tool.call>, C<tool.result>, C<todo.updated>,
 the C<permission.*> events (ADR 0021), C<hook.ran> and C<hook.message> (ADR
 0022), C<agent.started> and C<agent.finished> of the subagents it starts and
-C<agent.warning> about them (ADR 0020). C<run.finished> is written by
+C<agent.warning> about them (ADR 0020), C<model.usage> of a tool's own
+model call (C<web_fetch>'s prompt, ADR 0026). C<run.finished> is written by
 L</end_run>.
 
 =cut
@@ -2274,7 +2498,8 @@ and model) and C<run.state> C<running>. L</end_run> ends it.
 sub begin_run {
   my ( $self, %o ) = @_;
   my $session = $o{session};
-  $self->_todos([]);
+  $self->_todos([]) unless $self->task_tools;
+  $self->file_read_state->clear;
   $self->_run({
     session  => $session,
     run      => $session ? $session->next_run : undef,

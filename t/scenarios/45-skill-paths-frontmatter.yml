@@ -29,4 +29,4 @@ expect:
     - { name: read_file, text: docs, not_text: 'skills are available' }
     - { name: read_file, text: 'export const a.*The following skills are available for use with the Skill tool:\n\n- ts-style: House style for TypeScript\.\n</system-reminder>' }
     - { name: read_file, text: 'export const b', not_text: 'skills are available' }
-    - { name: skill, text: 'Use strict mode\. TS-BODY-MARKER' }
+    - { name: skill, text: '^Launching skill: ts-style$' }

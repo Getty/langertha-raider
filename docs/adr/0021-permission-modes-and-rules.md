@@ -337,6 +337,14 @@ channel back:
 - **Packing.** New modules loaded by `use` only; `IO::Socket::UNIX` and `IO::Select` are core
   Perl. No new by-name loads, no new dependency.
 
+## Nachtrag D (k159)
+
+The texts the model gets for a refusal (§6: the person's no, an ask nobody can approve, a
+deny) and the answers of `exit_plan_mode` (§8) are now Claude Code's words, with raider's
+reason after them; a refused plan and a plan nobody can review are error results. ADR 0026
+records the texts; the quotes in §6 and §8 are superseded by it. The verdicts, events and
+the order of the checks are unchanged.
+
 ## Source
 
 Plan `perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md`

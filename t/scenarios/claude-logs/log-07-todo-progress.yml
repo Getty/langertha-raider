@@ -2,6 +2,8 @@
 # progress, re-sent after each step with exactly one item moving
 # (pending -> in_progress -> completed), working in between with Read/Edit/Bash.
 title: the task list moves pending, in_progress, completed across a read-edit-verify job
+# A session of the TodoWrite era: todo_write instead of the task tools (ADR 0025).
+app: { task_tools: false }
 files:
   greet.txt: "hello world\n"
 prompt: Rename the greeting to Moin and check the result.
@@ -46,9 +48,9 @@ expect:
     - { name: todo_write, text: '^Todo list updated: 0 completed, 1 in progress, 2 pending\n\[>\] Read greet\.txt' }
     - { name: read_file, text: 'hello world' }
     - { name: todo_write, text: '^Todo list updated: 1 completed, 1 in progress, 1 pending' }
-    - { name: edit_file, text: '^Edited ' }
+    - { name: edit_file, text: '^The file \S+ has been updated successfully\.' }
     - { name: todo_write, text: '^Todo list updated: 2 completed, 1 in progress, 0 pending' }
-    - { name: bash, text: 'Exit code: 0.*Moin world' }
+    - { name: bash, text: '\AMoin world\z' }
     - { name: todo_write, text: '^Todo list updated: 3 completed, 0 in progress, 0 pending' }
   events:
     - { type: todo.updated, todos: [ { content: Read greet.txt, status: in_progress }, { content: Change the greeting, status: pending }, { content: Verify with cat, status: pending } ] }

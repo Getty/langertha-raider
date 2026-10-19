@@ -10,11 +10,14 @@ my $names = 'Langertha::Raider::ToolNames';
 
 subtest 'every Claude Code name maps to its raider tool' => sub {
   my %want = (
-    Read => 'read_file', Write => 'write_file', Edit => 'edit_file', MultiEdit => 'edit_file',
-    Bash => 'bash', Glob => 'glob', Grep => 'grep', LS => 'list_files',
+    Read => 'read_file', Write => 'write_file', Edit => 'edit_file', MultiEdit => 'multi_edit',
+    Bash => 'bash', BashOutput => 'bash_output', TaskOutput => 'bash_output',
+    TaskStop => 'kill_shell', KillShell => 'kill_shell', KillBash => 'kill_shell',
+    Glob => 'glob', Grep => 'grep', LS => 'list_files',
     WebFetch => 'web_fetch', WebSearch => 'web_search', TodoWrite => 'todo_write',
+    TaskCreate => 'task_create', TaskUpdate => 'task_update', TaskList => 'task_list', TaskGet => 'task_get',
     Task => 'agent', Agent => 'agent', Skill => 'skill',
-    AskUserQuestion => 'ask_user', ExitPlanMode => 'exit_plan_mode',
+    AskUserQuestion => 'ask_user', EnterPlanMode => 'enter_plan_mode', ExitPlanMode => 'exit_plan_mode',
   );
   is( $names->raider_name($_), $want{$_}, "$_ -> $want{$_}" ) for sort keys %want;
   is( [ $names->claude_names ], [ sort keys %want ], 'the table has exactly these names' );
@@ -27,13 +30,21 @@ subtest 'mcp__ names pass through, unknown names are unknown' => sub {
   ok( $names->is_mcp('mcp__a__b'), 'is_mcp' );
   ok( !$names->is_mcp($_), 'not mcp: ' . ( $_ // 'undef' ) ) for 'mcp__server', 'mcp____', 'Read', 'mcp_a_b', undef;
   is( $names->raider_name('NotATool'), undef, 'unknown: undef' );
+  # Claude Code tools raider deliberately has no counterpart for (ADR 0025)
+  is( $names->raider_name($_), undef, "no raider tool: $_" )
+    for qw( NotebookEdit NotebookRead ToolSearch SendMessage Monitor EnterWorktree ExitWorktree
+      ListAgents ScheduleWakeup CronCreate CronDelete CronList StructuredOutput SubagentHandback SlashCommand );
   is( $names->raider_name('read_file'), undef, 'a raider name is not a Claude name' );
   like( dies { $names->raider_name('') }, qr/needs a tool name/, 'empty name croaks' );
 };
 
 subtest 'the way back answers with the current Claude name' => sub {
-  is( $names->claude_name('edit_file'), 'Edit', 'Edit, not MultiEdit' );
+  is( $names->claude_name('edit_file'), 'Edit', 'Edit' );
+  is( $names->claude_name('multi_edit'), 'MultiEdit', 'MultiEdit has a tool of its own' );
   is( $names->claude_name('agent'),     'Agent', 'Agent, not Task' );
+  is( $names->claude_name('kill_shell'), 'TaskStop', 'TaskStop, not KillShell or KillBash' );
+  is( $names->claude_name('task_create'), 'TaskCreate', 'TaskCreate' );
+  is( $names->claude_name('enter_plan_mode'), 'EnterPlanMode', 'EnterPlanMode' );
   is( $names->claude_name('list_files'), 'LS', 'LS' );
   is( $names->claude_name('perl_eval'), undef, 'a raider-only tool has no Claude name' );
   is( $names->raider_name( $names->claude_name($_) ), $_, "round trip: $_" ) for $names->raider_names;
@@ -47,6 +58,16 @@ subtest 'arguments: raider form to Claude form' => sub {
     { file_path => 'a', old_string => 'o', new_string => 'n' }, 'Edit' );
   is( $names->claude_input( bash => { command => 'ls', timeout => 120 } ),
     { command => 'ls', timeout => 120000 }, 'Bash: seconds become milliseconds' );
+  my $edits = [ { old_string => 'a', new_string => 'b' }, { old_string => 'c', new_string => 'd', replace_all => 1 } ];
+  is( $names->claude_input( multi_edit => { path => 'lib/A.pm', edits => $edits } ),
+    { file_path => 'lib/A.pm', edits => $edits }, 'MultiEdit: path becomes file_path, the edits stay' );
+  is( $names->claude_input( kill_shell => { shell_id => 'bash_1' } ), { task_id => 'bash_1' },
+    'TaskStop: shell_id becomes task_id' );
+  is( $names->claude_input( bash_output => { bash_id => 'bash_1', filter => 'FAIL' } ),
+    { task_id => 'bash_1', filter => 'FAIL', block => F() }, 'TaskOutput: bash_id becomes task_id; raider does not wait, so block false' );
+  is( $names->claude_input( bash_output => { bash_id => 'bash_1', block => 1, timeout => 30 } ),
+    { task_id => 'bash_1', block => 1, timeout => 30000 }, 'TaskOutput: seconds become milliseconds' );
+  is( $names->claude_name('bash_output'), 'TaskOutput', 'the way back: TaskOutput' );
   my %same = (
     list_files => { path => 'lib' },
     glob       => { pattern => '**/*.pm', path => 'lib' },
@@ -54,6 +75,11 @@ subtest 'arguments: raider form to Claude form' => sub {
     web_fetch  => { url => 'https://example.org', as_html => 1 },
     web_search => { query => 'perl', limit => 3 },
     todo_write => { todos => [ { content => 'a', status => 'pending', activeForm => 'doing a' } ] },
+    task_create => { subject => 's', description => 'd', activeForm => 'doing s', metadata => { k => 1 } },
+    task_update => { taskId => '1', status => 'completed', addBlocks => ['2'], addBlockedBy => ['3'], owner => 'me' },
+    task_get    => { taskId => '1' },
+    task_list   => {},
+    enter_plan_mode => {},
     ask_user   => { question => 'Which?', options => [ 'a', 'b' ] },
     skill      => { skill => 'pdf', args => 'x' },
     agent      => { description => 'd', prompt => 'p', subagent_type => 'Explore' },
@@ -83,6 +109,19 @@ subtest 'arguments: Claude form back to raider form' => sub {
   is( $names->raider_input( bash => { command => 'ls', timeout => 'soon' } )->{timeout}, 'soon',
     'a timeout that is no number passes unchanged' );
   is( $names->raider_input( grep => { pattern => 'x', path => 'lib' } ), { pattern => 'x', path => 'lib' }, 'Grep unchanged' );
+  is( $names->raider_input( multi_edit => { file_path => '/abs/A.pm', edits => [ { old_string => 'a', new_string => 'b' } ] } ),
+    { path => '/abs/A.pm', edits => [ { old_string => 'a', new_string => 'b' } ] }, 'MultiEdit' );
+  is( $names->raider_input( kill_shell => { task_id => 'bash_2' } ), { shell_id => 'bash_2' }, 'TaskStop: task_id' );
+  is( $names->raider_input( kill_shell => { shell_id => 'bash_2' } ), { shell_id => 'bash_2' },
+    'KillShell / KillBash (and the deprecated shell_id of TaskStop): shell_id stays' );
+  is( $names->raider_input( kill_shell => { task_id => 'bash_3', shell_id => 'bash_2' } ), { shell_id => 'bash_3' },
+    'both: task_id, the current name, wins' );
+  is( $names->raider_input( bash_output => { task_id => 'bash_1', timeout => 30000 } ),
+    { bash_id => 'bash_1', timeout => 30, block => T() }, 'TaskOutput: task_id, ms to s, and its default block true said' );
+  is( $names->raider_input( bash_output => { task_id => 'bash_1', block => 0, timeout => 1500 } ),
+    { bash_id => 'bash_1', block => 0, timeout => 2 }, 'TaskOutput: a given block stays' );
+  is( $names->raider_input( bash_output => { bash_id => 'bash_1', filter => 'FAIL' } ),
+    { bash_id => 'bash_1', filter => 'FAIL' }, 'BashOutput (bash_id): unchanged, no block added' );
   is( $names->raider_input( ask_user => { questions => [ { question => 'q' } ] } ),
     { questions => [ { question => 'q' } ] }, 'AskUserQuestion: shape differs, passes unchanged' );
 };
@@ -96,6 +135,9 @@ subtest 'arguments: the round trip is lossless' => sub {
     [ bash       => { command => 'ls' } ],
     [ grep       => { pattern => 'x', '-C' => 2 } ],
     [ ask_user   => { question => 'q', options => ['a'] } ],
+    [ multi_edit => { path => 'a', edits => [ { old_string => 'o', new_string => 'n', replace_all => 1 } ] } ],
+    [ kill_shell => { shell_id => 'bash_1' } ],
+    [ bash_output => { bash_id => 'bash_1', block => 0, timeout => 20, filter => 'x' } ],
     [ mcp__s__t  => { file_path => 'x', path => 'y' } ],
   );
   for my $c (@cases) {
@@ -106,6 +148,9 @@ subtest 'arguments: the round trip is lossless' => sub {
     [ read_file => { file_path => '/a', offset => 1, limit => 2 } ],
     [ edit_file => { file_path => '/a', old_string => 'o', new_string => 'n', replace_all => 1 } ],
     [ bash      => { command => 'ls', timeout => 60000, run_in_background => 0 } ],
+    [ multi_edit => { file_path => '/a', edits => [ { old_string => 'o', new_string => 'n' } ] } ],
+    [ kill_shell => { task_id => 'bash_1' } ],
+    [ bash_output => { task_id => 'bash_1', block => 1, timeout => 30000 } ],
   );
   for my $c (@back) {
     my ( $tool, $args ) = @$c;
@@ -116,7 +161,8 @@ subtest 'arguments: the round trip is lossless' => sub {
 };
 
 subtest 'the tools raider has today have an effect class' => sub {
-  my @built = qw( read_file write_file edit_file bash glob grep list_files web_fetch web_search todo_write ask_user );
+  my @built = qw( read_file write_file edit_file bash glob grep list_files web_fetch web_search todo_write ask_user
+    task_create task_update task_list task_get enter_plan_mode exit_plan_mode );
   for my $tool (@built) {
     ok( defined Langertha::Raider::ToolEffects->effects_for($tool), "$tool has a class" );
     ok( defined $names->claude_name($tool), "$tool has a Claude name" );

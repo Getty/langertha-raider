@@ -20,5 +20,5 @@ expect:
     - { name: read_file, text: "the token is here" }
     - { name: grep, text: "/extra/notes\\.txt:1:the token is here" }
     - { name: write_file }
-    - { name: read_file, text: "^n$" }
+    - { name: read_file, text: "\\A1\\tn\\n2\\t\\z" }
     - { name: write_file, error: true, text: "acceptEdits mode asks before this call: write_file changes files; nobody can approve it" }

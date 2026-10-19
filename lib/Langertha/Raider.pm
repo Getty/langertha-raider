@@ -126,6 +126,25 @@ responses are persisted in history. Intermediate tool-call messages
 token bloat across long conversations. The full turn-by-turn record, tool
 calls and results included, is kept separately in L</session_history>.
 
+=head1 TOOL RESULTS THAT ADD MESSAGES
+
+A tool result may hand the raid user messages of its own: a list of
+strings under the key C<raider/messages> of the result's C<_meta> (the
+place MCP gives a result for such data):
+
+    { content => [ { type => 'text', text => 'Launching skill: pdf' } ],
+      _meta   => { 'raider/messages' => [ $skill_body ] } }
+
+After the batch's tool results each string becomes a message
+C<< { role => 'user', content => $string } >> of its own, in the order of
+the calls -- the shape Claude Code gives a loaded skill (ADR 0026). Like an
+injection (L</inject>) such a message is not part of its tool exchange: it
+stays when in-raid compaction drops the exchange, and it is kept in
+L</history> (and L</session_history>) with the user input and the answer.
+Only raider's own tool sources (the engine's MCP servers, inline tools) may
+do this; the key is removed from the result of a C<mcp_catalog> server
+before any plugin sees it.
+
 =cut
 
 has engine => (
@@ -750,7 +769,9 @@ has _tools_dirty => (
 # source is where the call runs: 'raider' (self-tools), 'inline', 'engine:N'
 # (the engine's Nth MCP server), 'catalog:NAME'; undef for a tool no source
 # offers. It answers { verdict => 'allow' }, { verdict => 'deny', reason => ... }
-# or { verdict => 'ask', reason => ... }. Without a gate every call runs.
+# or { verdict => 'ask', reason => ... }; a refusal may carry 'message', the
+# whole text of the error result the model gets (else the raider words it
+# from the reason). Without a gate every call runs.
 # Read-only and constructor-only on purpose: nothing a raid carries -- model
 # output, a plugin, a manifest -- sets or changes it (ADR 0005: permissions
 # never come from prompts). Internal (ADR 0017). The application sets it from
@@ -2211,12 +2232,16 @@ sub _gate_tool_call {
 # The error result for a call the gate did not allow. A gate that can ask
 # a person does so itself and answers allow or deny (the application,
 # ADR 0021); an ask that reaches the raider found nobody to approve it, and
-# is refused like deny.
+# is refused like deny. A gate that words the whole refusal itself puts it
+# in the verdict's 'message' (the application does, in Claude Code's words,
+# ADR 0026); that text is the result as it stands.
 sub _gate_refused_tool_result {
   my ( $self, $name, $verdict ) = @_;
   my $reason = $verdict->{reason};
   my $has_reason = defined $reason && length $reason;
-  my $text = $verdict->{verdict} eq 'ask'
+  my $text = defined $verdict->{message} && length $verdict->{message}
+    ? $verdict->{message}
+    : $verdict->{verdict} eq 'ask'
     ? "Tool call '".$name."' was not run: it needs approval"
       .( $has_reason ? ' ('.$reason.')' : '' ).', and nobody can approve it in this raid.'
       .' Do not retry the same call; go on without it or say what you need.'
@@ -2807,8 +2832,44 @@ async sub _call_mcp_tool_f {
   });
   my $result = await $self->_until_cancelled($call_f);
   $result = $self->_cancelled_tool_result($name) if $self->_cut_off($call_f, $result);
+  $result = $self->_without_foreign_messages($state, $name, $result);
 
   return await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0, $result, 1);
+}
+
+# The _meta key under which a tool result hands the raider user messages to
+# add after the batch's tool results (ADR 0026): the skill tool's body, as
+# Claude Code adds a skill as a message of its own.
+sub _messages_meta_key { 'raider/messages' }
+
+# A tool of a foreign source (a catalog:NAME MCP server) cannot put words in
+# the user's mouth: its result loses the messages key before any plugin sees
+# it. raider's own sources (engine:N, inline) keep it.
+sub _without_foreign_messages {
+  my ( $self, $state, $name, $result ) = @_;
+  return $result unless ref $result eq 'HASH' && ref $result->{_meta} eq 'HASH';
+  my $key = $self->_messages_meta_key;
+  return $result unless exists $result->{_meta}{$key};
+  my $source = $state->{tool_sources}{$name} // '';
+  return $result unless $source =~ /\Acatalog:/;
+  my %meta = %{ $result->{_meta} };
+  delete $meta{$key};
+  return { %$result, _meta => \%meta };
+}
+
+# The user messages the results of a batch hand over (see
+# _messages_meta_key), in the order of the calls: plain non-empty strings.
+sub _result_messages {
+  my ( $self, $results ) = @_;
+  my $key = $self->_messages_meta_key;
+  my @messages;
+  for my $r (@$results) {
+    my $meta = ref $r->{result} eq 'HASH' ? $r->{result}{_meta} : undef;
+    my $list = ref $meta eq 'HASH' ? $meta->{$key} : undef;
+    next unless ref $list eq 'ARRAY';
+    push @messages, map { { role => 'user', content => $_ } } grep { defined && !ref && length } @$list;
+  }
+  return @messages;
 }
 
 # Runs the plugin_after_tool_call hook on a tool's result and traces the call
@@ -2870,12 +2931,22 @@ sub _close_iteration_trace {
 # session_history, and tracks them as one exchange for in-loop compaction
 # (k89). $echo_data is the wire body without any tool call whose arguments
 # were truncated, so the next turn never carries a call without a result.
+# The user messages the results hand over (_result_messages, ADR 0026) follow
+# the tool results as messages of their own -- a separate user message is
+# valid on every wire, where a text block inside the tool results is not.
+# They are no part of the exchange: like injections they stay when in-loop
+# compaction drops the exchange, and they are kept in history.
 sub _append_tool_turn {
   my ( $self, $state, $echo_data, $results ) = @_;
   my @tool_msgs = $state->{engine}->format_tool_results($echo_data, $results);
   push @{$state->{conversation}}, @tool_msgs;
   push @{$state->{tool_segments}}, [ @tool_msgs ];
   $self->_push_session_history(@tool_msgs);
+  if ( my @messages = $self->_result_messages($results) ) {
+    push @{$state->{conversation}}, @messages;
+    push @{$state->{injected_history}}, @messages;
+    $self->_push_session_history(@messages);
+  }
   return;
 }
 
@@ -2930,11 +3001,9 @@ async sub _respond_f {
     );
   }
 
-  # Format tool results and append to conversation
-  my @tool_msgs = $engine->format_tool_results($data, \@results);
-  push @{$state->{conversation}}, @tool_msgs;
-  push @{$state->{tool_segments} //= []}, [ @tool_msgs ];   # track for in-loop compaction (k89)
-  $self->_push_session_history(@tool_msgs);
+  # Format tool results and append to conversation, tracked for in-loop
+  # compaction (k89), as in the first run of a batch.
+  $self->_append_tool_turn($state, $data, \@results);
 
   # Continue the raid loop from the next iteration
   return await $self->_run_raid_loop($state, $cont->{iteration} + 1);

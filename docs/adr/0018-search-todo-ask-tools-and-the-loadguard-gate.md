@@ -90,6 +90,9 @@ conversion) all need to say which raider tool a Claude Code tool name means.
   `mcp__server__tool` passes through unchanged; anything else is unknown (undef), never
   guessed. The table names targets, including tools that do not exist yet (`agent`, `skill`,
   `exit_plan_mode`). The way back answers with the current Claude name (`Edit`, `Agent`).
+  (Note, 2026-10-19: ADR 0025 extends the table -- `MultiEdit` -> `multi_edit`, the task
+  tools, `EnterPlanMode`, `BashOutput`, `TaskStop` -- lists every known Claude Code name, and
+  makes the task tools the default family instead of `todo_write`.)
 
 ## Consequences
 

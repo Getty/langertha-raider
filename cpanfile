@@ -15,7 +15,6 @@ requires 'JSON::MaybeXS', '1.002004';
 requires 'Log::Any';
 requires 'Langertha', '0.503';
 requires 'Langertha::Manifest';
-requires 'MCP::Run::Bash', '0.106';
 requires 'MCP::Server';
 requires 'Module::Runtime';
 requires 'Moose';

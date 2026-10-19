@@ -1,4 +1,6 @@
 title: a todo list with two items in progress is rejected and the earlier list stays
+# todo_write is mounted instead of the task tools (RAIDER_ENABLE_TASKS=0, ADR 0025)
+app: { task_tools: false }
 prompt: Do two things at once.
 script:
   - tool_calls:

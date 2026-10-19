@@ -27,10 +27,10 @@ my $live  = sub { [@roots] };
 
 subtest 'file tools follow the source' => sub {
   my $files = build_file_tools_server( root => "$root", extra_roots => $live );
-  is [ run_tool( $files, read_file => { path => "$a/f.txt" } ) ], [ "token=a\n", 0 ], 'a readable';
+  is [ run_tool( $files, read_file => { path => "$a/f.txt" } ) ], [ "1\ttoken=a\n2\t", 0 ], 'a readable';
   is [ ( run_tool( $files, read_file => { path => "$b/f.txt" } ) )[1] ], [1], 'b refused';
   @roots = ("$b");
-  is [ run_tool( $files, read_file => { path => "$b/f.txt" } ) ], [ "token=b\n", 0 ], 'b readable after the change';
+  is [ run_tool( $files, read_file => { path => "$b/f.txt" } ) ], [ "1\ttoken=b\n2\t", 0 ], 'b readable after the change';
   my ( $text, $err ) = run_tool( $files, read_file => { path => "$a/f.txt" } );
   is $err, 1, 'a refused after the change';
   like $text, qr/Path escapes root/, '... as before';

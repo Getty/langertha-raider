@@ -63,16 +63,23 @@ subtest 'stock set: exactly the mounted tools, with their parameters' => sub {
   my $app = app();
   is(tool_lines($app), [
     'list_files(path)',
-    'read_file(path)',
+    'read_file(path, [limit], [offset])',
     'write_file(path, content)',
     'edit_file(path, old_string, new_string, [replace_all])',
-    'bash(command, [compress], [timeout], [working_directory])',
-    'web_search(query, [limit])',
-    'web_fetch(url, [as_html])',
+    'multi_edit(path, edits)',
+    'bash(command, [description], [run_in_background], [timeout], [working_directory])',
+    'bash_output(bash_id, [block], [filter], [timeout])',
+    'kill_shell(shell_id)',
+    'web_search(query, [allowed_domains], [blocked_domains], [limit])',
+    'web_fetch(url, [as_html], [prompt])',
     'glob(pattern, [path])',
     'grep(pattern, [-A], [-B], [-C], [-i], [-n], [context], [glob], [head_limit], [multiline], [offset], [output_mode], [path], [type])',
-    'todo_write(todos)',
+    'task_create(subject, description, [activeForm], [metadata])',
+    'task_update(taskId, [activeForm], [addBlockedBy], [addBlocks], [description], [metadata], [owner], [status], [subject])',
+    'task_list()',
+    'task_get(taskId)',
     'ask_user(question, [options])',
+    'enter_plan_mode()',
     'agent(description, prompt, [subagent_type])',
   ], 'tool description lists the stock tool servers');
   unlike($app->mission, qr/perl_eval/, 'Perl tools not mounted, not described');

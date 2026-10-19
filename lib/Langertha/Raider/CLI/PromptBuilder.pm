@@ -4,6 +4,8 @@ our $VERSION = '0.504';
 use Moose;
 use namespace::autoclean;
 use utf8;
+use Cwd qw( realpath );
+use Path::Tiny;
 use Langertha::Raider;
 
 =head1 SYNOPSIS
@@ -94,6 +96,11 @@ sub run {
   my $out  = $self->output;
   my $instructions = $app->instructions;
   my $file = $instructions->file;
+  # The mission shows the file whole: it counts as read, so write_file may
+  # replace it (read before write, ADR 0023).
+  if ( -f $file && ( my $real = realpath("$file") ) ) {
+    $app->file_read_state->record( $real, bytes => path($real)->slurp_raw );
+  }
 
   my $builder_raider = Langertha::Raider->new(
     engine         => $app->_engine,

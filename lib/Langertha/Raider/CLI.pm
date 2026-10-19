@@ -33,8 +33,9 @@ working coding/system agent:
 =item * Local filesystem access, confined to L<Langertha::Raider::Application/root>
 (L<Langertha::Raider::FileTools>).
 
-=item * Full shell via L<MCP::Run::Bash> (the C<bash> tool), started in
-the root but not confined to it.
+=item * Full shell via L<Langertha::Raider::BashTools> (the C<bash> tool, with
+C<bash_output> and C<kill_shell> for background commands), started in the
+root but not confined to it.
 
 =item * Web search + fetch via L<Net::Async::WebSearch> and
 L<Net::Async::HTTP> (L<Langertha::Raider::WebTools>).
@@ -276,7 +277,7 @@ __PACKAGE__->meta->make_immutable;
 
 =item * L<Langertha::Raider::FileTools>
 
-=item * L<MCP::Run::Bash>
+=item * L<Langertha::Raider::BashTools>
 
 =item * L<raider> — the CLI entry point
 

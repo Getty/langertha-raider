@@ -12,4 +12,4 @@ expect:
   requests:
     - { index: 1, absent: TS-BODY-MARKER }
   tools:
-    - { name: skill, error: true, text: 'unknown skill: ts-style' }
+    - { name: skill, error: true, text: '^<tool_use_error>Unknown skill: ts-style\.' }

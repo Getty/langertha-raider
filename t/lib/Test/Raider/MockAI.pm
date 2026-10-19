@@ -57,14 +57,16 @@ happened to the files, the tool results and the answer.
   has script => (is => 'ro', default => sub { [] });
   sub mock_engine { $_[0]->_engine }
   # A scenario step { tool_calls => [ [ name, \%args ], ... ] } or { text => ... }
-  # as the engine's own reaction.
+  # as the engine's own reaction; with usage => { prompt_tokens, completion_tokens }
+  # the reply reports that usage.
   sub _build_engine {
     my ( $self ) = @_;
     return Langertha::Engine::Virtual->new(
       script => [ map {
-        $_->{tool_calls} ? Langertha::Virtual::Rules::tools( $_->{tool_calls} )
+        my @usage = $_->{usage} ? ( usage => $_->{usage} ) : ();
+        $_->{tool_calls} ? Langertha::Virtual::Rules::tools( $_->{tool_calls}, @usage )
           : $_->{error}  ? Langertha::Virtual::Rules::error( @{ $_->{error} } )
-                         : Langertha::Virtual::Rules::answer( $_->{text} // 'done' )
+                         : Langertha::Virtual::Rules::answer( $_->{text} // 'done', @usage )
       } @{ $self->script } ],
       fallback        => Langertha::Virtual::Rules::answer('done'),
       langfuse_enabled => 0,

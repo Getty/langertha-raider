@@ -233,6 +233,48 @@ subtest 'a session id is looked up in the Claude projects' => sub {
     'and with its subagent logs: each with the responses of its first run' );
 };
 
+# t/data/claude-log/tools.jsonl (written by a throwaway script, synthetic like
+# session.jsonl): prompt 1 -- TaskCreate, TaskUpdate; prompt 2 -- a Read, a
+# MultiEdit of two edits; prompt 3 -- a TodoWrite and a failing TaskOutput.
+my $tools_log = path("$FindBin::Bin/data/claude-log/tools.jsonl")->realpath;
+
+subtest 'the task tools, MultiEdit as one multi_edit, TodoWrite mounts todo_write (ADR 0025)' => sub {
+  my $dir = Path::Tiny->tempdir;
+  my $tasks = convert( "$tools_log", '--home', '/home/tester', '--from', 't0000001' );
+  is( $tasks->{exit}, 0, 'converts' ) or diag $tasks->{err};
+  my $s = $yaml->load_string( $tasks->{out} );
+  is( $s->{script}, [
+    { tool_calls => [ [ task_create => { subject => 'Tidy app.txt', description => 'Fix the numbers', activeForm => 'Tidying app.txt' } ] ] },
+    { tool_calls => [ [ task_update => { taskId => '1', status => 'in_progress' } ] ] },
+    { text => 'One task, in progress.' },
+  ], 'TaskCreate and TaskUpdate as task_create and task_update, arguments unchanged' );
+  ok( !exists $s->{app}, 'the task tools are the default family: no app key' );
+  $dir->child('tasks.yml')->spew_utf8( $tasks->{out} );
+
+  my $multi = convert( "$tools_log", '--home', '/home/tester', '--from', 't0000007' );
+  is( $multi->{exit}, 0, 'converts' ) or diag $multi->{err};
+  $s = $yaml->load_string( $multi->{out} );
+  is( $s->{script}[1], { tool_calls => [ [ multi_edit => { path => 'app.txt', edits => [
+    { old_string => 'two', new_string => '2' }, { old_string => 'three', new_string => '3', replace_all => F() },
+  ] } ] ] }, 'one MultiEdit is one multi_edit call with the edits as they are' );
+  is( $s->{expect}{tools}, [ { name => 'read_file', text => 'one' }, { name => 'multi_edit' } ], 'one expectation for it' );
+  is( $s->{files}, { 'app.txt' => "one\ntwo\nthree\n" }, 'the file rebuilt from the Read' );
+  unlike( $multi->{out}, qr/all or none/, 'no note about splitting any more' );
+  $dir->child('multi.yml')->spew_utf8( $multi->{out} );
+
+  my $todo = convert( "$tools_log", '--home', '/home/tester', '--from', 't0000013' );
+  is( $todo->{exit}, 0, 'converts' ) or diag $todo->{err};
+  $s = $yaml->load_string( $todo->{out} );
+  is( $s->{app}, { task_tools => F() }, 'a TodoWrite section mounts todo_write instead of the task tools' );
+  is( $s->{script}[0]{tool_calls}[0][0], 'todo_write', 'TodoWrite as todo_write' );
+  is( $s->{script}[1], { tool_calls => [ [ bash_output => { bash_id => 'bash_1', block => T() } ] ] },
+    'TaskOutput as bash_output, task_id as bash_id' );
+  is( $s->{expect}{tools}[1], { name => 'bash_output', error => T() }, "Claude Code's failed call expected to fail" );
+  $dir->child('todo.yml')->spew_utf8( $todo->{out} );
+
+  run_scenario_files( map { $dir->child($_)->stringify } qw( tasks.yml multi.yml todo.yml ) );
+};
+
 subtest 'mistakes are refused with a message' => sub {
   my $result = convert( "$log", '--from', 'u0000006' );
   is( $result->{exit}, 2, 'a tool result is no start' );

@@ -7,4 +7,4 @@ script:
 expect:
   answer: fehlgeschlagen
   tools:
-    - { name: bash, error: true, text: 'Exit code: 3.*oops' }
+    - { name: bash, error: true, text: '\AExit code 3\noops\z' }

@@ -15,13 +15,17 @@ our @EXPORT_OK = qw( build_skill_tools_server );
 B<Internal module.> Its interface may change without notice.
 
 The C<skill> tool of ADR 0019 §4: an L<MCP::Server> with one tool,
-C<skill(skill, args?)>, that returns a skill of a
-L<Langertha::Raider::Context::Skills> catalogue in the shape of Claude
-Code's Skill tool -- C<Base directory for this skill: DIR>, then the body
-without frontmatter, C<$ARGUMENTS> replaced (see
-L<Langertha::Raider::Context::Skills/tool_text>). The system prompt lists
-the skills (L<Langertha::Raider::Context::Skills/prompt_text>); the tool
-loads one. Mount it only when the catalogue lists at least one skill.
+C<skill(skill, args?)>, that loads a skill of a
+L<Langertha::Raider::Context::Skills> catalogue the way Claude Code's Skill
+tool does (ADR 0026): the result is C<Launching skill: NAME>, and the skill
+-- C<Base directory for this skill: DIR>, then the body without
+frontmatter, C<$ARGUMENTS> replaced (see
+L<Langertha::Raider::Context::Skills/tool_text>) -- goes under the
+C<raider/messages> key of the result's C<_meta>, so the raid adds it as a
+user message of its own after the tool results
+(L<Langertha::Raider/TOOL RESULTS THAT ADD MESSAGES>). The system prompt
+lists the skills (L<Langertha::Raider::Context::Skills/prompt_text>); the
+tool loads one. Mount it only when the catalogue lists at least one skill.
 
 =func build_skill_tools_server
 
@@ -31,8 +35,10 @@ loads one. Mount it only when the catalogue lists at least one skill.
 
 Returns an L<MCP::Server> with the tool C<skill>. A name the catalogue does
 not know, or a skill that is not model-invocable
-(C<disable-model-invocation: true>), is an error result naming the listed
-skills. Croaks without C<skills>.
+(C<disable-model-invocation: true>), is the error result
+C<< <tool_use_error>Unknown skill: NAME. Available skills: ...</tool_use_error> >>
+-- Claude Code's words and frame, then the listed skills.
+Croaks without C<skills>.
 
 =cut
 
@@ -49,8 +55,8 @@ sub build_skill_tools_server {
       .'instructions and domain knowledge, loaded on demand; the available skills are '
       .'listed in the system prompt with their descriptions. When a task matches a '
       .'skill, call this tool with its name BEFORE acting on the task, then follow the '
-      .'instructions it returns. Only call skills that are listed, and do not load a '
-      .'skill again whose instructions are already in the conversation.',
+      .'instructions it loads into the conversation. Only call skills that are listed, '
+      .'and do not load a skill again whose instructions are already in the conversation.',
     input_schema => {
       type       => 'object',
       properties => {
@@ -73,12 +79,17 @@ sub build_skill_tools_server {
       my $skill = length $name ? $skills->find($name) : undef;
       unless ($skill && $skills->is_listed($skill)) {
         my @listed = map { $_->{name} } $skills->listed;
-        return $tool->text_result('Error: unknown skill: '.( length $name ? $name : '(none given)' )
-          .'. '.( @listed ? 'Available skills: '.join(', ', @listed) : 'No skills are available.' ), 1);
+        return $tool->text_result('<tool_use_error>Unknown skill: '.( length $name ? $name : '(none given)' )
+          .'. '.( @listed ? 'Available skills: '.join(', ', @listed) : 'No skills are available.' )
+          .'</tool_use_error>', 1);
       }
       my $args = $in->{args};
       $args = undef if ref $args;
-      return $tool->text_result($skills->tool_text($skill->{name}, $args));
+      # As Claude Code: the result only says so, the body is a user message
+      # of its own after the tool results (Langertha::Raider, ADR 0026).
+      my $result = $tool->text_result('Launching skill: '.$skill->{name});
+      $result->{_meta} = { 'raider/messages' => [ $skills->tool_text($skill->{name}, $args) ] };
+      return $result;
     },
   );
 

@@ -200,7 +200,9 @@ sub interrupt {
 Cancels the run in progress without leaving the process -- the REPL's
 first Ctrl-C, and the first C<SIGINT> of a one-shot run: asks the application to cancel it
 (L<Langertha::Raider::Application/cancel_run>), then ends the tool
-subprocesses still running (L</terminate_children>). The run ends as
+subprocesses still running (L</terminate_children>) -- except the background shells of
+C<bash> (L<Langertha::Raider::BashTools/background_pids>), which belong to the
+session, not to the run. The run ends as
 C<cancelled> at its next safe point and L</run_prompt> returns false,
 after C<turn cancelled> (or with a machine, the C<cancelled> document).
 Only records and signals, so the signal handler calls it. Returns false
@@ -211,7 +213,7 @@ when no run is in progress.
 sub cancel_run {
   my ( $self ) = @_;
   return 0 unless $self->_current && $self->app->cancel_run;
-  $self->terminate_children;
+  $self->terminate_children( keep => [ $self->app->bash_tools->background_pids ] );
   return 1;
 }
 
@@ -329,19 +331,20 @@ sub die_of_signal {
     $runner->terminate_children;
 
 Ends the processes this raider started that still run -- a C<bash>
-command (L<MCP::Run::Bash> puts it into a process group of its own, so a
+command (L<Langertha::Raider::BashTools> puts it into a process group of its own, so a
 signal aimed at raider alone never reaches it), a C<perl_eval> or
 C<perl_cpanm> child: C<SIGTERM> to each child's process group, or to the
 child when it leads none, and C<SIGKILL> to what is left after
-C<terminate_grace> seconds.
+C<terminate_grace> seconds. C<keep> names process IDs to leave alone.
 
 =cut
 
 sub terminate_grace { 2 }
 
 sub terminate_children {
-  my ( $self ) = @_;
-  my @pids = $self->child_pids or return;
+  my ( $self, %arg ) = @_;
+  my %keep = map { $_ => 1 } @{ $arg{keep} // [] };
+  my @pids = grep { !$keep{$_} } $self->child_pids or return;
   $self->_signal_group_or_pid(TERM => $_) for @pids;
   my %left = map { $_ => 1 } @pids;
   my $deadline = Time::HiRes::time() + $self->terminate_grace;
