@@ -60,6 +60,12 @@ Headers sent with every request (C<Authorization>, ...). Default none.
 
 The negotiated revision; once set, sent as C<MCP-Protocol-Version>.
 
+=attr on_notification
+
+C<< sub { my ( $method, $params ) = @_; ... } >>, called for a notification
+in the event stream of a request's answer (there is no standalone stream).
+Optional.
+
 =attr session_id
 
 The C<Mcp-Session-Id> the server handed out, or C<undef>.
@@ -71,6 +77,7 @@ has url     => ( is => 'ro', isa => 'Str', required => 1 );
 has headers => ( is => 'ro', isa => 'HashRef', default => sub { {} } );
 
 has protocol_version => ( is => 'rw', isa => 'Maybe[Str]' );
+has on_notification  => ( is => 'ro', isa => 'Maybe[CodeRef]' );
 has session_id       => ( is => 'rw', isa => 'Maybe[Str]' );
 
 # One Net::Async::HTTP client, and one connection, per request: two
@@ -248,7 +255,8 @@ sub _sse_events {
     for my $m (ref $msg eq 'ARRAY' ? @$msg : ( $msg )) {
       next unless ref $m eq 'HASH';
       if (defined $m->{method}) {
-        $self->_answer_server($m) if defined $m->{id};
+        if (defined $m->{id}) { $self->_answer_server($m) }
+        elsif (my $cb = $self->on_notification) { eval { $cb->($m->{method}, $m->{params} // {}) } }
         next;
       }
       $self->_settle($answer, $m) if defined $m->{id} && $m->{id} eq $id;

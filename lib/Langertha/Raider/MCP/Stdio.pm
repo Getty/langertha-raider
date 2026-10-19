@@ -81,6 +81,12 @@ before C<KILL>. Default 2.
 C<< sub { my ( $method, $params ) = @_; return $result } >> for requests
 the server sends; dying answers with an error. Optional.
 
+=attr on_notification
+
+C<< sub { my ( $method, $params ) = @_; ... } >>, called for every
+notification the server sends (C<notifications/tools/list_changed>, ...).
+Optional.
+
 =attr on_exit
 
 C<< sub { my ( $exit_info ) = @_; ... } >>, called once when the process
@@ -98,6 +104,7 @@ has stderr_lines => ( is => 'ro', isa => 'Int', default => 20 );
 has kill_grace   => ( is => 'ro', isa => 'Num', default => 2 );
 has on_request   => ( is => 'ro', isa => 'Maybe[CodeRef]' );
 has on_exit      => ( is => 'ro', isa => 'Maybe[CodeRef]' );
+has on_notification => ( is => 'ro', isa => 'Maybe[CodeRef]' );
 
 has _process  => ( is => 'rw', init_arg => undef );
 has _pending  => ( is => 'ro', init_arg => undef, default => sub { {} } );
@@ -251,7 +258,8 @@ sub _read_stdout {
 sub _message {
   my ( $self, $msg ) = @_;
   if (defined $msg->{method}) {
-    $self->_answer($msg) if defined $msg->{id};
+    if (defined $msg->{id}) { $self->_answer($msg) }
+    elsif (my $cb = $self->on_notification) { eval { $cb->($msg->{method}, $msg->{params} // {}) } }
     return;
   }
   my $id = $msg->{id};

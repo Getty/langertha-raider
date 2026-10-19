@@ -19,6 +19,7 @@ subtest 'every Claude Code name maps to its raider tool' => sub {
     Task => 'agent', Agent => 'agent', Skill => 'skill',
     AskUserQuestion => 'ask_user', EnterPlanMode => 'enter_plan_mode', ExitPlanMode => 'exit_plan_mode',
     SendMessage => 'send_message',
+    ListMcpResourcesTool => 'list_mcp_resources', ReadMcpResourceTool => 'read_mcp_resource',
   );
   is( $names->raider_name($_), $want{$_}, "$_ -> $want{$_}" ) for sort keys %want;
   is( [ $names->claude_names ], [ sort keys %want ], 'the table has exactly these names' );

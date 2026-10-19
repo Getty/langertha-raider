@@ -58,12 +58,19 @@ Default 2.
 C<< sub { my ( $server ) = @_; ... } >>, called whenever a server's status
 changes. Optional.
 
+=attr on_tools_changed
+
+C<< sub { my ( $server ) = @_; ... } >>, called when a server announced
+C<notifications/tools/list_changed> (its tools are listed again at once;
+L<Langertha::Raider::MCP::Server/list_tools> waits for that). Optional.
+
 =cut
 
 has config     => ( is => 'ro', isa => 'Langertha::Raider::MCP::Config', required => 1 );
 has loop       => ( is => 'ro', required => 1 );
 has kill_grace => ( is => 'ro', isa => 'Num', default => 2 );
 has on_status  => ( is => 'ro', isa => 'Maybe[CodeRef]' );
+has on_tools_changed => ( is => 'ro', isa => 'Maybe[CodeRef]' );
 
 sub server_class { 'Langertha::Raider::MCP::Server' }
 
@@ -97,6 +104,8 @@ sub _new_client {
     startup_timeout_ms => $config->startup_timeout_ms,
     base_env           => $config->env,
     kill_grace         => $self->kill_grace,
+    max_output_tokens  => $config->max_output_tokens,
+    ( $self->on_tools_changed ? ( on_tools_changed => $self->on_tools_changed ) : () ),
     ( $on_status ? ( on_status => $on_status ) : () ),
   );
 }

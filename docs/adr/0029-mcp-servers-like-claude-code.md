@@ -395,12 +395,11 @@ against it. That is a ticket on the p5-net-async-mcp board, not a change raider 
 `managedMcpServers` and managed settings (`allowedMcpServers`, `deniedMcpServers`,
 `allowManagedMcpServersOnly`), claude.ai connectors and their deduplication by endpoint,
 `--mcp-config` / `--strict-mcp-config`, `enabledMcpServers` (built-in default-off servers),
-`MAX_MCP_OUTPUT_TOKENS` and the spill file, MCP resources and prompts (only tools), the
-approval lists Claude Code's older versions kept in the `projects` entries of
-`~/.claude.json`, `claude mcp reset-project-choices`, the stateless revision 2026-07-28
-(`server/discover`), the standalone `GET` event stream and resuming streams of streamable
-HTTP, `notifications/tools/list_changed`, sampling / elicitation / roots requests from a
-server.
+the spill file of `MAX_MCP_OUTPUT_TOKENS`, the approval lists Claude Code's older versions
+kept in the `projects` entries of `~/.claude.json`, `claude mcp reset-project-choices`, the
+stateless revision 2026-07-28 (`server/discover`), the standalone `GET` event stream and
+resuming streams of streamable HTTP, sampling / elicitation / roots requests from a server.
+(Prompts, resources, `list_changed` and `MAX_MCP_OUTPUT_TOKENS` followed in Addendum 1.)
 
 ## Consequences
 
@@ -416,8 +415,7 @@ server.
   handshake for servers before 2026-07-28, `Mcp-Session-Id` and the negotiated
   `MCP-Protocol-Version` in the HTTP transport, `env`/`cwd` and stderr in the stdio
   transport — then raider could use it again. Raider: `mcp.server` into the journal;
-  `notifications/tools/list_changed` (raider lists the tools once); ADR 0004's trust
-  replaces Claude Code's trust record as the decision once it exists.
+  ADR 0004's trust replaces Claude Code's trust record as the decision once it exists.
 
 ## Source
 
@@ -425,3 +423,133 @@ Plan `perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.m
 (stream M1); the coordinator's design brief for k164 (design questions decided by the
 stream). Complements ADR 0004 (trust), ADR 0005 (tool sources), ADR 0011 (home config),
 ADR 0019 (layout, settings, plugins), ADR 0021 (permissions) and ADR 0022 (hooks).
+
+## Addendum 1 — parent `.mcp.json`, bypass approval, `list_changed`, output limit, prompts, resources (2026-10-19)
+
+- karr: #167 (stream M2). Reference again `https://code.claude.com/docs/en/mcp`, fetched
+  2026-10-19, plus an observation: a Claude Code session with the working directory
+  `~/dev/perl-developer` offered the servers of `~/.mcp.json` (the hub has no `.mcp.json`,
+  `~/.claude.json` has no `mcpServers`).
+
+### 1. `.mcp.json` from parent directories
+
+The documentation says only "a `.mcp.json` file at your project's root directory"; it is
+silent about parent directories. The observation decides: **the `project` source is every
+`.mcp.json` from the project directory up to the file system root**
+(`MCP::Config->mcp_json_files`), the nearest first.
+
+- Precedence inside the scope: the nearer file wins per name, whole entry (the rule of §2:
+  a name found earlier wins; the farther entries are `shadowed`, with their file as source).
+  The documentation gives no rule for several files; "nearer overrides farther" is the one
+  Claude Code's other hierarchies (`CLAUDE.md`, settings) have. All stay scope `project`:
+  `local` > `project` > `user` is unchanged.
+- Labels: `.mcp.json` for the project directory, `~/.mcp.json` for the home directory, the
+  absolute path otherwise (`/mcp`, `config explain`, the approval notes).
+- Approval is unchanged and by name, as before: a server of a parent file is a repository's
+  (or at least a file outside the person's configuration) and waits for `enabledMcpjsonServers`
+  & co. (§7); there is no per-file approval in Claude Code either. `${CLAUDE_PROJECT_DIR}` and
+  the working directory of a stdio server stay the project directory and the root, not the
+  directory of the file.
+- Not done: stopping at the git root or at the home directory (nothing in the documentation
+  or the observation stops there; `/` is searched too), and approval keyed by file.
+
+### 2. Approval in `bypassPermissions`
+
+The documentation: `claude -p`, Agent SDK and cloud sessions load project servers without
+asking (they cannot ask), and **a session started in `bypassPermissions` with
+`skipDangerousModePermissionPrompt` set in the user (or managed) settings skips the prompt
+too**; `disabledMcpjsonServers` blocks in every mode.
+
+- Raider takes the second rule: when the session was started in `bypassPermissions` (by
+  `--permission-mode` or `--dangerously-skip-permissions`; not by a `defaultMode` of a file,
+  which is read only after the servers are built) **and** `~/.claude/settings.json` (the user
+  file only, not a project file) sets `skipDangerousModePermissionPrompt: true`, every pending
+  project server counts as approved (`approval.by`: `skipDangerousModePermissionPrompt in
+  bypassPermissions mode`). A `disabled` entry still rejects.
+  `MCP::Config->bypass_approval`, `Context::Settings->skip_dangerous_mode_prompt`.
+- **Not taken from the documentation:** the first rule. §7's deliberate difference stands:
+  `-p` runs, `--json`, the Hall and ACP keep pending servers off; raider does not start a
+  repository's servers in a script nobody watches. A person who wants that has the explicit
+  forms (`enableAllProjectMcpServers`, `mcp_approvals:` with `enable_all`) or the bypass pair
+  above. Bypass without the setting asks (REPL) or stays off (no terminal), because the
+  setting is the person's recorded agreement that the dangerous mode is accepted.
+
+### 3. `notifications/tools/list_changed`
+
+On the notification the server's tools are listed again (`tools/list`, all pages) and replace
+the old ones in place (names, original names; the "name taken" warnings are rebuilt).
+
+- `MCP::Server->list_tools` waits for a refresh in progress, so the next model request
+  gathers the new list; the application marks its tool set stale at once
+  (`on_tools_changed` → `Raider->_tools_dirty`, the way `/reload` does it). A change that
+  arrives during a refresh causes one more. A failed refresh keeps the tools known so far and
+  leaves a warning (Claude Code: "keeps the server's previously discovered tools … until a
+  later refresh succeeds").
+- Both transports hand notifications on (`on_notification`). Over HTTP only the notifications
+  inside the event stream of a request's answer arrive (there is no standalone `GET` stream,
+  §10), so a server that announces changes over HTTP is only heard while a call is open.
+- Claude Code refreshes tools, prompts and resources in an interactive session and only the
+  tools with `-p`; raider refreshes the tools always and drops the cached prompt and resource
+  lists, which are fetched again on next use.
+
+### 4. `MAX_MCP_OUTPUT_TOKENS`
+
+Default **25000** tokens as in Claude Code, read like the timeouts (§6; a bad value is
+ignored with a warning). Claude Code, for a successful result over the limit, saves it to a
+file under `~/.claude/projects/…/tool-results` and replaces it by a message naming the file
+(and warns above 10000 tokens, and cuts at 50000 characters whatever the token count).
+
+- **Deliberate difference:** raider has no such file store and cuts the text instead:
+  `MCP::Server->limit_content` keeps the first `limit × 4` characters (four characters count
+  as a token, the estimate of ADR 0030 §5) and adds the note `[MCP tool output truncated:
+  about N tokens, the limit is M tokens (MAX_MCP_OUTPUT_TOKENS). Ask the tool for less
+  (filter, paginate), or raise MAX_MCP_OUTPUT_TOKENS.]`. A result with an image block is left
+  alone (Claude Code applies the limit to images by another measure). The 10000-token warning
+  and the 50000-character rule are not taken; `_meta["anthropic/maxResultSizeChars"]` is not
+  read.
+- An error result (`isError`) over about 11000 characters keeps its first and last 5000 with a
+  marker between them that names the number removed (documented).
+
+### 5. Prompts as slash commands
+
+`/mcp__<server>__<prompt> ARGS` (the server part as in tool names, §5; the prompt name as the
+server declares it) runs a prompt of a configured server, as the documentation says.
+
+- It resolves in `CLI::Commands` as kind `mcp_prompt` after the catalogue entries (ADR 0030 §3)
+  and is also a one-shot form (`raider -p "/mcp__github__pr_review 456"`). The servers are
+  started for it when they are not yet; a server or prompt that does not exist is `unknown
+  command` (exit 2 in a one-shot run).
+- Arguments: whitespace-split tokens (the documentation's rule) assigned to the prompt's
+  declared arguments in order. A missing required one is an error that prints the usage
+  (`/mcp__s__p name [style]`) and sends nothing; a surplus argument is an error too (Claude
+  Code does not say; refusing is safer than dropping text silently).
+- Result: all returned messages (whatever their role: Claude Code also injects them as user
+  content) joined by blank lines, text only (a resource content contributes its text, an image
+  or other content a note), framed as a custom command (ADR 0030 §3: `<command-message>` /
+  `<command-name>` / `<command-args>`), as one prompt. `prompts/get` is bounded like a tool call.
+- `/help` lists the prompts of connected servers (`MCP prompts:`, with `(MCP, server)`);
+  Claude Code's `/server:prompt (MCP)` listing form is not copied — only the documented
+  `mcp__server__prompt` typing form is. `/help` starts nothing: servers not yet connected show
+  none.
+
+### 6. Resources
+
+Both Claude Code ways, since the documentation names both:
+
+- **Tools** `list_mcp_resources(server?)` and `read_mcp_resource(server, uri)` (Claude Code:
+  `ListMcpResourcesTool`, `ReadMcpResourceTool`; `ToolNames` maps both ways), read-only
+  (`ToolEffects` class `read`, so no permission question), mounted as one more tool server
+  (`MCP::Resources`) whenever any server is configured, because the capabilities are only
+  known after the start. A server without the `resources` capability has no resources; an
+  unknown server name is an error that lists the available ones. `ui://` resources and the
+  `text/html;profile=mcp-app` media type are left out, as documented. A binary `blob` is
+  reported as a note with its size, not returned.
+- **Mentions** `@server:scheme://path` in a prompt: the resource is read and appended to the
+  prompt as the two `<system-reminder>` blocks of an attachment (the shape ADR 0030 §2 uses for
+  `@file`), with the tool name `read_mcp_resource`. Done in `Application->run_prompt` after the
+  prompt hooks; the journal keeps the typed text. The server is the configured name or the
+  server part of its tool names; anything that names no connected server with resources, or
+  does not read, stays text. Not done: `@` completion (no completion in raider), mentions in a
+  `/name` command body, and subagents (they get only the tools their agent file allows, and
+  `Subagent.pm` is not touched here).
+- Resource lists are cached per server and dropped on `resources/list_changed`.

@@ -862,6 +862,10 @@ sent, the exit status:
 =item * a user-invocable catalogue entry: its run request; a render that
 aborts is printed on L</err> and gives C<1>;
 
+=item * C</mcp__SERVER__PROMPT ARGS>, a prompt of a configured MCP server:
+its run request (the servers are started for it); an unknown one gives C<2>,
+a failing one C<1>;
+
 =item * a built-in that only reports (L</oneshot_report_commands>): its
 report on L</output>, then C<0> -- also with a machine format, where the
 report is the plain text and there is no document;
@@ -903,6 +907,18 @@ sub oneshot_command {
   return ( undef, { prompt => $line } ) if $r->{kind} eq 'prompt';
   if ($r->{kind} eq 'entry') {
     my $request = $app->slash_run_request($r->{entry}, $r->{arguments}, session => $o{session});
+    if (defined $request->{error}) {
+      $self->_warn('error: '.$request->{error}."\n");
+      return EXIT_RUN_ERROR;
+    }
+    return ( undef, $request );
+  }
+  if ($r->{kind} eq 'mcp_prompt') {
+    my $request = $app->mcp_prompt_request($r->{name}, $r->{arguments});
+    unless ($request) {
+      $self->_warn('unknown command: /'.$r->{name}."\n");
+      return EXIT_USAGE;
+    }
     if (defined $request->{error}) {
       $self->_warn('error: '.$request->{error}."\n");
       return EXIT_RUN_ERROR;

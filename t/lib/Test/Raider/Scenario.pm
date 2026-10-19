@@ -226,8 +226,11 @@ sub run_scenario_file {
       $answer = eval {
         my @wait = $s->{wait_background} ? ( wait_background => 1 ) : ();
         # /NAME ARGS of a user-invocable catalogue entry: raider's /NAME run.
-        if ( $p =~ m{\A/(\S+)\s*(.*?)\s*\z}s
-             && ( my $req = $app->slash_run_request( $1, length $2 ? $2 : undef ) ) ) {
+        # /mcp__SERVER__PROMPT ARGS: a prompt of a configured MCP server (ADR 0029 Addendum 1).
+        my ( $cmd, $cmd_args ) = $p =~ m{\A/(\S+)\s*(.*?)\s*\z}s;
+        if ( defined $cmd
+             && ( my $req = $cmd =~ /\Amcp__/ ? $app->mcp_prompt_request( $cmd, length $cmd_args ? $cmd_args : undef )
+                                              : $app->slash_run_request( $cmd, length $cmd_args ? $cmd_args : undef ) ) ) {
           if ( defined $req->{error} ) {
             $outcome = { status => 'not sent', error => $req->{error} };
             return undef;

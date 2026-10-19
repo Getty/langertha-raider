@@ -81,6 +81,8 @@ my %RAIDER = (
   EnterPlanMode   => 'enter_plan_mode',
   ExitPlanMode    => 'exit_plan_mode',
   SendMessage     => 'send_message',
+  ListMcpResourcesTool => 'list_mcp_resources',
+  ReadMcpResourceTool  => 'read_mcp_resource',
 );
 
 # The way back: the current Claude Code name of each raider tool.
@@ -108,6 +110,8 @@ my %CLAUDE = (
   enter_plan_mode => 'EnterPlanMode',
   exit_plan_mode  => 'ExitPlanMode',
   send_message    => 'SendMessage',
+  list_mcp_resources => 'ListMcpResourcesTool',
+  read_mcp_resource  => 'ReadMcpResourceTool',
 );
 
 # The arguments that carry another name: raider name => Claude name.

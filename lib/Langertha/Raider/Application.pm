@@ -38,6 +38,7 @@ use Langertha::Raider::ToolEffects;
 use Langertha::Raider::Permissions;
 use Langertha::Raider::Hooks;
 use Langertha::Raider::MCP;
+use Langertha::Raider::MCP::Resources;
 use Langertha::Raider::ToolNames;
 use Langertha::Raider::SessionStore;
 use Langertha::Raider::Subagent;
@@ -1470,9 +1471,12 @@ sub _new_mcp {
   weaken(my $app = $self);
   return $self->mcp_class->new(
     config    => $self->mcp_config_class->from_context($self->context, config => $self->config,
-      session_approvals => $self->_mcp_session_approvals),
+      session_approvals => $self->_mcp_session_approvals,
+      bypass_approval   => ( $self->skip_permissions || ( $self->permission_mode // '' ) eq 'bypassPermissions' ) ? 1 : 0),
     loop      => $self->loop,
     %more,
+    # A server announced new tools: the next iteration gathers them again.
+    on_tools_changed => sub { $app->_raider->_tools_dirty(1) if $app && $app->_has_raider },
     on_status => sub {
       my ( $server ) = @_;
       return unless $app && $server->status =~ /\A(?:connected|failed)\z/;
@@ -1598,6 +1602,109 @@ sub mcp_report {
 }
 
 sub mcp_notes { $_[0]->configured_mcp->notes }
+
+=method mcp_prompts
+
+    for my $p (@{ $app->mcp_prompts }) { say $p->{command}, ' ', $p->{description} }
+
+The prompts of the connected configured MCP servers as slash commands
+(ADR 0029 Addendum 1): C<command> (C<mcp__SERVER__PROMPT>, the server part
+as in tool names, the prompt name as the server declares it), C<server>,
+C<name>, C<description> and C<arguments> (the server's list, each C<name>,
+C<required>). Starts nothing -- a server that is not connected has none.
+
+=cut
+
+sub mcp_prompts {
+  my ($self) = @_;
+  return [] unless $self->has_configured_mcp;
+  my @out;
+  for my $client (@{ $self->configured_mcp->clients }) {
+    next unless $client->has_prompts;
+    my $list = eval { $self->loop->await(my $f = $client->list_prompts_f); $f->get } or next;
+    push @out, map { +{
+      command     => 'mcp__'.$client->key.'__'.$_->{name},
+      server      => $client->name,
+      name        => $_->{name},
+      description => $_->{description} // '',
+      arguments   => [ map { +{ name => $_->{name}, required => $_->{required} ? 1 : 0 } }
+                       grep { ref $_ eq 'HASH' && defined $_->{name} } @{ ref $_->{arguments} eq 'ARRAY' ? $_->{arguments} : [] } ],
+    } } @$list;
+  }
+  return \@out;
+}
+
+=method mcp_prompt_request
+
+    my $request = $app->mcp_prompt_request( 'mcp__github__pr_review', '456' );
+    # { prompt => ... } or { error => '...' }, nothing for a name that is no MCP prompt
+
+A C</mcp__SERVER__PROMPT ARGS> run (ADR 0029 Addendum 1): starts the
+configured servers when they are not yet, finds the prompt on the server
+whose tool-name part is SERVER, maps the whitespace-separated arguments on
+the prompt's declared arguments in order, asks the server (C<prompts/get>)
+and frames the messages as a run request, in the framing of a custom
+command (ADR 0030 E<sect>3):
+
+    <command-message>mcp__github__pr_review is running...</command-message>
+    <command-name>/mcp__github__pr_review</command-name>
+    <command-args>456</command-args>
+
+    MESSAGE TEXTS
+
+Every message becomes part of one user prompt, in order, text only: a
+resource inside a message contributes its text, an image or other
+content a note. A missing required argument, one too many and a failing
+C<prompts/get> are an C<error>.
+
+=cut
+
+sub mcp_prompt_request {
+  my ($self, $command, $arguments) = @_;
+  my ($key, $name) = $command =~ /\Amcp__(.+?)__(.+)\z/s or return;
+  my $mcp = $self->configured_mcp;
+  my ($client) = grep { defined $_->key && $_->key eq $key } @{ $mcp->clients } or return;
+  $self->loop->await($client->start_f);
+  return unless $client->has_prompts;
+  my $listed = eval { $self->loop->await(my $f = $client->list_prompts_f); $f->get } or return;
+  my ($prompt) = grep { $_->{name} eq $name } @$listed or return;
+  my @declared = grep { ref $_ eq 'HASH' && defined $_->{name} } @{ ref $prompt->{arguments} eq 'ARRAY' ? $prompt->{arguments} : [] };
+  my @given = split ' ', $arguments // '';
+  my $usage = '/'.$command.join('', map { ' '.( $_->{required} ? $_->{name} : '['.$_->{name}.']' ) } @declared);
+  return { error => 'MCP prompt '.$command.' takes '.scalar(@declared).' argument'.( @declared == 1 ? '' : 's' )
+    .' (usage: '.$usage.'), got '.scalar(@given) } if @given > @declared;
+  my %args;
+  @args{ map { $_->{name} } @declared[0 .. $#given] } = @given if @given;
+  my @missing = grep { $_->{required} && !defined $args{ $_->{name} } } @declared;
+  return { error => 'Missing required argument'.( @missing == 1 ? '' : 's' ).' for MCP prompt '.$command.': '
+    .join(', ', map { $_->{name} } @missing).' (usage: '.$usage.')' } if @missing;
+  my $got = eval { $self->loop->await(my $f = $client->get_prompt_f($name, \%args)); $f->get };
+  unless ($got) {
+    my $error = ( split /\n/, ''.( $@ || 'no answer' ) )[0];
+    return { error => 'MCP prompt '.$command.' failed: '.$error };
+  }
+  my $text = join "\n\n", grep { length } map { $self->_mcp_prompt_message_text($_) }
+    grep { ref $_ eq 'HASH' } @{ ref $got->{messages} eq 'ARRAY' ? $got->{messages} : [] };
+  return { error => 'MCP prompt '.$command.' returned no text' } unless length $text;
+  return { prompt => '<command-message>'.$command." is running\x{2026}</command-message>\n"
+    .'<command-name>/'.$command."</command-name>\n"
+    .'<command-args>'.( $arguments // '' )."</command-args>\n\n".$text };
+}
+
+# The text of one prompt message: its content block (or blocks) as text.
+sub _mcp_prompt_message_text {
+  my ($self, $message) = @_;
+  my $content = $message->{content};
+  my @blocks = ref $content eq 'ARRAY' ? @$content : ( $content );
+  return join "\n", grep { length } map {
+    my $b = $_;
+    ref $b ne 'HASH' ? ( defined $b && !ref $b ? $b : '' )
+      : ( $b->{type} // '' ) eq 'text' ? ( $b->{text} // '' )
+      : ( $b->{type} // '' ) eq 'resource' && ref $b->{resource} eq 'HASH'
+        ? ( $b->{resource}{text} // '[resource '.( $b->{resource}{uri} // '' ).': binary content not shown]' )
+      : '['.( $b->{type} // 'content' ).' content not shown]'
+  } @blocks;
+}
 
 sub ask_mcp_approvals {
   my ($self, $ask) = @_;
@@ -2241,7 +2348,24 @@ sub _build_tool_servers {
     $self->_enter_plan_tool_server,
     ( $self->_agent_tool_server // () ),
     ( $self->_plan_tool_wanted ? $self->_plan_tool_server : () ),
+    ( @{ $self->configured_mcp->clients } ? $self->_mcp_resources->tool_server : () ),
   ];
+}
+
+# The resources of the configured MCP servers (ADR 0029 Addendum 1): the
+# list/read tools, mounted when servers are configured, and the
+# @server:uri mentions of a prompt.
+has _mcp_resources => (is => 'ro', lazy => 1, builder => '_build_mcp_resources');
+
+sub mcp_resources_class { 'Langertha::Raider::MCP::Resources' }
+
+sub _build_mcp_resources {
+  my ($self) = @_;
+  weaken(my $app = $self);
+  return $self->mcp_resources_class->new(
+    servers => sub { $app ? $app->configured_mcp->clients : [] },
+    loop    => $self->loop,
+  );
 }
 
 # exit_plan_mode (ADR 0021): mounted once the application has been in plan
@@ -3328,6 +3452,7 @@ sub run_prompt {
 
   my $result;
   unless (eval {
+    $prompt = $self->_with_resource_mentions($prompt);
     $result = $self->run($prompt);
     $result = $self->_hooks_after_answer($result);
     $result = $self->_await_background($result) if $o{wait_background};
@@ -3344,6 +3469,17 @@ sub run_prompt {
   my $metrics = { %{ $self->raider->metrics }, usage => $self->usage_stats };
   my $end = $self->end_run(completed => metrics => $metrics);
   return { %$end, result => $result, response => "$result", metrics => $metrics };
+}
+
+# The prompt with the resources its @server:uri mentions name attached
+# (ADR 0029 Addendum 1). The configured servers are started first (a no-op
+# once they are); a prompt without a mention is returned as it is.
+sub _with_resource_mentions {
+  my ($self, $prompt) = @_;
+  return $prompt unless $prompt =~ /@\S+:[A-Za-z][A-Za-z0-9+.-]*:\/\//;
+  $self->loop->await($self->configured_mcp->start_f);
+  my @blocks = $self->_mcp_resources->attachments($prompt);
+  return @blocks ? join("\n\n", $prompt, @blocks) : $prompt;
 }
 
 =method begin_run

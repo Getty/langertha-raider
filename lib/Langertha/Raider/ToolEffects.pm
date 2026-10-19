@@ -50,6 +50,10 @@ C<raider_ask_user>: it puts a question to a person.
 
 C<skill> is C<read>: it returns a skill file from the local skill directories.
 
+C<list_mcp_resources> and C<read_mcp_resource> are C<read>: they return
+resources of the configured MCP servers, as Claude Code's read-only
+C<ListMcpResourcesTool> and C<ReadMcpResourceTool>.
+
 C<bash_output> is C<read>: it returns what a background shell of the session
 wrote, or a subagent's status and report. C<kill_shell> has no effect class:
 it can only stop a shell raider itself started with C<bash> (which was
@@ -94,6 +98,9 @@ my %EFFECTS = (
   exit_plan_mode         => [],
   # skills
   skill                  => [qw( read )],
+  # MCP resources of the configured servers (ADR 0029 Addendum 1)
+  list_mcp_resources     => [qw( read )],
+  read_mcp_resource      => [qw( read )],
   # shell
   bash                   => [qw( code )],
   bash_output            => [qw( read )],

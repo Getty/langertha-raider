@@ -12,6 +12,9 @@ use Cwd qw( getcwd );
 #   hang            reads everything, answers nothing
 #   exit            writes to stderr and exits with code 3 at once
 #   noinit          answers every request "Method not found" (a 2026-07-28-only server)
+#   rich            normal, plus tools big and bump (bump adds a tool and sends
+#                   notifications/tools/list_changed), prompts (greet, plain)
+#                   and resources (file:///a.txt, file:///b.txt, ui://app)
 #   mcp-server      the installed MCP::Server over stdio (its legacy handshake)
 #
 # --log FILE appends every message it receives, one JSON line each.
@@ -75,6 +78,54 @@ my %tools = (
   },
 );
 
+my $notify;
+if ($mode eq 'rich') {
+  $tools{big} = {
+    description => 'Returns N characters of text',
+    inputSchema => { type => 'object', properties => { n => { type => 'number' } } },
+    run => sub { return { content => [ { type => 'text', text => 'x' x ( $_[0]{n} // 100 ) } ] } },
+  };
+  $tools{big_error} = {
+    description => 'Returns an error result of N characters',
+    inputSchema => { type => 'object', properties => { n => { type => 'number' } } },
+    run => sub { return { content => [ { type => 'text', text => join('', map { chr(97 + $_ % 26) } 0 .. ( $_[0]{n} // 100 ) - 1) } ],
+      isError => JSON::MaybeXS->true } },
+  };
+  $tools{bump} = {
+    description => 'Adds a tool and announces it',
+    inputSchema => { type => 'object', properties => {} },
+    run => sub {
+      $tools{added_by_bump} = {
+        description => 'Appears after bump',
+        inputSchema => { type => 'object', properties => {} },
+        run => sub { return { content => [ { type => 'text', text => 'new tool' } ] } },
+      };
+      $notify = 'notifications/tools/list_changed';
+      return { content => [ { type => 'text', text => 'bumped' } ] };
+    },
+  };
+}
+
+my %prompts = (
+  greet => {
+    description => 'Greets someone',
+    arguments   => [ { name => 'name', description => 'who', required => JSON::MaybeXS->true }, { name => 'style' } ],
+    run => sub { my ( $a ) = @_; return { description => 'A greeting', messages => [
+      { role => 'user', content => { type => 'text', text => ( $a->{style} // 'Hello' ).', '.( $a->{name} // '?' ).'!' } },
+      { role => 'assistant', content => { type => 'text', text => 'Understood.' } },
+    ] } },
+  },
+  plain => {
+    description => 'No arguments',
+    run => sub { return { messages => [ { role => 'user', content => { type => 'text', text => 'plain prompt' } } ] } },
+  },
+);
+my %resources = (
+  'file:///a.txt' => { name => 'a.txt', mimeType => 'text/plain', text => 'contents of a' },
+  'file:///b.txt' => { name => 'b.txt', mimeType => 'text/plain', text => 'contents of b' },
+  'ui://app'      => { name => 'app', mimeType => 'text/html;profile=mcp-app', text => '<html/>' },
+);
+
 if ($mode eq 'mcp-server') {
   require MCP::Server;
   my $server = MCP::Server->new( name => 'raider-test', version => '1.0' );
@@ -115,7 +166,7 @@ while (defined( my $line = <STDIN> )) {
     my $v = $version // $msg->{params}{protocolVersion};
     reply({ jsonrpc => '2.0', id => $id, result => {
       protocolVersion => $v,
-      capabilities    => { tools => {} },
+      capabilities    => $mode eq 'rich' ? { tools => { listChanged => JSON::MaybeXS->true }, prompts => {}, resources => {} } : { tools => {} },
       serverInfo      => { name => 'raider-test', version => '1.0' },
       instructions    => 'test server',
     } });
@@ -135,8 +186,30 @@ while (defined( my $line = <STDIN> )) {
     if (ref $@ eq 'HASH') { reply({ jsonrpc => '2.0', id => $id, error => $@ }) }
     else                  { reply({ jsonrpc => '2.0', id => $id, result => $r }) }
   }
+  elsif ($mode eq 'rich' && $method eq 'prompts/list') {
+    reply({ jsonrpc => '2.0', id => $id, result => { prompts => [
+      map { { name => $_, description => $prompts{$_}{description}, ( $prompts{$_}{arguments} ? ( arguments => $prompts{$_}{arguments} ) : () ) } } sort keys %prompts
+    ] } });
+  }
+  elsif ($mode eq 'rich' && $method eq 'prompts/get') {
+    my $p = $prompts{ $msg->{params}{name} // '' };
+    if ($p) { reply({ jsonrpc => '2.0', id => $id, result => $p->{run}->($msg->{params}{arguments} // {}) }) }
+    else    { reply({ jsonrpc => '2.0', id => $id, error => { code => -32602, message => 'unknown prompt' } }) }
+  }
+  elsif ($mode eq 'rich' && $method eq 'resources/list') {
+    reply({ jsonrpc => '2.0', id => $id, result => { resources => [
+      map { { uri => $_, name => $resources{$_}{name}, mimeType => $resources{$_}{mimeType} } } sort keys %resources
+    ] } });
+  }
+  elsif ($mode eq 'rich' && $method eq 'resources/read') {
+    my $uri = $msg->{params}{uri} // '';
+    my $r = $resources{$uri};
+    if ($r) { reply({ jsonrpc => '2.0', id => $id, result => { contents => [ { uri => $uri, mimeType => $r->{mimeType}, text => $r->{text} } ] } }) }
+    else    { reply({ jsonrpc => '2.0', id => $id, error => { code => -32002, message => 'resource not found' } }) }
+  }
   else {
     reply({ jsonrpc => '2.0', id => $id, error => { code => -32601, message => "Method '$method' not found" } });
   }
+  if (defined $notify) { reply({ jsonrpc => '2.0', method => $notify }); undef $notify }
 }
 exit 0;

@@ -43,7 +43,8 @@ Sources, highest precedence first (ADR 0029 E<sect>2):
 =item 3. C<local> -- C<projects["PROJECT DIR"].mcpServers> of Claude's
 global config (L</claude_config_file>); Claude layout only
 
-=item 4. C<project> -- C<mcpServers> of F<.mcp.json> in L</project_dir>;
+=item 4. C<project> -- C<mcpServers> of F<.mcp.json> in L</project_dir> and
+every directory above it, the nearest file first (L</mcp_json_files>);
 Claude layout only
 
 =item 5. C<user> -- the top-level C<mcpServers> of Claude's global config;
@@ -232,6 +233,23 @@ has session_approvals => (
   default => sub { {} },
 );
 
+=attr bypass_approval
+
+True when the session was started in C<bypassPermissions> (by
+C<--permission-mode> or C<--dangerously-skip-permissions>). Together with
+C<skipDangerousModePermissionPrompt> in the user settings
+(L<Langertha::Raider::Context::Settings/skip_dangerous_mode_prompt>) every
+project server then counts as approved, as in Claude Code; a C<disabled>
+entry still rejects (ADR 0029 Addendum 1). Default false.
+
+=cut
+
+has bypass_approval => (
+  is      => 'ro',
+  isa     => 'Bool',
+  default => 0,
+);
+
 =method from_context
 
     my $mcp = Langertha::Raider::MCP::Config->from_context( $context, config => $config );
@@ -359,6 +377,40 @@ sub _project_dirs {
 }
 
 sub _project_real { ( $_[0]->_project_dirs )[-1] }
+
+=method mcp_json_files
+
+    for my $f ($mcp->mcp_json_files) { say $f->{label}, ' ', $f->{file} }
+
+The F<.mcp.json> files that exist, nearest first: the one in
+L</project_dir>, then those of every directory above it up to the root
+(ADR 0029 Addendum 1). Each C<< { file, label } >>; the label is
+C<.mcp.json> for the project directory, C<~/.mcp.json> for the home
+directory, else the absolute path. A name in a nearer file wins over the
+same name farther up (scope C<project> for all of them).
+
+=cut
+
+sub mcp_json_files {
+  my ( $self ) = @_;
+  my @out;
+  my $dir = path($self->project_dir)->absolute;
+  my $home = defined $self->home ? path($self->home)->absolute->stringify : undef;
+  my $first = 1;
+  while (1) {
+    my $file = $dir->child('.mcp.json');
+    if (-e $file) {
+      my $label = $first ? '.mcp.json'
+                : defined $home && "$dir" eq $home ? '~/.mcp.json'
+                : $file->stringify;
+      push @out, { file => $file, label => $label };
+    }
+    last if $dir->is_rootdir;
+    $dir = $dir->parent;
+    $first = 0;
+  }
+  return @out;
+}
 
 # ( key, entry ) of the project in Claude's global config, or nothing.
 sub _claude_project {
@@ -512,6 +564,11 @@ sub _build_approvals {
       }
     }
     $out{enable_all} = { source => $all->{source}, by => 'enableAllProjectMcpServers' } if $all && $all->{value};
+    if ($self->bypass_approval && !$out{enable_all} && $settings->skip_dangerous_mode_prompt) {
+      my ( $user ) = grep { $_->{scope} eq 'user' } @{ $settings->files };
+      $out{enable_all} = { source => $user->{label},
+        by => 'skipDangerousModePermissionPrompt in bypassPermissions mode' };
+    }
   }
   if (my $config = $self->config) {
     my $real = $self->_project_real;
@@ -662,9 +719,15 @@ C<MCP_TIMEOUT> of L</env>: how long one server may take to start
 C<MCP_TOOL_TIMEOUT> of L</env>: the per-call limit in milliseconds for
 servers without a C<timeout> of their own. C<undef> (no limit) when unset.
 
+=method max_output_tokens
+
+C<MAX_MCP_OUTPUT_TOKENS> of L</env>: how many tokens of a tool result
+raider passes on before it cuts the text (ADR 0029 Addendum 1). Default
+25000, Claude Code's.
+
 =method env_warnings
 
-The problems of those two variables (a value that is not a positive whole
+The problems of those three variables (a value that is not a positive whole
 number is ignored), as strings.
 
 =cut
@@ -678,8 +741,8 @@ has _timeouts => (
 
 sub _build__timeouts {
   my ( $self ) = @_;
-  my %out = ( startup => 30000, tool => undef, warnings => [] );
-  for my $pair ([ startup => 'MCP_TIMEOUT' ], [ tool => 'MCP_TOOL_TIMEOUT' ]) {
+  my %out = ( startup => 30000, tool => undef, output => 25000, warnings => [] );
+  for my $pair ([ startup => 'MCP_TIMEOUT' ], [ tool => 'MCP_TOOL_TIMEOUT' ], [ output => 'MAX_MCP_OUTPUT_TOKENS' ]) {
     my ( $key, $var ) = @$pair;
     my $value = $self->env->{$var};
     next unless defined $value && length $value;
@@ -687,7 +750,8 @@ sub _build__timeouts {
       $out{$key} = 0 + $1;
     }
     else {
-      push @{ $out{warnings} }, $var.'='.$value.' is not a positive number of milliseconds; ignored';
+      push @{ $out{warnings} }, $var.'='.$value.' is not a positive number of '
+        .( $key eq 'output' ? 'tokens' : 'milliseconds' ).'; ignored';
     }
   }
   return \%out;
@@ -695,6 +759,7 @@ sub _build__timeouts {
 
 sub startup_timeout_ms { $_[0]->_timeouts->{startup} }
 sub tool_timeout_ms    { $_[0]->_timeouts->{tool} }
+sub max_output_tokens  { $_[0]->_timeouts->{output} }
 sub env_warnings       { [ @{ $_[0]->_timeouts->{warnings} } ] }
 
 #### Servers
@@ -793,10 +858,11 @@ sub _build__resolved {
           for grep { defined && !ref } @{ $project->{disabledMcpServers} };
       }
     }
-    my $file = path($self->project_dir)->absolute->child('.mcp.json');
-    my ( $data, $error ) = $self->_read_json($file);
-    push @errors, { source => '.mcp.json', error => $error } if $error;
-    push @candidates, $self->_candidates($data->{mcpServers}, 'project', '.mcp.json', \@errors) if $data;
+    for my $file ($self->mcp_json_files) {
+      my ( $data, $error ) = $self->_read_json($file->{file});
+      push @errors, { source => $file->{label}, error => $error } if $error;
+      push @candidates, $self->_candidates($data->{mcpServers}, 'project', $file->{label}, \@errors) if $data;
+    }
     push @candidates, $self->_candidates($cc->{data}{mcpServers}, 'user', $cc->{label}, \@errors);
     if (my $plugins = $self->plugins) {
       for my $p (@{ $plugins->plugins }) {

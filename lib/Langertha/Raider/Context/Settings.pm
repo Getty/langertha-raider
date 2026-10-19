@@ -88,7 +88,7 @@ sub _build_claude_home {
 
 # The settings keys raider uses; everything else is listed by ignored().
 my %USED = map { $_ => 1 } qw( permissions hooks disableAllHooks disableSkillShellExecution env enabledPlugins
-  enableAllProjectMcpServers enabledMcpjsonServers disabledMcpjsonServers );
+  enableAllProjectMcpServers enabledMcpjsonServers disabledMcpjsonServers skipDangerousModePermissionPrompt );
 
 # The three files with their data, in read order. Each entry is
 # { file, label, scope, exists, error, data }; data is the decoded object,
@@ -348,6 +348,26 @@ sub _build_disable_all_hooks {
     $off = $value ? 1 : 0 if is_bool($value);
   }
   return $off;
+}
+
+=method skip_dangerous_mode_prompt
+
+    $settings->skip_dangerous_mode_prompt;
+
+C<1> when the user file (F<~/.claude/settings.json>, no other) sets
+C<skipDangerousModePermissionPrompt> to a JSON true, else C<0>. Claude Code
+honours it only from user and managed settings; with it a session started
+in C<bypassPermissions> loads project MCP servers without asking
+(ADR 0029 Addendum 1).
+
+=cut
+
+sub skip_dangerous_mode_prompt {
+  my ( $self ) = @_;
+  my ( $user ) = grep { $_->{scope} eq 'user' && $_->{data} } @{ $self->_loaded };
+  return 0 unless $user;
+  my $value = $user->{data}{skipDangerousModePermissionPrompt};
+  return is_bool($value) && $value ? 1 : 0;
 }
 
 =method disable_skill_shell_execution

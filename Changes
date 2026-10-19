@@ -333,6 +333,32 @@ Revision history for Langertha-Raider
       (Test::Raider::MCPHTTP); scenarios may use {{PERL}} and
       {{MCP_TEST_SERVER}}, and answer pending servers with mcp_answers:.
 
+  [MCP follow-ups: parent .mcp.json, list_changed, output limit, prompts, resources]
+    - ADR 0029 Addendum 1. A project's .mcp.json is read from the project
+      directory and every directory above it, nearest first (a server named
+      in several wins whole from the nearest): a ~/.mcp.json now serves
+      every project below the home directory, as in Claude Code. They are
+      all scope project and need the same approval.
+    - A session started in bypassPermissions (--permission-mode or
+      --dangerously-skip-permissions) with skipDangerousModePermissionPrompt
+      in ~/.claude/settings.json approves the project servers without
+      asking, as Claude Code does; disabledMcpjsonServers still blocks.
+    - notifications/tools/list_changed: the server's tools are listed again
+      and the next model request offers them.
+    - MAX_MCP_OUTPUT_TOKENS (default 25000): a tool result's text over the
+      limit is cut with a note that says how to raise it; an error text
+      over about 11000 characters keeps its first and last 5000. Claude
+      Code saves the whole result to a file instead; raider keeps none.
+    - MCP prompts are slash commands: /mcp__server__prompt ARGS (arguments
+      by the prompt's declared order), listed in /help, also in a one-shot
+      run.
+    - MCP resources: the tools list_mcp_resources and read_mcp_resource
+      (Claude Code's ListMcpResourcesTool / ReadMcpResourceTool) are
+      mounted when servers are configured, and @server:scheme://path in a
+      prompt attaches the resource.
+    - Tests t/280-t/282, scenarios 210-214; the test server has a rich mode
+      (prompts, resources, a tool that changes the tool list).
+
   [Status]
     - Marked as in development (POD and README): a developer release, not yet
       covered end to end. Release it with `dzil release --trial`.

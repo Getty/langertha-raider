@@ -132,10 +132,14 @@ an error and nothing runs. C<session> (a L<Langertha::Raider::Session> or a
 code reference returning one, called only here) gives
 C<${CLAUDE_SESSION_ID}>.
 
-=item 3. A built-in: the method C<cmd_NAME> (L</command_method>) with the
+=item 3. C</mcp__SERVER__PROMPT ARGS>: a prompt of a configured MCP server
+(L<Langertha::Raider::Application/mcp_prompt_request>, ADR 0029 Addendum 1),
+a run request; a server or prompt that does not exist is an unknown command.
+
+=item 4. A built-in: the method C<cmd_NAME> (L</command_method>) with the
 rest of the line.
 
-=item 4. Anything else: C<unknown command: /NAME (try /help)>.
+=item 5. Anything else: C<unknown command: /NAME (try /help)>.
 
 =back
 
@@ -154,6 +158,18 @@ sub dispatch {
   return { prompt => $line } if $r->{kind} eq 'prompt';
   if ( $r->{kind} eq 'entry' ) {
     my $request = $self->app->slash_run_request( $r->{entry}, $r->{arguments}, session => $o{session} );
+    if ( defined $request->{error} ) {
+      $self->output->say_error($request->{error});
+      return 0;
+    }
+    return $request;
+  }
+  if ( $r->{kind} eq 'mcp_prompt' ) {
+    my $request = $self->app->mcp_prompt_request( $r->{name}, $r->{arguments} );
+    unless ($request) {
+      $self->output->say_error('unknown command: /'.$r->{name}.' (try /help)');
+      return 0;
+    }
     if ( defined $request->{error} ) {
       $self->output->say_error($request->{error});
       return 0;
@@ -183,7 +199,7 @@ sub dispatch {
 
 How L</dispatch> reads the line, without running anything: C<kind> is
 C<prompt> (a path-like first word), C<entry> (with the catalogue
-C<entry>), C<builtin> (with its C<method>) or C<unknown>; C<name> is the
+C<entry>), C<mcp_prompt> (a name C<mcp__SERVER__PROMPT>), C<builtin> (with its C<method>) or C<unknown>; C<name> is the
 word after the C</>, C<arguments> the rest of the line, trimmed (C<undef>
 when empty). A catalogue that cannot be read (a broken config file) holds
 no entry: the built-ins still resolve, and its error is in
@@ -204,6 +220,8 @@ sub resolve {
     return { %r, kind => 'entry', entry => $entry } if $entry;
     $r{catalog_error} = $self->output->error_text($@) if $@;
   }
+  # mcp__SERVER__PROMPT: the prompt of a configured MCP server (ADR 0029 Addendum 1).
+  return { %r, kind => 'mcp_prompt' } if $name =~ /\Amcp__.+?__.+\z/s;
   my $method = $self->command_method($name);
   return $method ? { %r, kind => 'builtin', method => $method } : { %r, kind => 'unknown' };
 }
@@ -259,6 +277,15 @@ sub cmd_help {
     '  ?CMD                  run CMD, then send it and its output to the model',
     '  /quit /exit :q        leave the REPL',
   );
+  my @prompts = @{ $self->app->mcp_prompts };
+  if (@prompts) {
+    $out->say_meta('MCP prompts:');
+    for my $p (@prompts) {
+      my $call = '/'.$p->{command}.join('', map { ' '.( $_->{required} ? $_->{name} : '['.$_->{name}.']' ) } @{ $p->{arguments} });
+      my $desc = length $p->{description} ? $p->{description}.' ' : '';
+      $out->say_meta(sprintf('  %-21s %s(MCP, %s)', $call, $desc, $p->{server}));
+    }
+  }
   my @entries = sort { $a->{name} cmp $b->{name} } $self->app->context->skill_catalog->user_invocable;
   return unless @entries;
   $out->say_meta('skills and custom commands:');
