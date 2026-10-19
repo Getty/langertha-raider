@@ -63,8 +63,19 @@ cpanm --installdeps .
 perl -Ilib bin/raider
 ```
 
-Note: `Skilletor` is a new dependency that is not on CPAN yet; it has to be released to
-CPAN before a raider release, and `cpanm --installdeps .` cannot fetch it until then.
+Note: two dependencies are ahead of CPAN, so `cpanm --installdeps .` cannot fetch them
+yet. Release order: **Skilletor 0.001** (the `perl/` dist of
+[skilletor](https://github.com/Getty/skilletor)) first, then **Langertha 0.504** (the
+release after 0.503, with `Langertha::Engine::Virtual` for `-e mock` and the scenario
+suites, and `stream_usage`), then raider. Until then install both from their checkouts
+(`dzil install`).
+
+> **Upgrading?** Three changes are incompatible (see `Changes`): every tool call now
+> passes a permission policy, and a run nobody can approve (one-shot, `--json`, Hall,
+> ACP) refuses writes, `bash`, network and messages unless a rule or
+> `--permission-mode` allows them; `bash` refuses heavy commands under memory pressure
+> (loadguard, `LOADGUARD_THROTTLE=0` turns it off); and a project with only `CLAUDE.md`
+> or `.claude/` is read like Claude Code reads it.
 
 Or as a single-file Linux binary — no Perl needed (see [Binary](#binary-no-perl-needed)).
 

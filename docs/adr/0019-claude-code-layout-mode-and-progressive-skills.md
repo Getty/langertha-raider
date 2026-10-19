@@ -204,8 +204,13 @@ Counting any `.raider/` as the marker turned a Claude Code project native from
 its second run on: CLAUDE.md, `.claude/skills`, `.claude/agents` and the
 settings were no longer read. `.raider/` now decides the mode only when it
 holds project files: `config.yml`, `instructions.md`, or one of the
-directories `skills/`, `agents/`, `raiders/`, `packs/`. The reason names the
+directories `skills/`, `agents/`, `packs/`. The reason names the
 file (`.raider/config.yml in root`). Found by stream A (karr #153).
+
+`raiders/` was on that list at first and was taken off (karr #160): ADR 0020
+replaced ADR 0011's `raiders/<name>.yml` by `agents/<name>.md`, so nothing
+reads `.raider/raiders/` any more, and a directory nothing reads must not
+switch the Claude layout off.
 
 ## Addendum 3 — hooks run (karr #155, 2026-10-19)
 

@@ -2,15 +2,46 @@ Revision history for Langertha-Raider
 
 {{$NEXT}}
 
+  [Before you upgrade]
+    - INCOMPATIBLE: every tool call passes a permission policy, always on
+      (ADR 0021). In the default mode a run nobody can approve -- a one-shot
+      `raider "..."`, --json and the --stream-* flags, a Hall raider, ACP --
+      refuses writing files, bash, the network and messages unless a rule
+      allows them. See [Permissions] for the remedies.
+    - INCOMPATIBLE: bash refuses heavy commands (prove, make test, dzil
+      test|build|release, cpanm, docker build, ...) while the host is under
+      memory pressure or all heavy slots are taken -- the loadguard gate is
+      on by default (ADR 0018). LOADGUARD_THROTTLE=0 turns it off. See
+      [Tools].
+    - INCOMPATIBLE: a project with only CLAUDE.md, CLAUDE.local.md or
+      .claude/ is read in Claude mode (ADR 0019): the CLAUDE.md hierarchy,
+      the Claude settings (their permissions and env apply, their hooks
+      run), Claude skills and agents -- without --claude. Skills are no
+      longer glued into the system prompt in full: the prompt lists them,
+      the model loads one with the skill tool. See [Claude Code layout and
+      skills].
+
+  [Release order]
+    - Skilletor 0.001 (the perl/ dist of the skilletor repository) goes to
+      CPAN first: raider requires it, and `cpanm --installdeps .` cannot
+      fetch it before.
+    - Langertha 0.504 (the release after 0.503, with
+      Langertha::Engine::Virtual and stream_usage) goes to CPAN before raider:
+      `-e mock` / `-e virtual` and the scenario suites need
+      Langertha::Engine::Virtual. The cpanfile floor (still 0.503) moves
+      to it in the release audit; knarr's floor moves to the same Langertha.
+    - Then this release; the standalone binaries are built from it.
+
     - A tool call naming a tool no source offers is answered "unknown tool"
       at once, before the PreToolUse hook, the permission gate and any
       approval; in default mode it used to read "needs approval" (ADR 0005:
       resolve comes before policy).
     - A .raider/ directory makes a raider project only when it holds
-      config.yml, instructions.md, skills/, agents/, raiders/ or packs/.
-      raider's own .raider/sessions, .raider/lib and .gitignore turned a
-      Claude Code project native from its second run on (ADR 0019
-      addendum 2).
+      config.yml, instructions.md, skills/, agents/ or packs/. raider's own
+      .raider/sessions, .raider/lib and .gitignore turned a Claude Code
+      project native from its second run on (ADR 0019 addendum 2).
+      raiders/ is no marker: ADR 0020 replaced raiders/<name>.yml by
+      agents/<name>.md.
 
   [Status]
     - Marked as in development (POD and README): a developer release, not yet
@@ -586,7 +617,8 @@ Revision history for Langertha-Raider
       error result that tells the model to decide itself. glob and grep are
       confined to the root like the file tools. Effect classes: glob and
       grep read, todo_write none, ask_user message.
-    - Loadguard: bash is gated by a port of the loadguard plugin. A heavy
+    - INCOMPATIBLE: bash is gated by a port of the loadguard plugin, on by
+      default. A heavy
       command (prove, make test, dzil test|build|release, cpanm, perlbench,
       docker|podman build|run, cargo build|test, npm test, claude -p|--bg,
       codex exec|review), found in command position, is refused with the

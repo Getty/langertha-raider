@@ -187,3 +187,109 @@ karr #96 (from #22, item "Oeffentliche API inventarisieren"). Inventory taken fr
 `lib/` and `bin/` at `ef7dd92`: every package's `# ABSTRACT`, POD entries against
 `sub` / `has`, internal markers, cross-class `->_` calls and the object system used.
 Outside consumers checked in `langertha-knarr` and `langertha` core.
+
+## Addendum 1 — the modules of the Claude Code flow (karr #160, 2026-10-19)
+
+The night of 2026-10-19 (streams K, K2, T, P, P2, H, A, L; ADRs 0018 to 0022) added
+about thirty packages and a few dozen documented names. This addendum sorts them by the
+rules above. Nothing in it changes the rules.
+
+### New packages: all internal
+
+Every package the Claude Code flow added carries the internal marker (rule 6), and this
+addendum adds none of them to the public list:
+
+- Context: `::Context`, `::Context::Layout`, `::Context::Memory`, `::Context::Settings`,
+  `::Context::Plugins`, `::Context::Skills`, `::Context::Agents`,
+  `::Context::Frontmatter`.
+- Skills and subagents: `::SkillTools`, `::SkillResolver`, `::SkillResolver::Catalog`,
+  `::SkillResolver::Skilletor`, `::AgentTools`, `::Subagent`, `::Briefing`.
+- Tools: `::SearchTools`, `::TodoTools`, `::AskTools`, `::PlanTools`, `::ToolNames`,
+  `::Loadguard`.
+- Permissions: `::Permissions`, `::Permissions::Rule`, `::Permissions::ReadOnlyBash`,
+  `::PermissionChannel`, `::Hall::PermissionChannel`.
+- Hooks and plugins: `::Hooks`, `::Hooks::Result`, `::Plugin::ClaudeHooks`,
+  `::Plugin::NestedMemory`.
+
+Already internal and marked, but missing from the lists above: `::Binary`,
+`::ConnectCheck`, `::Provider::Binding`.
+
+Why none of them goes public: their contract is the behaviour of Claude Code, which the
+tool-parity stream (karr #159) is still aligning, and every one of them is driven by
+`Application` state (the context, the run's todo list, the REPL's questions, the hall's
+permission channel). A tool builder like `build_skill_tools_server` (`SkillTools`
+exports it) is not usable without that state, unlike `build_file_tools_server`. The two
+plugins only make sense wired by `Application`; `Plugin::Situation`, `Trace` and `Events`
+stay the public plugins. An ADR that wants one of them public later adds it to the list
+(rule 6).
+
+The nine `Hall::*` and `ACP::CLI` packages of "Internal by this ADR, still without the
+marker" carry the marker now; consequence 2 is done.
+
+### What the flow made public
+
+Public, by rule 7 (formats) and rule 2 (documented names of public packages):
+
+- **Tool names the model sees:** `skill`, `agent`, `glob`, `grep`, `todo_write`,
+  `ask_user`, `exit_plan_mode`. Their argument names follow Claude Code (ADR 0018,
+  karr #159) and are fixed with the first release that ships them.
+- **Command line:** `--permission-mode MODE`, `--dangerously-skip-permissions`,
+  `raider config explain` with the layout, settings, skills, agents, permissions and
+  hooks it reports. The hidden `--permission-channel` is the hall's private wire to its
+  raiders, not part of the command line.
+- **Files raider reads:** the Claude Code layout as ADR 0019 describes it (the
+  `CLAUDE.md` hierarchy, `CLAUDE.local.md`, `@imports`, `AGENTS.md`,
+  `.claude/settings.json` / `settings.local.json` / `~/.claude/settings.json` with
+  `permissions`, `env`, `enabledPlugins`, `hooks`; skill directories; plugins), agent
+  files (ADR 0020: `.claude/agents/**/*.md`, `~/.claude/agents`, plugin agents,
+  `.raider/agents/<name>.md`), `skilletor.json` sources for `briefing.skills`. raider's
+  promise is "as Claude Code reads it"; where Claude Code changes, raider follows.
+- **Config keys:** `claude`, `permissions` (`allow`, `ask`, `deny`, `default_mode`,
+  `additional_directories`), `max_agent_depth`, `agent_models` in `.raider/config.yml`;
+  `permission_timeout` in `.raider-hall.yml`.
+- **Hook protocol:** Claude Code's JSON on stdin and stdout and its exit codes (ADR 0022);
+  raider sets `CLAUDE_PROJECT_DIR`, and for plugin hooks `CLAUDE_PLUGIN_ROOT` and
+  `CLAUDE_PLUGIN_DATA`.
+- **Environment variables:** `LOADGUARD_THROTTLE`, `LOADGUARD_PSI_FULL`,
+  `LOADGUARD_SWAP_USED`, `LOADGUARD_HEAVY_SLOTS`, `LOADGUARD_CONFINE`,
+  `LOADGUARD_MEMORY_HIGH`, `LOADGUARD_MEMORY_MAX`, `LOADGUARD_MEMORY_SWAP_MAX`,
+  `LOADGUARD_CPU_WEIGHT` (loadguard's names, ADR 0018); `CLAUDE_CONFIG_DIR` (read as
+  Claude Code reads it). `LOADGUARD_CONFINED` is the restart's own marker, not an input.
+- **`Langertha::Raider::Hall`:** `permission_timeout`, `register_permission_handler` and
+  `unregister_permission_handler` (documented in its POD).
+- **`Langertha::Raider` (the engine):** no new public name. Its tool hook is
+  `_tool_hook`, private; used as a library without a gate every call runs (ADR 0021).
+
+### Consequence 1 narrowed: what `Application` gained is not public through the CLI
+
+Under consequence 1 every name documented in `Application` is public through
+`Langertha::Raider::CLI`. Since the inventory `Application` gained 31 documented names:
+`agent_models`, `build_subagent_engine`, `claude`, `claude_base_text`,
+`claude_persona_off`, `compile_mission`, `context`, `hooks`, `instructions`,
+`is_journal_type`, `loadguard`, `max_agent_depth`, `note_history_cleared`,
+`on_ask_user`, `on_permission_request`, `on_plan_review`, `permission_mode`,
+`permissions`, `provider`, `reload_context`, `reload_permissions`, `run_cancelled`,
+`run_plugins`, `set_permission_mode`, `shutdown_hooks`, `skip_permissions`,
+`stop_hook_limit`, `subagent_class`, `todos`, `tool_gate`, `tool_hook`. Most of them
+are plumbing between `Application`, the REPL, the Hall and the new internal packages;
+making them public by inheritance would freeze exactly the code the redesign recuts.
+
+Decision: public through the CLI are only the names the inventory found, plus the
+constructor arguments that mirror a public option or config key: `claude`,
+`permission_mode`, `skip_permissions`, `max_agent_depth`, `agent_models`. Every other
+name `Application` gains is internal, documented or not, until the recut of
+consequence 1 gives the CLI its own list. The CLI POD says so. This is the first half of
+that recut's choice ("the CLI POD names its own list"), applied to new names only.
+
+### Follow-ups (not fixed here)
+
+- The path confinement exists twice, in `FileTools` and in `SearchTools` (glob, grep).
+  Folding it into one place waits for the tool-parity stream (karr #159), which owns
+  both files now.
+- `Hall`'s `register_permission_handler` is public by rule 2 only because its POD names
+  it; it is the hall's wire to its ACP adapter, like the private `_register_cmd`. The
+  Hall recut should decide whether surface adapters get a public registration API.
+
+Source: karr #160. Inventory from `lib/` at `c828f0d`: `# ABSTRACT` and marker of every
+package, `=attr` / `=method` of `Application` at `ef7dd92` against `c828f0d`, `$ENV{…}`
+reads, `bin/raider` POD.
