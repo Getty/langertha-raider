@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-10-19T12:16:33Z
+claimed_by: claude-k166
+class: standard
+completed: 2026-10-19T12:16:33Z
+created: 2026-10-19T11:59:56Z
+id: 166
+priority: medium
+started: 2026-10-19T12:00:47Z
+status: done
+tags:
+- claude-code-flow
+title: Use Langertha's tool_result_images / tool_result_pdf instead of guessing from
+  the wire name
+updated: 2026-10-19T12:16:33Z
+---
+
+Aus langertha #380 (13446c7, ADR 0039): _engine_sees_images in raider durch supports('tool_result_images') und supports('tool_result_pdf') ersetzen, getrennte Callbacks für Bild und PDF in FileTools. Details auf langertha-Karte 380.
+
+Design: strict, no fallback. FileTools has two independent callbacks sees_images (images, notebook output images) and reads_pdf (PDF without pages), both default true. A fallback reads_pdf->sees_images would keep the conflation k380 removed, so t/190 and t/236 now pass both. Application::_engine_sees_images/_engine_reads_pdf ask supports(tool_result_images / tool_result_pdf); %IMAGE_WIRE and the image_input check are gone (the core capability already requires image_input). Subagent.pm passes both. Refuse texts unchanged (Claude Code wording). cpanfile Langertha 0.504 (next unreleased; change spans both repos). ADR 0023 and Changes updated. Tests: t/270, t/271 (4 combos each), scenario t/scenarios/200; t/192 adapted. Scenarios cannot set engine capabilities, so only the neither-case is a scenario. Full suite 188 files PASS. Commit a108f18 (WIP, unmerged). Binary: no new deps.
+
+k380 capabilities used; commit a108f18; full suite green
