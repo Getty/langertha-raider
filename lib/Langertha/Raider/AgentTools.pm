@@ -113,7 +113,7 @@ Set subagent_type to pick the agent type; without it, general-purpose runs.
 Usage notes:
 - The agent starts with no memory of this conversation: write a self-contained prompt with the task, the context it needs, and what it should report back.
 - Its final message is returned to you as the result of this tool; the user does not see it, so pass on what matters.
-- Launch independent agents in one message, with several agent calls, to run them concurrently.
+- Several agent calls in one message are fine; they run one after the other, each in its own context.
 - Use it for broad searches and work that would fill your own context; for a single known file or symbol, use the other tools directly.
 EOM
 }

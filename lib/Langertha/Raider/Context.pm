@@ -11,6 +11,8 @@ use Langertha::Raider::Context::Settings;
 use Langertha::Raider::Context::Plugins;
 use Langertha::Raider::Context::Skills;
 use Langertha::Raider::Context::Agents;
+use Langertha::Raider::SkillResolver;
+use Langertha::Raider::SkillResolver::Catalog;
 
 =head1 SYNOPSIS
 
@@ -26,6 +28,7 @@ use Langertha::Raider::Context::Agents;
     my @items = $context->prompt_items;         # memory, AGENTS.md, skill listing
     my $skills = $context->skill_catalog;       # Langertha::Raider::Context::Skills
     my $agents = $context->agent_catalog;       # Langertha::Raider::Context::Agents
+    my $skill  = $context->skill_resolver->resolve('pdf');   # { name, dir, file } or undef
     my $more  = $context->nested_memory_for('lib/Foo.pm');   # or undef
     my @notes = $context->nested_reminders_for('lib/Foo.pm');  # CLAUDE.md, skills
     $context->reload;                           # /reload: read it all again
@@ -152,6 +155,8 @@ sub settings_class { 'Langertha::Raider::Context::Settings' }
 sub plugins_class  { 'Langertha::Raider::Context::Plugins' }
 sub skills_class   { 'Langertha::Raider::Context::Skills' }
 sub agents_class   { 'Langertha::Raider::Context::Agents' }
+sub skill_resolver_class   { 'Langertha::Raider::SkillResolver' }
+sub catalog_resolver_class { 'Langertha::Raider::SkillResolver::Catalog' }
 
 =attr home
 
@@ -422,6 +427,41 @@ has _nested_skill_dirs_seen => (
   init_arg => undef,
   default  => sub { {} },
 );
+=attr skill_resolver
+
+The L<Langertha::Raider::SkillResolver> that briefs agents (ADR 0020
+E<sect>6): the chain of L</skill_resolvers>.
+
+=method skill_resolvers
+
+The resolvers of L</skill_resolver>, first asked first: the skill
+catalogue (L<Langertha::Raider::SkillResolver::Catalog> over
+L</skill_catalog>, skills that are not model-invocable included). The
+Skilletor resolver (the sources of F<skilletor.json>, read without
+installing) becomes one more entry here once that distribution is
+released.
+
+=cut
+
+has skill_resolver => (
+  is         => 'ro',
+  isa        => 'Langertha::Raider::SkillResolver',
+  init_arg   => undef,
+  lazy_build => 1,
+);
+
+sub _build_skill_resolver {
+  my ( $self ) = @_;
+  return $self->skill_resolver_class->new( resolvers => [ $self->skill_resolvers ] );
+}
+
+sub skill_resolvers {
+  my ( $self ) = @_;
+  return (
+    $self->catalog_resolver_class->new( catalog => $self->skill_catalog ),
+  );
+}
+
 =attr agent_roots
 
 The agent roots in precedence order (ADR 0020 E<sect>1), each
@@ -656,8 +696,8 @@ object.
 sub reload {
   my ( $self ) = @_;
   $self->$_ for qw( clear_layout clear_memory clear_settings clear_plugins
-    clear_skill_roots clear_skill_catalog clear_agent_roots clear_agent_catalog
-    clear_agents_md );
+    clear_skill_roots clear_skill_catalog clear_skill_resolver clear_agent_roots
+    clear_agent_catalog clear_agents_md );
   $self->_env_done(0);
   $self->apply_env;
   return $self;
@@ -776,14 +816,16 @@ What C<config explain> shows of the context, plain data (JSON-safe):
       skill_problems  => [ { file, reason }, ... ],
       plugins         => [ { name, key, scope }, ... ],
       agents          => [ { name, source, file, tools, disallowed, model,
-                             skills, unknown_tools, ignored_keys }, ... ],
+                             skills, missing_skills, unknown_tools, ignored_keys }, ... ],
       shadowed_agents => [ { name, source, file, by }, ... ],
       agent_problems  => [ { file, reason }, ... ],
     }
 
 C<memory> includes the F<AGENTS.md> item. C<agents>, C<shadowed_agents>
 and C<agent_problems> are L<Langertha::Raider::Context::Agents/report>;
-the arguments go there, for the model each agent would get.
+the arguments go there, for the model each agent would get. Each agent's
+C<missing_skills> lists the declared skills L</skill_resolver> does not
+resolve: the agent tool refuses to start that agent (ADR 0020 E<sect>6).
 
 =cut
 
@@ -813,10 +855,17 @@ sub report {
     shadowed_skills => [ map { { name => $_->{name}, source => $_->{source}, by => $_->{by} } } $catalog->shadowed ],
     skill_problems  => [ map { { file => $_->{file}, reason => $_->{reason} } } $catalog->problems ],
     plugins         => $plugins ? [ map { { name => $_->{name}, key => $_->{key}, scope => $_->{scope} } } @{ $plugins->plugins } ] : [],
-    agents          => $agents->{agents},
+    agents          => [ map { $self->_with_missing_skills($_) } @{ $agents->{agents} } ],
     shadowed_agents => $agents->{shadowed},
     agent_problems  => $agents->{problems},
   };
+}
+
+# An agent of the report with its declared skills that do not resolve.
+sub _with_missing_skills {
+  my ( $self, $agent ) = @_;
+  my $resolver = $self->skill_resolver;
+  return { %$agent, missing_skills => [ grep { !$resolver->resolve($_) } @{ $agent->{skills} } ] };
 }
 
 sub _settings_report {

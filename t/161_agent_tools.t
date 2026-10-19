@@ -47,7 +47,8 @@ subtest 'the tool text lists every agent with its tools' => sub {
     'the built-in, all tools' );
   like( $text, qr/no memory of this conversation.*self-contained prompt/, 'the prompt must stand alone' );
   like( $text, qr/final message is returned to you/, 'what comes back' );
-  like( $text, qr/one message, with several agent calls, to run them concurrently/, 'how to launch several' );
+  like( $text, qr/Several agent calls in one message are fine; they run one after the other/, 'several calls: one after the other' );
+  unlike( $text, qr/concurren|in parallel|simultaneous/i, 'no promise of concurrency (ADR 0020 section 4)' );
 
   my ($tool) = @{ $tools->server->tools };
   is( $tool->name, 'agent', 'one tool named agent' );

@@ -1,0 +1,260 @@
+package Langertha::Raider::Briefing;
+# ABSTRACT: Internal briefing of a subagent: its declared skills in front of its task
+our $VERSION = '0.504';
+use Moose;
+use namespace::autoclean;
+use utf8;
+use Encode ();
+use Path::Tiny;
+
+=head1 SYNOPSIS
+
+    # Internal to Langertha-Raider -- no API promise.
+    my $b = Langertha::Raider::Briefing->new(
+      agent    => 'raider-worker',
+      skills   => [ 'getty-perl-core', 'perl-mcp' ],
+      resolver => $context->skill_resolver,
+    );
+    return ( $b->missing_note, 1 ) if $b->has_missing;   # no spawn
+    warn $b->size_note if $b->oversized;                 # spawn anyway
+    my $prompt = $b->prompt($task);
+
+=head1 DESCRIPTION
+
+B<Internal module.> Its interface may change without notice.
+
+ADR 0020 E<sect>6: the skills an agent declares are put in front of its
+task in the format of the briefing plugin (F<hooks/briefing-preload>,
+C<main_claude>), so an agent reads the same under Claude Code with that
+plugin and under raider:
+
+    BRIEFING_HEADER                    (the plugin's text, word for word)
+    <skill name="NAME" dir="/abs/dir">
+    BODY
+    </skill>                           (one block per skill, "\n\n" between)
+
+    ---
+
+    # Original task
+
+    TASK
+
+C<NAME> is the name as declared, C<dir> the directory of the resolved
+F<SKILL.md>, C<BODY> the file without its frontmatter (the plugin's
+C<split_frontmatter>) and stripped of leading and trailing whitespace.
+
+Every name goes through L</resolver>. A name that does not resolve is
+listed in L</missing>; the caller then starts nothing (the plugin's
+hard-fail policy, never a partial briefing). Above L</budget_bytes> of
+skill text the briefing is L</oversized>: the spawn goes ahead with
+L</size_note>.
+
+=attr agent
+
+The agent's name, for the notes. Required.
+
+=attr skills
+
+The declared skill names, in order (L<Langertha::Raider::Context::Agents>
+puts Claude Code's C<skills> before C<briefing.skills>, each once).
+Defaults to none.
+
+=attr resolver
+
+The L<Langertha::Raider::SkillResolver> (anything with C<resolve($name)>
+returning C<< { name, dir, file } >> or nothing). Required.
+
+=cut
+
+has agent => (
+  is       => 'ro',
+  isa      => 'Str',
+  required => 1,
+);
+
+has skills => (
+  is      => 'ro',
+  isa     => 'ArrayRef[Str]',
+  default => sub { [] },
+);
+
+has resolver => (
+  is       => 'ro',
+  required => 1,
+);
+
+=attr missing
+
+The declared names that did not resolve, in order.
+
+=method has_missing
+
+True when L</missing> lists a name: the spawn is refused.
+
+=attr blocks
+
+One C<< { name, dir, file } >> per resolved skill, in order.
+
+=attr text
+
+The C<< <skill> >> blocks joined by a blank line; empty without skills.
+
+=attr size
+
+The length of L</text> in UTF-8 bytes.
+
+=cut
+
+has _resolved => (
+  is       => 'ro',
+  isa      => 'HashRef',
+  init_arg => undef,
+  lazy     => 1,
+  builder  => '_build__resolved',
+);
+
+sub missing { @{ $_[0]->_resolved->{missing} } }
+sub blocks  { @{ $_[0]->_resolved->{blocks} } }
+sub text    { $_[0]->_resolved->{text} }
+sub size    { $_[0]->_resolved->{size} }
+
+sub has_missing { scalar( () = $_[0]->missing ) ? 1 : 0 }
+
+sub _build__resolved {
+  my ( $self ) = @_;
+  my ( @missing, @blocks, @texts );
+  for my $name (@{ $self->skills }) {
+    my $skill = $self->resolver->resolve($name);
+    unless ($skill) {
+      push @missing, $name;
+      next;
+    }
+    my $file = path($skill->{file});
+    my $dir  = defined $skill->{dir} ? $skill->{dir} : $file->absolute->parent->stringify;
+    my $text = eval { $file->slurp_utf8 } // '';
+    my $body = $self->strip( $self->split_frontmatter($text) );
+    push @blocks, { name => $name, dir => $dir, file => $file->stringify };
+    push @texts, '<skill name="'.$name.'" dir="'.$dir.'">'."\n".$body."\n".'</skill>';
+  }
+  my $text = join "\n\n", @texts;
+  return {
+    missing => \@missing,
+    blocks  => \@blocks,
+    text    => $text,
+    size    => length Encode::encode('UTF-8', $text),
+  };
+}
+
+=method split_frontmatter
+
+    my $body = $briefing->split_frontmatter($text);
+
+The text after a leading C<---> ... C<---> block, or the whole text when
+there is none -- the plugin's C<split_frontmatter>, which is stricter than
+L<Langertha::Raider::Context::Frontmatter>.
+
+=method strip
+
+Leading and trailing whitespace removed, as Python's C<str.strip> does
+(which counts C<\x1c>-C<\x1f> as whitespace too).
+
+=cut
+
+sub split_frontmatter {
+  my ( $self, $text ) = @_;
+  return $text =~ /\A---\r?\n(.*?)\r?\n---\r?\n(.*)\z/s ? $2 : $text;
+}
+
+sub strip {
+  my ( $self, $text ) = @_;
+  $text =~ s/\A[\s\x1c-\x1f]+//;
+  $text =~ s/[\s\x1c-\x1f]+\z//;
+  return $text;
+}
+
+=method budget_bytes
+
+C<65536>: above this many bytes of skill text the briefing is
+L</oversized>.
+
+=method oversized
+
+True when L</size> is over L</budget_bytes>.
+
+=cut
+
+sub budget_bytes { 64 * 1024 }
+
+sub oversized { $_[0]->size > $_[0]->budget_bytes ? 1 : 0 }
+
+=method header
+
+The plugin's C<BRIEFING_HEADER> for Claude Code, word for word (its
+C<{dont}> is "do NOT call the Skill tool for any of these names").
+
+=cut
+
+sub header {
+  return "# Briefing — pre-loaded skills\n\n"
+    ."The skills below have been injected directly into your context by the\n"
+    ."briefing plugin, one <skill> element each. Treat them as already loaded —\n"
+    ."do NOT call the Skill tool for any of these names; their content is already here. Only the SKILL.md body is\n"
+    ."included: paths a skill mentions (references/, scripts/, …) are relative to\n"
+    ."its element's dir, so read them from there when you need them.\n\n";
+}
+
+=method prompt
+
+    my $prompt = $briefing->prompt($task);
+
+The subagent's prompt: L</header>, L</text>, then C<\n\n---\n\n# Original
+task\n\n> and C<$task>. C<$task> unchanged when no skill is declared.
+
+=cut
+
+sub prompt {
+  my ( $self, $task ) = @_;
+  $task //= '';
+  return $task unless @{ $self->skills };
+  return $self->header.$self->text."\n\n---\n\n# Original task\n\n".$task;
+}
+
+=method missing_note
+
+    briefing: agent 'NAME' references unknown skill(s): a, b
+
+=method size_note
+
+    briefing: agent 'NAME' is briefed with N kB of skill text (over 64 kB) — consider declaring fewer or smaller skills.
+
+The plugin's texts.
+
+=cut
+
+sub missing_note {
+  my ( $self ) = @_;
+  return 'briefing: agent \''.$self->agent.'\' references unknown skill(s): '.join( ', ', $self->missing );
+}
+
+sub size_note {
+  my ( $self ) = @_;
+  return 'briefing: agent \''.$self->agent.'\' is briefed with '.int( $self->size / 1024 ).' kB '
+    .'of skill text (over '.int( $self->budget_bytes / 1024 ).' kB) — consider declaring '
+    .'fewer or smaller skills.';
+}
+
+__PACKAGE__->meta->make_immutable;
+
+1;
+
+=seealso
+
+=over
+
+=item * L<Langertha::Raider::SkillResolver>
+
+=item * L<Langertha::Raider::Subagent>
+
+=back
+
+=cut

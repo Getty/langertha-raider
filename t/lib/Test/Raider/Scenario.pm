@@ -85,6 +85,7 @@ our @EXPORT_OK = qw( run_scenario_files );
 #                  tool_text: text the descriptions of the offered tools must contain. A
 #                  subagent's requests count in the same sequence, in the order made
 #                  (the caller's agent call, the subagent's requests, the caller's next)
+#     request_count: how many model requests were made in all
 #     events:      [ { type => ..., fields } ] events of the application, in order; each
 #                  is matched (as a subset) by the next event of its type
 #     questions:   [ { question => ..., options => [...] } ] what ask_user put to the person
@@ -214,6 +215,9 @@ sub run_scenario_file {
         like( $texts, qr/\Q$r->{tool_text}\E/, "request $r->{index} tool texts contain '$r->{tool_text}'" );
       }
     }
+
+    is( scalar @{ $app->mock_engine->requests }, $expect->{request_count}, 'number of model requests' )
+      if defined $expect->{request_count};
 
     if ( my $want = $expect->{events} ) {
       my @pool = @events;

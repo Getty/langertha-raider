@@ -188,6 +188,9 @@ sub show {
     elsif ($type eq 'agent.finished') {
       $line->($run.'agent end', ($e->{call} // '?').' '.($e->{status} // '?'));
     }
+    elsif ($type eq 'agent.warning') {
+      $line->($run.'agent warn', ($e->{call} // '?').' ', $out->c(warn => $e->{message} // ''));
+    }
     elsif ($type eq 'run.finished') {
       $line->($run.'finished', join ', ', grep { defined } $e->{status},
         defined $e->{elapsed} ? $e->{elapsed}.'s' : undef,

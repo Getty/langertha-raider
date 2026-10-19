@@ -2114,7 +2114,7 @@ one. An empty C<$text> runs nothing and returns nothing.
 # run.finished is written by end_run.
 my %JOURNAL_TYPE = map { $_ => 1 } qw( run.started message tool.call tool.result todo.updated
   permission.asked permission.granted permission.denied permission.mode hook.ran hook.message
-  agent.started agent.finished );
+  agent.started agent.finished agent.warning );
 
 =method is_journal_type
 
@@ -2123,8 +2123,9 @@ my %JOURNAL_TYPE = map { $_ => 1 } qw( run.started message tool.call tool.result
 Whether the journal records events of that type from a run (ADR 0015):
 C<run.started>, C<message>, C<tool.call>, C<tool.result>, C<todo.updated>,
 the C<permission.*> events (ADR 0021), C<hook.ran> and C<hook.message> (ADR
-0022), and C<agent.started> and C<agent.finished> of the subagents it starts (ADR
-0020). C<run.finished> is written by L</end_run>.
+0022), C<agent.started> and C<agent.finished> of the subagents it starts and
+C<agent.warning> about them (ADR 0020). C<run.finished> is written by
+L</end_run>.
 
 =cut
 
@@ -2609,7 +2610,8 @@ C<agents>, C<shadowed_agents> and C<agent_problems> come from the same
 report (L<Langertha::Raider::Context::Agents/report>): every agent a run
 could start (ADR 0020) with its root, its tools in raider names (C<*> for
 all), the disallowed ones, the model it would get under this engine and
-L</agent_models> (or why it inherits), its declared skills, the tool names
+L</agent_models> (or why it inherits), its declared skills and those that
+do not resolve (C<missing_skills>), the tool names
 and frontmatter keys raider does not use; the agents shadowed by an earlier
 one of the same name; and files in an agent root that are not agents.
 

@@ -10,6 +10,7 @@ use Scalar::Util qw( blessed refaddr weaken );
 use Time::HiRes ();
 use Langertha::Raider;
 use Langertha::Raider::AgentTools;
+use Langertha::Raider::Briefing;
 use Langertha::Raider::TodoTools;
 
 =synopsis
@@ -60,14 +61,30 @@ all stay is mounted as it is; otherwise a new L<MCP::Server> carries the
 tools that stay. Prompt and catalogue derive from this set alone; the skill
 listing stays only when the set has the C<skill> tool.
 
+=item * B<Briefing> (L</briefing>, ADR 0020 E<sect>6). The skills the agent
+declares are resolved through L<Langertha::Raider::Context/skill_resolver>
+and put in front of the prompt in the briefing plugin's format
+(L<Langertha::Raider::Briefing>); that is the subagent's prompt
+(L</briefed_prompt>). A skill that does not resolve refuses the call: the
+result is the error C<briefing: agent 'NAME' references unknown skill(s):
+a, b>, and nothing starts -- no session, no C<agent.started>, no request.
+Above 64 kB of skill text the run goes ahead, and the caller's stream and
+journal get C<agent.warning> (C<call>, C<agent>, C<message>: the size
+note) before C<agent.started>.
+
 =item * B<Engine.> One engine of the caller's class and arguments, built by
 L<Langertha::Raider::Application/build_subagent_engine> over this set's
-clients, on the same loop; the model is inherited.
+clients, on the same loop. Its model is the agent's C<model> as
+L<Langertha::Raider::Context::Agents/resolve_model> maps it under the
+caller's engine and L<Langertha::Raider::Application/agent_models>
+(L</model_resolution>, ADR 0020 E<sect>5): a resolved model replaces the
+caller's, otherwise it is inherited. C<agent.started> carries the model the
+engine really uses.
 
 =item * B<Journal.> When the caller has a session, the subagent gets its own
 session in the same store, whose C<session.created> carries C<parent>,
 C<parent_call>, C<agent> and C<depth>, and runs one journaled run there --
-C<run.started>, the prompt and the answer as C<message>, every C<tool.call>,
+C<run.started>, the briefed prompt and the answer as C<message>, every C<tool.call>,
 C<tool.result> and C<todo.updated>, and C<run.finished>. The caller gets
 only C<agent.started> (C<call>, C<agent>, C<description>, C<session>,
 C<model>) and C<agent.finished> (C<call>, C<agent>, C<session>,
@@ -191,6 +208,52 @@ has on_caller_event => (
 
 The caller's event stream, called as C<< ->($type, %payload) >> with
 C<agent.started> and C<agent.finished>. Required.
+
+=cut
+
+has briefing => (
+  is       => 'ro',
+  isa      => 'Langertha::Raider::Briefing',
+  init_arg => undef,
+  lazy     => 1,
+  builder  => '_build_briefing',
+);
+
+=attr briefing
+
+The L<Langertha::Raider::Briefing> of the agent's declared skills, built
+once (L</briefing_class>).
+
+=cut
+
+has briefed_prompt => (
+  is       => 'ro',
+  isa      => 'Str',
+  init_arg => undef,
+  lazy     => 1,
+  builder  => '_build_briefed_prompt',
+);
+
+=attr briefed_prompt
+
+What the subagent is asked: L</prompt> behind its briefing, or L</prompt>
+itself when the agent declares no skill.
+
+=cut
+
+has model_resolution => (
+  is       => 'ro',
+  isa      => 'HashRef',
+  init_arg => undef,
+  lazy     => 1,
+  builder  => '_build_model_resolution',
+);
+
+=attr model_resolution
+
+What the agent's C<model> means under the caller's engine
+(L<Langertha::Raider::Context::Agents/resolve_model>): C<< { model => ... } >>
+or C<< { inherit => 1, reason => ... } >>.
 
 =cut
 
@@ -360,6 +423,7 @@ sub run {
   my $outcome = $f->get;
   my $name = $self->agent->{name};
   return ( $outcome->{text} // '', 0 ) if $outcome->{status} eq 'completed';
+  return ( $outcome->{error}, 1 ) if $outcome->{status} eq 'refused';
   return ( 'Agent \''.$name.'\' was cancelled.', 1 ) if $outcome->{status} eq 'cancelled';
   return ( 'Agent \''.$name.'\' failed: '.$outcome->{error}, 1 );
 }
@@ -369,14 +433,18 @@ sub run {
     my $outcome = await $sub->run_f;
 
 The run itself: starts the journal and C<agent.started>, raids with the
-prompt, ends the journal and C<agent.finished>. Never fails; returns the
-outcome as a hash reference: C<status> (C<completed>, C<failed> or
-C<cancelled>), C<text> of a completed run, C<error> of a failed one.
+briefed prompt, ends the journal and C<agent.finished>. Never fails;
+returns the outcome as a hash reference: C<status> (C<completed>,
+C<failed>, C<cancelled>, or C<refused> when a declared skill does not
+resolve -- then nothing ran), C<text> of a completed run, C<error> of a
+failed or refused one.
 
 =cut
 
 async sub run_f {
   my ( $self ) = @_;
+  my $briefing = $self->briefing;
+  return { status => 'refused', error => $briefing->missing_note } if $briefing->has_missing;
   my $outcome = await Future->call( sub { $self->_raid_f } )->then(
     sub { Future->done( $self->_outcome_of( $_[0] ) ) },
     sub {
@@ -398,7 +466,7 @@ async sub _raid_f {
     await $mcp->initialize;
   }
   $raider->cancel if $self->cancel_requested;
-  return await $raider->raid_f( $self->prompt );
+  return await $raider->raid_f( $self->briefed_prompt );
 }
 
 =method cancel
@@ -455,6 +523,11 @@ sub _begin {
   }
   my $model = eval { $self->engine->chat_model };
   $self->_model($model);
+  $self->on_caller_event->( 'agent.warning', $self->_defined(
+    call    => $self->caller_call,
+    agent   => $self->agent->{name},
+    message => $self->briefing->size_note,
+  ) ) if $self->briefing->oversized;
   $self->on_caller_event->( 'agent.started', $self->_defined(
     call        => $self->caller_call,
     agent       => $self->agent->{name},
@@ -463,7 +536,7 @@ sub _begin {
     model       => $model,
   ) );
   $self->event( 'run.started', engine => $app->engine_name, defined $model ? ( model => $model ) : () );
-  $self->event( 'message', role => 'user', content => $self->prompt );
+  $self->event( 'message', role => 'user', content => $self->briefed_prompt );
   return;
 }
 
@@ -580,6 +653,38 @@ sub _own_agent_tool {
   )->tools->[0];
 }
 
+=method briefing_class
+
+The class of L</briefing>: L<Langertha::Raider::Briefing>.
+
+=cut
+
+sub briefing_class { 'Langertha::Raider::Briefing' }
+
+sub _build_briefing {
+  my ( $self ) = @_;
+  return $self->briefing_class->new(
+    agent    => $self->agent->{name},
+    skills   => [ @{ $self->agent->{skills} // [] } ],
+    resolver => $self->app->context->skill_resolver,
+  );
+}
+
+sub _build_briefed_prompt {
+  my ( $self ) = @_;
+  return $self->briefing->prompt( $self->prompt );
+}
+
+sub _build_model_resolution {
+  my ( $self ) = @_;
+  my $app = $self->app;
+  return $app->context->agent_catalog->resolve_model( $self->agent->{model},
+    engine_class => scalar eval { $app->_engine_class },
+    engine_name  => $app->engine_name,
+    agent_models => $app->agent_models,
+  );
+}
+
 sub _build_mission {
   my ( $self ) = @_;
   return $self->app->compile_mission( $self->agent->{body} // '', $self->tool_servers );
@@ -593,7 +698,9 @@ sub _build_mcps {
 
 sub _build_engine {
   my ( $self ) = @_;
-  return $self->app->build_subagent_engine( mcp_servers => $self->_mcps );
+  my $model = $self->model_resolution->{model};
+  return $self->app->build_subagent_engine( mcp_servers => $self->_mcps,
+    defined $model ? ( model => $model ) : () );
 }
 
 sub _build_raider {

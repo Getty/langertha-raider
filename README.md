@@ -619,7 +619,9 @@ eval, and reports what it installed. It never loops. (Note that `perl -c` runs
   with an empty history, the agent file as its instructions and the caller's tools
   filtered by `tools` / `disallowedTools` (never `ask_user`), and its last text comes
   back as the tool result. With a session it journals into a child session of its
-  own. Subagents cannot start subagents unless `max_agent_depth` is raised.
+  own. Subagents cannot start subagents unless `max_agent_depth` is raised. The
+  skills an agent declares (`skills`, `briefing.skills`) are put in front of its task
+  as the briefing plugin does, and its `model` applies under the Anthropic API.
 
 ### Claude Code projects
 
