@@ -1,0 +1,42 @@
+---
+claimed_at: 2026-10-19T13:28:50Z
+claimed_by: strom-m1
+class: standard
+completed: 2026-10-19T13:28:49Z
+created: 2026-10-19T11:18:54Z
+id: 164
+priority: high
+started: 2026-10-19T11:20:16Z
+status: done
+tags:
+- claude-code-flow
+title: 'MCP servers like Claude Code: .mcp.json, settings mcpServers, plugin servers,
+  mcp__ tools, approvals'
+updated: 2026-10-19T13:28:50Z
+---
+
+Strom M1. Plan: /home/getty/dev/perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md
+
+strom-m1: Worktree .claude/worktrees/strom-m1 (Branch worktree-strom-m1 von lokalem main b22ccb2). Slice 1 (ADR 0029 + Konfigurationsmodell) an raider-worker übergeben.
+
+2026-10-19 11:30 Slice 1 started: read brief, ADRs 0004/0005/0011/0019/0021/0022, Settings/Plugins/Config/Hooks. Verified on this machine: Claude Code persists the .mcp.json approval choice in .claude/settings.local.json (enabledMcpjsonServers / enableAllProjectMcpServers / disabledMcpjsonServers); trust is ~/.claude.json projects.<path>.hasTrustDialogAccepted.
+
+2026-10-19 11:42 Slice 1 done (uncommitted): ADR 0029 (whole M1 design), Langertha::Raider::MCP::Config (pure model), Config mcp:/mcp_approvals:, Settings->mcpjson_approvals, Plugins->mcp_servers; t/250-253 pass, neighbours (122-126, 141, 25/27/28_config*, 34, 36, 152, 00/01) pass. Decisions: raider files before Claude sources (ADR 0021 order); trust = Claude's hasTrustDialogAccepted (self or ancestor) until ADR 0004; native approvals in ~/.raider/config.yml mcp_approvals; server part with __ or leading/trailing _ is invalid; credential vars blanked in remote url/headers.
+
+strom-m1: Slice 1 fertig (WIP f2d3b3c): ADR 0029, MCP::Config (Quellen/Vorrang/Expansion/Freigaben, nativer mcp:-Key), t/250-253 grün. Slice 2 (Verbindung/Mounting/Gate) läuft.
+
+2026-10-19 12:13 Slice 2 done (uncommitted): raider talks to configured servers itself (MCP::Server/Stdio/HTTP; initialize handshake 2024-11-05..2025-11-25) because installed Net::Async::MCP 0.006 speaks only 2026-07-28 (server/discover, no fallback; HTTP sends MCP-Protocol-Version 2026-07-28, no Mcp-Session-Id; Stdio no env/cwd, drops stderr). Mounted as leading engine mcp_servers + source_servers; subagent views (needed now: for_subrun keeps source_servers). Tests t/254-257 + scenarios 180-186 pass; regressions (permissions, subagents, hooks, remount, 200_scenarios) pass. Follow-up for the p5-net-async-mcp board: initialize fallback, Mcp-Session-Id + negotiated protocol header in HTTP, env/cwd/stderr in Stdio. Also found: Net::Async::HTTP 0.50 can hang a request when one client opens two connections to a host at once -> one client per request in MCP::HTTP.
+
+strom-m1: Slice 2 fertig (WIP): MCP::Server/Stdio/HTTP/View + MCP-Set, mcp__-Namen, Gate/Hooks, Subagent-Views, t/254-257 + Szenarien 180-186 grün. Raider spricht den initialize-Handshake (2024-11-05..2025-11-25) selbst. Folgepunkt p5-net-async-mcp: 0.006 kann nur 2026-07-28 (server/discover, kein Fallback), HTTP ohne Mcp-Session-Id, Stdio ohne env/cwd/stderr - danach könnte raider zurückwechseln.
+
+2026-10-19 12:40 Slice 3 done (uncommitted): REPL asks pending project servers once (Claude's 3 choices; session approvals + written to settings.local.json when trusted, else ~/.raider/config.yml mcp_approvals); non-interactive notes on stderr; /mcp + /mcp reconnect; config explain mcp section; /reload keeps unchanged servers (fingerprint), stops changed/removed, front of _mcps + source_servers in place; cancel keeps servers (Runner keeps mcp_pids). t/258-261 + scenarios 187/188; process-cleanup test via bin/raider (one-shot, REPL end, SIGTERM). Regressions incl. 200/202 scenarios, ACP, hall pass. Follow-ups: mcp.server into the session journal (A2's event list); tools/list_changed; p5-net-async-mcp ticket (switch-back conditions in ADR 0029 §10). Card ready for review after the WIP commit.
+
+2026-10-19 12:55 Fixed t/62 failure after rebase: test subclass My::HangApp has its own 'mcp' attribute, which overrode my new Application->mcp; raid_f then called start_f on the fake and the run failed. Renamed the public attribute to configured_mcp (Application, Subagent, Main, t/257-261, ADR 0029 §10). t/62, t/250-261, 97, 52x2, 53x2, 30x2, 162, 00 pass.
+
+strom-m1: WIP zu einem Commit zusammengefasst, auf main 2e35b05 (Strom C) rebased; Konflikte Changes/Main.pm/Settings.pm gelöst, t/260/261 -> t/267/268 umbenannt. t/62-Regression war Attributname 'mcp' (Kollision mit Test-Subklasse) -> configured_mcp. Läuft: /mcp in Cs Slash-System einpassen, dann volle Suite.
+
+2026-10-19 13:10 After rebase onto strom C (2e35b05): /mcp checked against ADR 0030 — it is a normal built-in (cmd_mcp via command_method, dispatch error handling, a user-invocable 'mcp' entry replaces it per §3). One-shot: /mcp now a reporting built-in (connects, prints, stops, exit 0); /mcp reconnect one-shot = usage error (exit 2); the early one-shot return now calls shutdown_mcp. /mcp connects servers before reporting. Tests: t/250-259, 267, 268, 256, 200, C's 260-266, 62, 00, 30x2, 38, 39 pass; no leftover processes.
+
+M1 fertig auf Branch worktree-strom-m1 (rebased auf main 2e35b05): b5227c2 (Hauptcommit, ADR 0029) + db09cd9 (/mcp in Cs Slash-System). Volle Suite PASS (207 Dateien, 1788 Tests; nur Live-Tests übersprungen), keine Testserver-Prozesse übrig. Folgepunkte: (1) p5-net-async-mcp: initialize-Fallback + Version des Servers akzeptieren, MCP-Protocol-Version/Mcp-Session-Id über HTTP, Stdio env/cwd/stderr - dann raider zurück auf Net::Async::MCP (Bedingung in ADR 0029 §10); (2) mcp.server-Events ins Session-Journal nach A2-Merge; (3) tools/list_changed, sampling/elicitation/roots, sse/ws/oauth/headersHelper, MAX_MCP_OUTPUT_TOKENS, Resources/Prompts nicht gebaut; (4) scripts/verify-binary.sh nicht gelaufen (Stdio fork/exec, heavy); (5) interaktive Freigabe nur mit Skript-Eingabe getestet; (6) A2-Rebase: Subagent.pm _build_mcps 1 Zeile, Application.pm ein Block nach shutdown_hooks + Einzeiler. WIP-Commits: Release-Manager schneidet beim Merge.
+
+Koordinator 2026-10-19: geprüft (1788 grün, t/250–259 rot gegen alten Code), gemerged. Befund Koordinator: Claude Code lädt .mcp.json auch aus Elternverzeichnissen (diese Hub-Sitzung hat die Server aus ~/.mcp.json, cwd ~/dev/perl-developer); raider nur aus der Wurzel -> Folgekarte.
