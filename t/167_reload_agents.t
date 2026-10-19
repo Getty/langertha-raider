@@ -27,14 +27,14 @@ subtest 'Context::reload: the agent catalogue and the skill resolver are read ag
   my $p = project();
   put($p, '.raider/agents/alpha.md', agent('alpha'));
   my $c = Langertha::Raider::Context->new(root => "$p");
-  is([ map { $_->{name} } $c->agent_catalog->agents ], [qw( alpha general-purpose )], 'alpha');
+  is([ map { $_->{name} } $c->agent_catalog->agents ], [qw( alpha general-purpose Explore Plan )], 'alpha');
   ok(!$c->skill_resolver->resolve('notes'), 'no skill yet');
 
   put($p, '.raider/agents/beta.md', agent('beta'));
   put($p, '.raider/skills/notes/SKILL.md', "---\ndescription: Notes.\n---\nN\n");
-  is([ map { $_->{name} } $c->agent_catalog->agents ], [qw( alpha general-purpose )], 'cached until reload');
+  is([ map { $_->{name} } $c->agent_catalog->agents ], [qw( alpha general-purpose Explore Plan )], 'cached until reload');
   $c->reload;
-  is([ map { $_->{name} } $c->agent_catalog->agents ], [qw( alpha beta general-purpose )], 'agents read again');
+  is([ map { $_->{name} } $c->agent_catalog->agents ], [qw( alpha beta general-purpose Explore Plan )], 'agents read again');
   ok($c->skill_resolver->resolve('notes'), 'the resolver sees the new skill catalogue');
 };
 

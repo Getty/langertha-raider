@@ -28,13 +28,14 @@ a scenario.
     TaskGet -> task_get          Task, Agent -> agent
     AskUserQuestion -> ask_user  EnterPlanMode -> enter_plan_mode
     ExitPlanMode -> exit_plan_mode
+    SendMessage -> send_message
 
 A name C<mcp__server__tool> is an MCP tool and passes through unchanged:
 raider addresses MCP tools the same way. Any other name is unknown --
 L</raider_name> returns undef; the table never guesses. ADR 0025 lists every
 Claude Code tool name known and why those without a raider tool have none
-(C<NotebookEdit>, C<ToolSearch>, C<SendMessage>, C<Monitor>,
-C<EnterWorktree>, ...).
+(C<NotebookEdit>, C<ToolSearch>, C<Monitor>, C<EnterWorktree>, ...).
+C<SendMessage> means C<send_message> since ADR 0027.
 
 The table names the raider tool a Claude Code tool stands for; it does not
 say that the tool is mounted in a run. raider mounts one task-list family at
@@ -79,6 +80,7 @@ my %RAIDER = (
   AskUserQuestion => 'ask_user',
   EnterPlanMode   => 'enter_plan_mode',
   ExitPlanMode    => 'exit_plan_mode',
+  SendMessage     => 'send_message',
 );
 
 # The way back: the current Claude Code name of each raider tool.
@@ -105,6 +107,7 @@ my %CLAUDE = (
   ask_user        => 'AskUserQuestion',
   enter_plan_mode => 'EnterPlanMode',
   exit_plan_mode  => 'ExitPlanMode',
+  send_message    => 'SendMessage',
 );
 
 # The arguments that carry another name: raider name => Claude name.

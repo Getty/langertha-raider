@@ -26,4 +26,4 @@ expect:
   tools:
     - { name: bash, error: true, text: 'No such tool available: bash</tool_use_error>' }
     - { name: read_file, text: 'alpha' }
-    - { name: agent, text: '\Aalpha and beta\z' }
+    - { name: agent, text: '\Aalpha and beta\nagentId: agent_1 \(use send_message with to: ''agent_1'' to continue this agent\)\n<usage>subagent_tokens: \d+\ntool_uses: \d+\nduration_ms: \d+</usage>\z' }

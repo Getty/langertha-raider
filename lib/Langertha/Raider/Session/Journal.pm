@@ -138,23 +138,28 @@ sub last_run_number {
 The runs in order, each a hash reference: C<run>, C<status> (from
 C<run.finished>, or C<interrupted> without one), C<started> and
 C<finished> (the events, C<finished> may be C<undef>), C<prompt> (the
-user message) and C<response> (the assistant message, when there is one).
+user message -- the first that is not a notification of background work,
+ADR 0027, else the first notification) and C<response> (the assistant
+message, when there is one).
 
 =cut
 
 sub runs {
   my ( $self ) = @_;
-  my ( @runs, %run );
+  my ( @runs, %run, %notice );
   for my $e (@{ $self->events }) {
     my $id = $e->{run} // next;
     my $r = $run{$id} //= do { push @runs, { run => $id }; $runs[-1] };
     if    ($e->{type} eq 'run.started')  { $r->{started}  = $e }
     elsif ($e->{type} eq 'run.finished') { $r->{finished} = $e }
     elsif ($e->{type} eq 'message') {
-      $r->{prompt}   //= $e->{content} if ($e->{role} // '') eq 'user';
+      if (($e->{role} // '') eq 'user') {
+        $e->{notification} ? ( $notice{$id} //= $e->{content} ) : ( $r->{prompt} //= $e->{content} );
+      }
       $r->{response}   = $e->{content} if ($e->{role} // '') eq 'assistant';
     }
   }
+  $_->{prompt} = $notice{ $_->{run} } for grep { !defined $_->{prompt} && defined $notice{ $_->{run} } } @runs;
   $_->{status} = $_->{finished} ? ($_->{finished}{status} // 'unknown') : 'interrupted' for @runs;
   return \@runs;
 }

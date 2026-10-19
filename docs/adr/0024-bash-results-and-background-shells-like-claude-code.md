@@ -77,7 +77,8 @@ pipe also means a background command never blocks on a full pipe while nobody re
 `timeout` is in seconds (raider's unit since ADR 0018; `ToolNames` turns Claude's
 milliseconds into seconds), default 120, at most 600 (more is cut to 600; 0, negative or not
 a number is the default). `description` is accepted and ignored (Claude Code shows it to
-the person; raider's trace shows the command).
+the person; raider's trace shows the command) — since ADR 0027 it names a background shell
+in its notification.
 
 A command still running after its timeout is moved to the background, as in Claude Code:
 the loop adopts it (§4) and the result is
@@ -135,7 +136,10 @@ before (ADR 0021 §3).
 - **No output file path and no notification.** Claude Code names its output file and
   notifies the model when the task ends. Raider's output file is internal (outside the root,
   where the file tools do not reach) and there is no channel to notify a model between its
-  calls; the texts point to `bash_output` instead.
+  calls; the texts point to `bash_output` instead. *Notification superseded by ADR 0027 §4:
+  a background shell that ends notifies its caller with a `<task-notification>` through the
+  application's task registry (summary from `description`, else the command); the texts
+  then say "You will be notified when it completes."; the output file stays internal.*
 - **No persisted output.** Claude Code saves a successful output over ~30000 characters to a
   file and returns a 2 KB preview; raider keeps start and end inline, the form Claude Code
   uses for failed commands, for both. The threshold of that form differs in Claude Code

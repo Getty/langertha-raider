@@ -38,9 +38,12 @@ Code reference called as C<< $on_event->($type, %payload) >>. Required.
 =over
 
 =item C<tool.call> -- C<call> (the id of the call within the raid: C<c1>,
-C<c2>, ...), C<name>, C<arguments> and C<status> (C<dispatched>).
+C<c2>, ...), C<name>, C<arguments> and C<status> (C<dispatched>). The id
+is also recorded as C<call> in the call's context
+(L<Langertha::Raider/plugins>), where an async tool's handler finds it.
 
-=item C<tool.result> -- C<call> (the id of its C<tool.call>), C<name>,
+=item C<tool.result> -- C<call> (the id of its C<tool.call>, also when
+calls ran at the same time), C<name>,
 C<status> (C<cancelled> for a call cut off by L<Langertha::Raider/cancel>,
 C<failed> when the tool reported an error, else C<succeeded>),
 C<ok> (the same as a boolean), C<size> (characters of the text) and
@@ -95,25 +98,31 @@ async sub plugin_after_llm_response {
 }
 
 async sub plugin_before_tool_call {
-  my ( $self, $name, $input ) = @_;
+  my ( $self, $name, $input, $ctx ) = @_;
   $self->_calls($self->_calls + 1);
+  # Recorded in the call's context (Langertha::Raider/plugins), so the result
+  # of a call that ran beside others gets its own id, and an async tool's
+  # handler knows it (the agent call id of ADR 0027).
+  $ctx->{call} = $self->_call_id if ref $ctx eq 'HASH';
   $self->on_event->('tool.call', call => $self->_call_id, name => $name, arguments => $input // {},
     status => 'dispatched');
   return ( $name, $input );
 }
 
-# Tool calls run one after another, so a result belongs to the last call.
+# The id of the last call. A host that passes no call context runs its tool
+# calls one after another, so a result belongs to the last call.
 sub _call_id { 'c'.$_[0]->_calls }
 
 async sub plugin_after_tool_call {
-  my ( $self, $name, $input, $result ) = @_;
+  my ( $self, $name, $input, $result, $ctx ) = @_;
+  my $call = ref $ctx eq 'HASH' && defined $ctx->{call} ? $ctx->{call} : $self->_call_id;
   my ( $text, $ok ) = ref $result eq 'HASH'
     ? ( join('', map { $_->{text} // '' } grep { ref $_ eq 'HASH' }
         ref $result->{content} eq 'ARRAY' ? @{ $result->{content} } : ()),
         !$result->{isError} )
     : ( $result // '', 1 );
   $self->on_event->('tool.result',
-    call    => $self->_call_id,
+    call    => $call,
     name    => $name,
     status  => ref $result eq 'HASH' && $result->{cancelled} ? 'cancelled' : $ok ? 'succeeded' : 'failed',
     ok      => $ok ? JSON::MaybeXS->true : JSON::MaybeXS->false,

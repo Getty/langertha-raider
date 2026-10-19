@@ -26,7 +26,7 @@ our @SEEN;
   package Test::Raider::Subagent::Spy;
   use Moose;
   extends 'Langertha::Raider::Subagent';
-  sub run { push @main::SEEN, $_[0]; return ( 'spied', 0 ) }
+  sub foreground_f { push @main::SEEN, $_[0]; return Future->done( 'spied', 0 ) }
   __PACKAGE__->meta->make_immutable;
 }
 

@@ -7,6 +7,7 @@ use Test2::V0;
 use FindBin;
 use lib "$FindBin::Bin/lib";
 use IPC::Open3 qw( open3 );
+use JSON::MaybeXS ();
 use Path::Tiny;
 use YAML::PP;
 BEGIN {
@@ -122,12 +123,13 @@ subtest 'the third prompt: each subagent replays its own log after the call that
   my $s    = $yaml->load_string($text);
   like( $text, qr/^# 2 model responses and 7 of subagents\./m, 'the head counts the subagent responses apart' )
     or diag $text;
-  is( $s->{app}, { max_agent_depth => 2 }, 'a subagent of a subagent needs max_agent_depth 2' );
+  ok( !exists $s->{app}, 'a subagent of a subagent: within raider\'s default depth of 3, no app key' );
+  unlike( $text, qr/max_agent_depth|deeper than/, 'nor a note' );
   is( $s->{files}, { 'app.txt' => "one\n2\nthree\n\n" }, "files: rebuilt from the subagent's whole Read" );
   is( $s->{script}, [
     { tool_calls => [
       [ agent => { description => 'Review app', prompt => 'Review {{ROOT}}/app.txt and report.', subagent_type => 'general-purpose' } ],
-      [ agent => { description => 'Find files', prompt => 'List the text files.', subagent_type => 'general-purpose', run_in_background => T() } ],
+      [ agent => { description => 'Find files', prompt => 'List the text files.', subagent_type => 'Explore' } ],
     ] },
     { tool_calls => [
       [ read_file => { path => 'app.txt' } ],
@@ -154,8 +156,8 @@ subtest 'the third prompt: each subagent replays its own log after the call that
 
   like( $text, qr/^  # subagent_type reviewer: no such agent file in \.claude\/agents of the project .*, general-purpose stands in$/m,
     'an agent file that is not there: general-purpose, noted' );
-  like( $text, qr/^  # subagent_type Explore: Claude Code's built-in agent, raider has no such agent, general-purpose stands in$/m,
-    'a built-in of Claude Code: general-purpose, noted' );
+  unlike( $text, qr/subagent_type Explore:/, 'Explore stays: raider has it built in (ADR 0027)' );
+  like( $text, qr/^  # subagent Explore of Agent \(Find files\), from agent-a0000000000000002\.jsonl /m, 'and runs as Explore' );
   like( $text, qr/^  # subagent reviewer \(as general-purpose\) of Agent \(Review app\), from agent-a0000000000000001\.jsonl$/m,
     'where a subagent starts is noted' );
   like( $text, qr/^  # left out 1 later response of this run, after SubagentHandback$/m, 'the text after the handback is left out' );
@@ -194,7 +196,7 @@ subtest "an agent file of the project goes into files:, without its skills" => s
   like( $run->{out}, qr/^# \.claude\/agents\/review\/reviewer\.md: the agent reviewer, from the project, without its skills \(review, getty-perl-core\)$/m,
     'noted' );
   is( $s->{script}[0]{tool_calls}[0][1]{subagent_type}, 'reviewer', 'the call keeps its agent' );
-  is( $s->{script}[0]{tool_calls}[1][1]{subagent_type}, 'general-purpose', 'the built-in Explore does not' );
+  is( $s->{script}[0]{tool_calls}[1][1]{subagent_type}, 'Explore', 'so does the built-in Explore' );
 
   my $dir  = Path::Tiny->tempdir;
   my $file = $dir->child('agent-file-from-claude-log.yml');
@@ -273,6 +275,37 @@ subtest 'the task tools, MultiEdit as one multi_edit, TodoWrite mounts todo_writ
   $dir->child('todo.yml')->spew_utf8( $todo->{out} );
 
   run_scenario_files( map { $dir->child($_)->stringify } qw( tasks.yml multi.yml todo.yml ) );
+};
+
+subtest 'SendMessage is left out and noted: raider would resume the agent in the background (ADR 0027)' => sub {
+  my $dir  = Path::Tiny->tempdir;
+  my $file = $dir->child('send.jsonl');
+  my $json = JSON::MaybeXS->new( utf8 => 1, canonical => 1 );
+  my $n    = 0;
+  my $line = sub {
+    my ( $type, $message, %more ) = @_;
+    $n++;
+    return $json->encode( { cwd => '/home/tester/work/demo', isSidechain => JSON::MaybeXS->false, message => $message,
+      parentUuid => undef, sessionId => '00000000-0000-4000-8000-000000000003',
+      timestamp => sprintf( '2026-10-19T10:00:%02d.000Z', $n ), type => $type,
+      uuid => sprintf( 's%07d-0000-4000-8000-%012d', $n, $n ), version => '2.1.300', %more } )."\n";
+  };
+  $file->spew_raw(
+    $line->( user => { role => 'user', content => 'Ask the reviewer again.' } ),
+    $line->( assistant => { id => 'msg_s1', model => 'claude-test', role => 'assistant', type => 'message', content => [
+      { type => 'tool_use', id => 'toolu_s1', name => 'SendMessage',
+        input => { to => 'a0000000000000001', message => 'Check it again.', summary => 'again' } } ] } ),
+    $line->( user => { role => 'user', content => [ { type => 'tool_result', tool_use_id => 'toolu_s1',
+      content => 'Message queued for delivery to a0000000000000001 at its next tool round.' } ] } ),
+    $line->( assistant => { id => 'msg_s2', model => 'claude-test', role => 'assistant', type => 'message',
+      content => [ { type => 'text', text => 'Asked.' } ] } ),
+  );
+  my $run = convert( "$file", '--home', '/home/tester' );
+  is( $run->{exit}, 0, 'converts' ) or diag $run->{err};
+  my $s = $yaml->load_string( $run->{out} );
+  is( $s->{script}, [ { text => 'Asked.' } ], 'no send_message call in the script' );
+  like( $run->{out}, qr/^  # left out SendMessage to a0000000000000001: continuing an agent runs it in the background in raider, which the draft does not replay$/m,
+    'the note says why' ) or diag $run->{out};
 };
 
 subtest 'mistakes are refused with a message' => sub {

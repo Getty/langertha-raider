@@ -20,5 +20,5 @@ expect:
     - { tool: write_file, rule: 'Edit(/**)', arguments: { path: a.txt } }
   tools:
     - { name: write_file }
-    - { name: agent, text: '\Awrote a.txt\z' }
+    - { name: agent, text: '\Awrote a.txt\nagentId: agent_1 \(use send_message with to: ''agent_1'' to continue this agent\)\n<usage>subagent_tokens: \d+\ntool_uses: \d+\nduration_ms: \d+</usage>\z' }
     - { name: write_file }

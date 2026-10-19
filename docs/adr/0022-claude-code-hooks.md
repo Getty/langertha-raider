@@ -247,7 +247,9 @@ in the Claude layout only, as Claude Code fires them from `TaskCreate` / `TaskUp
   non-blocking errors reported as `hook.message`.
 - The hook runs on the application's loop and the tool waits for it (the way `web_search`
   waits for its provider). `TodoTools` has a plain callback (`before_task`) and knows nothing
-  of hooks. Subagents' own task lists fire no task hooks yet.
+  of hooks. Since ADR 0027 a subagent's own task list fires them too, with the subagent's
+  hook fields (`agent_id`, `agent_type`, `permission_mode`); their reports go to its journal
+  and a `continue: false` cancels the subagent only (as its tool hooks, ADR 0020 §7).
 
 **The words of a `PreToolUse` denial** replace raider's "Tool call 'X' was denied: PreToolUse
 hook: …" (ADR 0026 follow-up). From the local session logs: a hook that denies by exit 2

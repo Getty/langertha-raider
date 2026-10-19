@@ -5,6 +5,9 @@ use Moose;
 use namespace::autoclean;
 use Carp qw( croak );
 use Encode ();
+use Future;
+use Future::AsyncAwait;
+use JSON::MaybeXS ();
 use List::Util qw( min );
 use MCP::Server;
 use Path::Tiny;
@@ -51,6 +54,16 @@ across the runs of a session and are stopped when it goes away
 C<allowed_commands> and C<validator> (the loadguard gate, ADR 0018) are asked
 before any command starts, in the foreground or the background, with the
 texts L<MCP::Run> used.
+
+With L</tasks> -- the application's registry of background work (ADR 0027)
+-- a background shell is registered there as C<bash_N>, kind C<bash>, and
+when it ends, on its own or stopped, a C<< <task-notification> >> goes to
+the run that started it (L</async_tools>); the texts of C<bash> then say
+that it will be notified. C<bash_output> and C<kill_shell> also take the ID
+(or the name given at spawn) of any other entry of the registry -- a
+subagent: C<bash_output> answers with its status and, once it has ended,
+its report; C<kill_shell> asks it to stop (L<Langertha::Raider::Tasks/stop>).
+This module does not know what a subagent is; the registry does.
 
 =cut
 
@@ -103,6 +116,21 @@ has validator => (
 Optional. Called as C<< $validator->($command, $working_directory) >> before a
 command starts; C<1> lets it run, anything else refuses it with
 C<Command REASON> (L<Langertha::Raider::Loadguard/validator>).
+
+=cut
+
+has tasks => (
+  is        => 'ro',
+  isa       => 'Langertha::Raider::Tasks',
+  predicate => 'has_tasks',
+);
+
+=attr tasks
+
+Optional. The application's L<Langertha::Raider::Tasks>: background shells
+are registered and notify there, and C<bash_output> and C<kill_shell> reach
+its other entries (see L</DESCRIPTION>). Without it a background shell is
+known only here and notifies nobody.
 
 =cut
 
@@ -166,6 +194,7 @@ built once.
 has _shells => ( is => 'ro', isa => 'HashRef', default => sub { {} }, init_arg => undef );
 has _count  => ( is => 'rw', isa => 'Int', default => 0, init_arg => undef );
 has _dir    => ( is => 'ro', lazy => 1, builder => '_build__dir', init_arg => undef );
+has _quiet  => ( is => 'rw', isa => 'Bool', default => 0, init_arg => undef );
 
 sub _build__dir { Path::Tiny->tempdir( TEMPLATE => 'raider-bash-XXXXXXXX' ) }
 
@@ -175,7 +204,8 @@ sub _no_output { '(Bash completed with no output)' }
 
 sub _hint {
   my ( $self, $id ) = @_;
-  return 'Read its output and see whether it has finished with bash_output (bash_id: '.$id
+  return ( $self->has_tasks ? 'You will be notified when it completes. ' : '' )
+    .'Read its output and see whether it has finished with bash_output (bash_id: '.$id
     .'); stop it with kill_shell (shell_id: '.$id.').';
 }
 
@@ -222,11 +252,14 @@ sub _build_server {
     description  => 'Read the output a background shell has written since the last call, with its status (running, '
       .'completed, killed) and, once it has finished, its exit code. filter: a regex; only matching lines are '
       .'returned, the others are discarded. block: true waits until the command has finished, at most timeout '
-      .'seconds (default '.$self->block_timeout.', at most '.$self->max_timeout.').',
+      .'seconds (default '.$self->block_timeout.', at most '.$self->max_timeout.').'
+      .( $self->has_tasks ? ' Given an agent ID (or an agent\'s name), it answers with the agent\'s status and, once '
+        .'it has ended, its report; block waits for its end.' : '' ),
     input_schema => {
       type       => 'object',
       properties => {
-        bash_id => { type => 'string',  description => 'The ID of the background shell' },
+        bash_id => { type => 'string',  description => 'The ID of the background shell'
+          .( $self->has_tasks ? ' (or of an agent)' : '' ) },
         filter  => { type => 'string',  description => 'Regex: only lines matching it are returned' },
         block   => { type => 'boolean', description => 'Wait until the command has finished' },
         timeout => { type => 'integer', description => 'With block: the most seconds to wait' },
@@ -238,11 +271,13 @@ sub _build_server {
   $server->tool(
     name         => 'kill_shell',
     description  => 'Stop a background shell by its ID: SIGTERM to its process group, SIGKILL after '
-      .$self->kill_grace.' seconds.',
+      .$self->kill_grace.' seconds.'
+      .( $self->has_tasks ? ' Given an agent ID (or an agent\'s name), it stops that agent.' : '' ),
     input_schema => {
       type       => 'object',
       properties => {
-        shell_id => { type => 'string', description => 'The ID of the background shell to stop' },
+        shell_id => { type => 'string', description => 'The ID of the background shell to stop'
+          .( $self->has_tasks ? ' (or of an agent)' : '' ) },
       },
       required => ['shell_id'],
     },
@@ -260,10 +295,19 @@ sub _build_server {
 The C<bash> tool: runs the command and returns the result text and whether
 it is an error result.
 
+    my ( $text, $is_error ) = $shell->bash( $in, { recipient => 'agent_2', call => 'c4', detached => 1 } );
+
+The optional caller (see L</async_tools>) says who runs it: the
+C<recipient> of the notification when the command ends in the background
+(default C<main>), the C<call> id the notification names as
+C<tool-use-id>, and whether the run is C<detached> -- its foreground
+command then belongs to the session (L</background_pids>).
+
 =cut
 
 sub bash {
-  my ( $self, $in ) = @_;
+  my ( $self, $in, $caller ) = @_;
+  $caller //= {};
   my $command = $in->{command};
   return ( 'No command given: the command parameter must be a non-empty string', 1 )
     unless defined $command && $command =~ /\S/;
@@ -273,6 +317,11 @@ sub bash {
   }
   my $shell = $self->_spawn( $command, $wd );
   return ( 'Cannot start bash: '.$shell, 1 ) unless ref $shell;
+  $shell->{description} = $in->{description} if defined $in->{description} && !ref $in->{description}
+    && $in->{description} =~ /\S/;
+  $shell->{recipient}   = $caller->{recipient} // 'main';
+  $shell->{tool_use_id} = $caller->{call};
+  $shell->{detached}    = $caller->{detached} ? 1 : 0;
 
   if ( $in->{run_in_background} ) {
     $self->_adopt($shell);
@@ -368,6 +417,7 @@ sub _adopt {
   my ( $self, $shell ) = @_;
   $shell->{background} = 1;
   return unless $shell->{status} eq 'running';
+  $self->_register($shell);
   weaken( my $weak = $self );
   $shell->{watched} = 1;
   $self->loop->watch_process( $shell->{pid}, sub {
@@ -405,18 +455,100 @@ sub _unwatch {
   return;
 }
 
-# Records how a shell ended; a wait status of undef: unknown, stopped.
+# Records how a shell ended; a wait status of undef: unknown, stopped. A
+# registered shell ends its entry and notifies -- once, as this runs once.
 sub _ended {
   my ( $self, $shell, $status ) = @_;
   return unless $shell->{status} eq 'running';
   $shell->{ended} = Time::HiRes::time();
   if ( !defined $status || $shell->{stopping} ) {
     $shell->{status} = 'killed';
-    return;
   }
-  $shell->{status}    = 'completed';
-  $shell->{exit_code} = ( $status & 127 ) ? 128 + ( $status & 127 ) : $status >> 8;
+  else {
+    $shell->{status}    = 'completed';
+    $shell->{exit_code} = ( $status & 127 ) ? 128 + ( $status & 127 ) : $status >> 8;
+  }
+  $self->_task_ended($shell) if $shell->{registered};
   return;
+}
+
+#### The registry
+
+# A background shell in the application's registry (ADR 0027 section 1):
+# kind bash; leaving raider stops it through the registry too.
+sub _register {
+  my ( $self, $shell ) = @_;
+  return unless $self->has_tasks && !$shell->{registered};
+  weaken( my $weak = $self );
+  $self->tasks->add(
+    id          => $shell->{id},
+    kind        => 'bash',
+    command     => $shell->{command},
+    description => $shell->{description},
+    tool_use_id => $shell->{tool_use_id},
+    recipient   => $shell->{recipient} // 'main',
+    background  => 1,
+    stop        => sub { $weak->_stop($shell) if $weak },
+  );
+  $shell->{registered} = 1;
+  return;
+}
+
+# The end of a registered shell: its entry, then the notification for the
+# run that started it -- unless that is a subagent whose run has ended
+# (nobody would read it), or the shells are being torn down.
+sub _task_ended {
+  my ( $self, $shell ) = @_;
+  my $tasks  = $self->tasks;
+  my $status = $shell->{status} eq 'killed' ? 'killed' : $shell->{exit_code} ? 'failed' : 'completed';
+  $tasks->finish( $shell->{id}, $status, exit_code => $shell->{exit_code} );
+  return if $self->_quiet || ${^GLOBAL_PHASE} eq 'DESTRUCT';
+  my $recipient = $shell->{recipient} // 'main';
+  if ( $recipient ne 'main' ) {
+    my $caller = $tasks->get($recipient);
+    return unless $caller && $caller->{status} eq 'running';
+  }
+  my ( $text, $label ) = $self->notification( $shell, $status );
+  $tasks->notify( $recipient, $text, id => $shell->{id}, label => $label );
+  return;
+}
+
+=method notification
+
+    my ( $text, $label ) = $shell->notification( $shell_hash, 'completed' );
+
+The C<< <task-notification> >> of a background shell that ended (ADR 0027
+E<sect>4, in Claude Code's form for shells) and the line a surface shows
+for it. Status C<completed> (exit code 0), C<failed> (any other) or
+C<killed>; summary C<Background command "DESCRIPTION" completed (exit code
+N)>, C<... failed with exit code N> or C<... was stopped> -- the command
+stands in for a missing C<description>.
+
+=cut
+
+sub notification {
+  my ( $self, $shell, $status ) = @_;
+  my $what = 'Background command "'.( $shell->{description} // $shell->{command} ).'"';
+  my $summary = $status eq 'killed' ? $what.' was stopped'
+    : $status eq 'failed'           ? $what.' failed with exit code '.$shell->{exit_code}
+    :                                 $what.' completed (exit code '.( $shell->{exit_code} // 0 ).')';
+  my $text = $self->tasks->notification_text(
+    task_id     => $shell->{id},
+    tool_use_id => $shell->{tool_use_id},
+    status      => $status,
+    summary     => $summary,
+  );
+  return ( $text, 'background shell '.$shell->{id}.' '.( $status eq 'killed' ? 'was stopped' : $status ) );
+}
+
+# The registry entry an ID or name stands for when it is no shell of this
+# object (a subagent), or nothing.
+sub _task {
+  my ( $self, $ref ) = @_;
+  return unless $self->has_tasks;
+  my $entry = $self->tasks->find($ref) or return;
+  return if $entry->{kind} eq 'bash';
+  return $entry;
 }
 
 # Waits up to $seconds for the shell to end; true when it has. With
@@ -542,22 +674,102 @@ status and exit code:
 C<stdout> carries both outputs and is left out when there is no new output.
 An unknown ID is an error result C<No task found with ID: ID>.
 
+Another entry of L</tasks> (an agent, by ID or by the name given at spawn)
+answers with its status (C<running>, C<completed>, C<failed>, C<killed>)
+and, once it has ended, its report (its error, when it failed):
+
+    <status>completed</status>
+
+    <output>
+    REPORT
+    </output>
+
+This synchronous method does not wait for an agent: an agent runs on the
+loop, which a blocking wait would stop. L</bash_output_f> waits.
+
+=method bash_output_f
+
+    my ( $text, $is_error ) = await $shell->bash_output_f({ bash_id => 'agent_1', block => 1 });
+
+L</bash_output> as a Future: C<block> waits on the loop, so other work --
+an agent, the shells -- goes on meanwhile, for a shell and for an agent.
+What L</async_tools> runs.
+
 =cut
 
 sub bash_output {
   my ( $self, $in ) = @_;
   my $id    = $in->{bash_id} // '';
-  my $shell = $self->_shells->{$id} or return ( $self->_no_shell($id), 1 );
-  my $filter;
-  if ( defined $in->{filter} && length $in->{filter} ) {
-    $filter = eval { qr/$in->{filter}/ } or do {
-      ( my $why = $@ ) =~ s/ at \S+ line \d+.*//s;
-      return ( 'Invalid filter regex: '.$why, 1 );
-    };
+  my $shell = $self->_shells->{$id};
+  unless ($shell) {
+    my $entry = $self->_task($id) or return ( $self->_no_shell($id), 1 );
+    return $self->_task_output($entry);
   }
+  my ( $filter, $bad ) = $self->_filter( $in->{filter} );
+  return ( $bad, 1 ) if defined $bad;
   $in->{block}
     ? $self->_wait( $shell, $self->_seconds( $in->{timeout}, $self->block_timeout ) )
     : $self->_poll($shell);
+  return $self->_shell_output( $shell, $filter );
+}
+
+async sub bash_output_f {
+  my ( $self, $in ) = @_;
+  my $id    = $in->{bash_id} // '';
+  my $shell = $self->_shells->{$id};
+  my $entry = $shell ? undef : $self->_task($id);
+  return ( $self->_no_shell($id), 1 ) unless $shell || $entry;
+  my ( $filter, $bad ) = $shell ? $self->_filter( $in->{filter} ) : ();
+  return ( $bad, 1 ) if defined $bad;
+  if ( $in->{block} ) {
+    my $done = $shell ? sub { $self->_poll($shell) } : sub { $entry->{status} ne 'running' };
+    await $self->_wait_f( $done, $self->_seconds( $in->{timeout}, $self->block_timeout ) );
+  }
+  return $self->_task_output($entry) if $entry;
+  $self->_poll($shell);
+  return $self->_shell_output( $shell, $filter );
+}
+
+# The filter of bash_output: ( $regex ), ( undef, $error_text ), or nothing.
+sub _filter {
+  my ( $self, $source ) = @_;
+  return unless defined $source && length $source;
+  my $filter = eval { qr/$source/ };
+  return $filter if $filter;
+  ( my $why = $@ ) =~ s/ at \S+ line \d+.*//s;
+  return ( undef, 'Invalid filter regex: '.$why );
+}
+
+# Lets the loop run until $done answers true, at most $seconds.
+async sub _wait_f {
+  my ( $self, $done, $seconds ) = @_;
+  my $deadline = Time::HiRes::time() + $seconds;
+  my $pause    = 0.001;
+  until ( $done->() ) {
+    my $left = $deadline - Time::HiRes::time();
+    last if $left <= 0;
+    await $self->loop->delay_future( after => min( $pause, $left ) );
+    $pause = min( $pause * 2, 0.05 );
+  }
+  return;
+}
+
+# bash_output of a registry entry that is no shell: its status, and once it
+# has ended its report (or error).
+sub _task_output {
+  my ( $self, $entry ) = @_;
+  my @parts = ( '<status>'.$entry->{status}.'</status>' );
+  if ( $entry->{status} ne 'running' ) {
+    my $text = $entry->{status} eq 'completed' ? $entry->{report} : $entry->{error};
+    push @parts, "<output>\n".$self->_clip( $text =~ s/[\r\n]+\z//r )."\n</output>"
+      if defined $text && length $text;
+  }
+  return ( join( "\n\n", @parts ), 0 );
+}
+
+# bash_output of a shell: what it wrote since the last call, filtered.
+sub _shell_output {
+  my ( $self, $shell, $filter ) = @_;
   my $output = $self->_take_output( $shell, $shell->{status} ne 'running' );
   if ($filter) {
     $output = join '', grep { /$filter/ } split /^/m, $output;
@@ -579,12 +791,27 @@ The C<kill_shell> tool: stops a running background shell (L</kill_grace>)
 and answers C<Successfully stopped task: ID (COMMAND)>. An unknown ID, or a
 shell that is not running, is an error result.
 
+Another running entry of L</tasks> (an agent, by ID or by the name given at
+spawn) is asked to stop (L<Langertha::Raider::Tasks/stop>), and the answer
+is C<Successfully stopped task: agent_1 (DESCRIPTION)>; its run ends on the
+loop, and a background agent's notification then says it was stopped. One
+that is not running is the same error as a shell's.
+
 =cut
 
 sub kill_shell {
   my ( $self, $in ) = @_;
   my $id    = $in->{shell_id} // '';
-  my $shell = $self->_shells->{$id} or return ( $self->_no_shell($id), 1 );
+  my $shell = $self->_shells->{$id};
+  unless ($shell) {
+    my $entry = $self->_task($id) or return ( $self->_no_shell($id), 1 );
+    return ( 'Task '.$entry->{id}.' is not running (status: '.$entry->{status}.')', 1 )
+      unless $entry->{status} eq 'running';
+    $self->tasks->stop( $entry->{id} );
+    my $label = defined $entry->{description} && length $entry->{description}
+      ? $entry->{description} : $entry->{agent} // $entry->{name} // $entry->{kind};
+    return ( 'Successfully stopped task: '.$entry->{id}.' ('.$label.')', 0 );
+  }
   $self->_poll($shell);
   return ( 'Task '.$id.' is not running (status: '.$shell->{status}.')', 1 )
     unless $shell->{status} eq 'running';
@@ -596,15 +823,77 @@ sub kill_shell {
 
 =method background_pids
 
-The process IDs of the background shells still running. A surface that
-stops the children of a cancelled run leaves these alone: they belong to the
-session, not to the run.
+The process IDs of the commands that belong to the session, not to the run
+in progress: the background shells still running, and the foreground
+command of a run that goes on without the person -- a background subagent,
+the C<detached> caller of L</bash> (ADR 0027 E<sect>3). A surface that
+stops the children of a cancelled run leaves these alone.
 
 =cut
 
 sub background_pids {
   my ( $self ) = @_;
-  return map { $_->{pid} } grep { $_->{background} && $_->{status} eq 'running' } values %{ $self->_shells };
+  return map { $_->{pid} } grep { ( $_->{background} || $_->{detached} ) && $_->{status} eq 'running' }
+    values %{ $self->_shells };
+}
+
+=method async_tools
+
+    my $tools = $shell->async_tools( recipient => 'main' );
+    my $tools = $shell->async_tools(
+      recipient => sub { $subagent->task_id },
+      detached  => sub { $subagent->detached },
+      applies   => sub { my ( $mcp ) = @_; ... },   # is $mcp a client of this server?
+    );
+
+The three tools as L<Langertha::Raider/async_tools> for the raider of one
+run. C<bash> runs with that run as its caller (L</bash>): the
+C<recipient> of its background shells' notifications and whether it is
+C<detached> -- each a value or a code reference asked at the call -- and
+the call id from the call's context (C<call>, else C<id>). C<bash_output>
+goes through L</bash_output_f>, so C<block> lets the loop run;
+C<kill_shell> is L</kill_shell>. Each handler returns a Future of an MCP
+result. C<applies> goes into each tool as the C<applies> of
+L<Langertha::Raider/async_tools>, so a tool of these names from another
+source is left alone.
+
+=cut
+
+sub async_tools {
+  my ( $self, %caller ) = @_;
+  weaken( my $weak = $self );
+  my $value  = sub { my ( $v ) = @_; ref $v eq 'CODE' ? $v->() : $v };
+  my $result = sub {
+    my ( $text, $is_error ) = @_;
+    return {
+      content => [ { type => 'text', text => ''.( $text // '' ) } ],
+      isError => $is_error ? JSON::MaybeXS->true : JSON::MaybeXS->false,
+    };
+  };
+  my $gone = sub { Future->done( $result->( 'the shell tools are gone', 1 ) ) };
+  my $in   = sub { ref $_[0] eq 'HASH' ? $_[0] : {} };
+  my %tools = (
+    bash => sub {
+      my ( $input, %ctx ) = @_;
+      return $gone->() unless $weak;
+      return Future->done( $result->( $weak->bash( $in->($input), {
+        recipient => $value->( $caller{recipient} ) // 'main',
+        detached  => $value->( $caller{detached} ),
+        call      => $ctx{call} // $ctx{id},
+      } ) ) );
+    },
+    bash_output => sub {
+      my ( $input ) = @_;
+      return $gone->() unless $weak;
+      return $weak->bash_output_f( $in->($input) )->then( sub { Future->done( $result->(@_) ) } );
+    },
+    kill_shell => sub {
+      my ( $input ) = @_;
+      return $gone->() unless $weak;
+      return Future->done( $result->( $weak->kill_shell( $in->($input) ) ) );
+    },
+  );
+  return { map { $_ => { code => $tools{$_}, ( $caller{applies} ? ( applies => $caller{applies} ) : () ) } } keys %tools };
 }
 
 =method stop_all
@@ -624,6 +913,7 @@ sub stop_all {
 
 sub DEMOLISH {
   my ( $self ) = @_;
+  $self->_quiet(1);
   $self->stop_all;
   return;
 }

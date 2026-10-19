@@ -5,9 +5,11 @@
 # itself, because the agent cannot. A write attempt by the agent has no tool to
 # land on. The agent's read does not count for the caller: each has a read
 # state of its own (ADR 0023), so the caller reads before it edits.
-# Abweichung: Claude Code's Explore is a built-in agent type; raider has none and
-# the same shape is an agent file with disallowedTools (an Explore file copied
-# from a Claude Code setup works the same).
+# Abweichung: Claude Code's Explore is a built-in agent type; raider has one too
+# since ADR 0027, but this scenario keeps the shape of an agent file with
+# disallowedTools (an Explore file copied from a Claude Code setup works the
+# same). Agent is disallowed as in Claude Code's Explore: with nesting depth 3
+# a subagent would otherwise get the agent tool.
 # Abweichung: NotebookEdit has no raider counterpart; it is ignored (reported by
 # `config explain`), the rest of the list still applies.
 # Abweichung: where Claude Code's agent is never offered a removed tool, raider
@@ -15,7 +17,7 @@
 title: a read-only explore agent searches with glob, grep and read_file, its write attempt finds no tool, and the caller edits
 files:
   CLAUDE.md: "Project.\n"
-  .claude/agents/scout.md: "---\nname: scout\ndescription: Read-only search of the tree; reports file and line, changes nothing.\ndisallowedTools: Write, Edit, NotebookEdit, Bash\n---\nSCOUT-BODY: you search and report, you never change files.\n"
+  .claude/agents/scout.md: "---\nname: scout\ndescription: Read-only search of the tree; reports file and line, changes nothing.\ndisallowedTools: Write, Edit, NotebookEdit, Bash, Agent\n---\nSCOUT-BODY: you search and report, you never change files.\n"
   src/limits.txt: "max_items = 10\nretries = 3\n"
   src/other.txt: "retries_note = see limits\n"
 prompt: Find where the retry count is set and change it to 5.
@@ -41,7 +43,7 @@ expect:
   files:
     src/limits.txt: "max_items = 10\nretries = 5\n"
   requests:
-    - { index: 0, tool_text: "- scout: Read-only search of the tree; reports file and line, changes nothing. (Tools: All tools except write_file, edit_file, bash)" }
+    - { index: 0, tool_text: "- scout: Read-only search of the tree; reports file and line, changes nothing. (Tools: All tools except write_file, edit_file, bash, agent)" }
     - { index: 1, contains: "SCOUT-BODY" }
     - { index: 1, lacks: [ write_file, edit_file, bash, agent, ask_user ] }
     - { index: 1, contains: "glob(" }

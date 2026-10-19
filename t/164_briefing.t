@@ -191,7 +191,8 @@ subtest 'spawn: the child\'s prompt is the briefing; skills before briefing.skil
     .'<skill name="notes" dir="'.$root.'/.claude/skills/notes">'."\nNOTES-BODY\n</skill>"
     ."\n\n---\n\n# Original task\n\nTHE-TASK";
   is( user_text( $app->mock_engine->requests->[1] ), $want, 'the child\'s first request: exactly the briefed prompt' );
-  is( $app->mock_engine->results->[-1]{result}{content}[0]{text}, 'child answer', 'the caller gets the child\'s answer' );
+  like( $app->mock_engine->results->[-1]{result}{content}[0]{text}, qr/\Achild answer\nagentId: agent_1 /,
+    'the caller gets the child\'s answer' );
   my ($started) = grep { $_->{type} eq 'agent.started' } @$events;
   my ($message) = grep { $_->{type} eq 'message' && $_->{role} eq 'user' }
     @{ $app->session_store->read( $started->{session} )->events };

@@ -20,7 +20,7 @@ expect:
     - { index: 2, absent: READER-BODY }
   tools:
     - { name: agent, error: true, text: "denied by rule 'Agent\\(reader\\)' from \\.raider/config\\.yml" }
-    - { name: agent, text: '\Ageneral answer\z' }
+    - { name: agent, text: '\Ageneral answer\nagentId: agent_1 \(use send_message with to: ''agent_1'' to continue this agent\)\n<usage>subagent_tokens: \d+\ntool_uses: \d+\nduration_ms: \d+</usage>\z' }
   events:
     - { type: permission.denied, tool: agent, by: rule, rule: 'Agent(reader)' }
     - { type: agent.started, call: c2, agent: general-purpose }

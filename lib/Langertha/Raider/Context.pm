@@ -81,7 +81,8 @@ The agent catalogue (L<Langertha::Raider::Context::Agents>) has its roots
 in the precedence of ADR 0020 E<sect>1 (L</agent_roots>).
 
 With L</bare> nothing is read at all: mode C<bare>, no memory, no settings,
-no skills, no agent files (only the built-in C<general-purpose> agent), no
+no skills, no agent files (only the built-in agents C<general-purpose>,
+C<Explore> and C<Plan>), no
 F<AGENTS.md>.
 
 =attr root

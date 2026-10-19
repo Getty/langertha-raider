@@ -9,6 +9,7 @@ use Test2::V0;
 use Path::Tiny;
 use YAML::PP;
 use Test::Raider::MockAI qw( mock_app );
+use Test::Raider::SlowAI qw( slow_app );
 use Test::Raider::FakeProc qw( fake_proc );
 use Test::Raider::LocalHTTP;
 use IO::Async::Loop;
@@ -75,6 +76,15 @@ our @EXPORT_OK = qw( run_scenario_files );
 #            not named gets no answer and stays off
 #   review:  [ yes | no | 'no: feedback', ... ]  the person reviewing plans of
 #            exit_plan_mode, in order (without the key nobody reviews)
+#   delay, sub_delay: seconds the main model (delay) and every subagent's model
+#            (sub_delay) take to answer, on the application's loop
+#            (Test::Raider::SlowAI instead of MockAI): work that runs on the loop
+#            meanwhile -- a background subagent -- really runs in between. The
+#            script is still consumed in the order the requests are answered.
+#   wait_background: true               run each prompt with run_prompt( wait_background => 1 )
+#            as a non-interactive run does (ADR 0027 section 3): the run does not
+#            end before its background subagents, and goes on with their
+#            notifications. Implies run_prompt.
 #   prompt:  the user prompt (or `prompts:`, a list run one after the other on
 #            the same raider, so the conversation carries over). A prompt
 #            `/NAME ARGS` that names a user-invocable skill or custom command
@@ -183,7 +193,9 @@ sub run_scenario_file {
            : defined $v && !ref $v ? $fill->($v)
            : $v;
     };
-    my $app = mock_app(
+    my $make = ( $s->{delay} || $s->{sub_delay} ) ? \&slow_app : \&mock_app;
+    my $app = $make->(
+      ( $s->{delay} || $s->{sub_delay} ? ( delay => $s->{delay} // 0, sub_delay => $s->{sub_delay} // 0 ) : () ),
       root => "$root", script => $deep_fill->( $s->{script} // [] ), @gate,
       permission_mode => exists $s->{permission_mode} ? $s->{permission_mode} : 'bypassPermissions',
       %{ $s->{app} // {} },
@@ -212,6 +224,7 @@ sub run_scenario_file {
       }
       my $p = $prompts[$i];
       $answer = eval {
+        my @wait = $s->{wait_background} ? ( wait_background => 1 ) : ();
         # /NAME ARGS of a user-invocable catalogue entry: raider's /NAME run.
         if ( $p =~ m{\A/(\S+)\s*(.*?)\s*\z}s
              && ( my $req = $app->slash_run_request( $1, length $2 ? $2 : undef ) ) ) {
@@ -219,15 +232,17 @@ sub run_scenario_file {
             $outcome = { status => 'not sent', error => $req->{error} };
             return undef;
           }
-          $outcome = $app->run_prompt( delete $req->{prompt}, %$req );
+          $outcome = $app->run_prompt( delete $req->{prompt}, %$req, @wait );
           return $outcome->{response};
         }
-        return '' . $app->run($p) unless $s->{run_prompt};
-        $outcome = $app->run_prompt($p);
+        return '' . $app->run($p) unless $s->{run_prompt} || $s->{wait_background};
+        $outcome = $app->run_prompt( $p, @wait );
         return $outcome->{response};
       };
     }
-    is( $@, '', 'the raid finishes' );
+    my $failed = $@;
+    $app->stop_background;    # no subagent outlives its scenario
+    is( $failed, '', 'the raid finishes' );
     my $expect = $s->{expect} // {};
 
     is( $answer, $expect->{answer}, 'final answer' ) if exists $expect->{answer};

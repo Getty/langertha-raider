@@ -18,4 +18,4 @@ expect:
     - { index: 1, contains: "/.claude/skills/style\">\nSTYLE-BODY\n</skill>\n\n<skill name=\"notes\" dir=\"" }
     - { index: 1, contains: "/.claude/skills/notes\">\nNOTES-BODY\n</skill>\n\n---\n\n# Original task\n\nWrite it." }
   tools:
-    - { name: agent, text: '\Awritten\z' }
+    - { name: agent, text: '\Awritten\nagentId: agent_1 \(use send_message with to: ''agent_1'' to continue this agent\)\n<usage>subagent_tokens: \d+\ntool_uses: \d+\nduration_ms: \d+</usage>\z' }

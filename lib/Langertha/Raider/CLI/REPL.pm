@@ -5,6 +5,8 @@ use Moose;
 use namespace::autoclean;
 use Config;
 use Encode qw( decode encode FB_QUIET );
+use Future;
+use IO::Handle;
 use JSON::MaybeXS ();
 use List::Util qw( first );
 use POSIX ();
@@ -12,7 +14,6 @@ use Path::Tiny;
 use Scalar::Util qw( weaken );
 use Term::ANSIColor qw( color );
 use Term::ReadLine;                   # Core; upgrades to Gnu if installed
-use IO::Prompt::Tiny qw( prompt );    # Fallback when Gnu is not available
 use Langertha::Raider::CLI::Commands;
 use Langertha::Raider::CLI::Runner;
 
@@ -36,7 +37,24 @@ exit status and its output to the model as the next prompt
 (L</run_shell_prompt>). A line that is only C<!> or C<?> is a prompt.
 
 On a terminal, lines come from L<Term::ReadLine::Gnu> (line editing,
-F<~/.raider_history>) or L<IO::Prompt::Tiny>.
+F<~/.raider_history>), else the REPL prints its own prompt and reads the
+line itself.
+
+While it waits for a line the REPL runs the application's loop (ADR 0027
+E<sect>4), so background subagents go on working: with
+L<Term::ReadLine::Gnu> through its callback interface (the characters fed
+from a watcher on the loop), otherwise by running the loop until the input
+is readable (L</read_line>). When a background subagent of the main
+conversation ends while nothing is typed, its notification starts a turn
+of its own, shown as C<background agent agent_1 finished>
+(L</run_notifications>); notifications that are due when a line is
+submitted go in front of it, in the same turn, each in a
+C<< <system-reminder> >> (L</run_prompt>). At the end of input that is not
+a terminal the REPL waits for its background subagents and delivers their
+notifications before it ends (L</finish_background>); leaving it any other
+way -- C</quit>, Ctrl-D, a second Ctrl-C, C<SIGTERM> -- stops them
+(L<Langertha::Raider::Application/stop_background>). The first Ctrl-C
+leaves them running.
 
 The first C<SIGINT> (Ctrl-C) while a prompt runs cancels that turn
 (L<Langertha::Raider::CLI::Runner/cancel_run>): the tool commands still
@@ -301,7 +319,7 @@ sub run {
   }
 
   my $rl = -t $in ? $self->_terminal_reader : {
-    read => sub { my $l = <$in>; $l },
+    read => sub { $self->read_line($in) },
     impl => 'none (input is not a terminal)',
   };
   my $call = sub { my $cb = $rl->{ $_[0] }; $cb->(@_[ 1 .. $#_ ]) if $cb };
@@ -311,13 +329,16 @@ sub run {
   # accidentally killing raider and removes the old "Ctrl-C + Return"
   # Docker quirk. Cancelling and leaving end the tool commands still
   # running: a bash command sits in a process group of its own and would
-  # outlive raider.
+  # outlive raider. Leaving stops the background subagents too; the first
+  # Ctrl-C leaves them running (ADR 0027 section 3).
   my $leave = sub {
     my ( $signal ) = @_;
     local $SIG{INT}  = 'IGNORE';
     local $SIG{TERM} = 'IGNORE';
+    $call->('cleanup');
     $self->runner->terminate_children;
     $self->runner->abandon($signal);
+    $self->app->stop_background;
     $call->('save');
     $out->emit($out->c(meta => "\nbye."), "\n");
     exit 0;
@@ -343,12 +364,21 @@ sub run {
   $self->commands->cmd_prompt if $self->customize_prompt;
   if (@first) { my $first = join ' ', @first; $first =~ m{^/} ? $self->run_slash($first) : $self->run_prompt($first) }
 
-  while (defined(my $line = $rl->{read}->())) {
+  my $quit;
+  while (1) {
+    my $line = $rl->{read}->();
+    # Notifications of background subagents and nothing typed: a turn.
+    if (ref $line) {
+      $self->run_notifications;
+      next;
+    }
+    last unless defined $line;
     $line =~ s/^\s+|\s+$//g;
     next unless length $line;
 
     if ($line =~ m{^(?:/quit|/exit|:q|quit|exit)$}i) {
       $out->emit($out->c(meta => 'bye.'), "\n");
+      $quit = 1;
       last;
     }
     $call->(add => $line);
@@ -363,10 +393,128 @@ sub run {
     $self->run_prompt($line);
   }
 
+  $call->('cleanup');
+  # Piped input has ended: its background agents are waited for, their
+  # notifications delivered (ADR 0027 section 3).
+  $self->finish_background unless $quit || -t $in;
+  $self->app->stop_background;
   $call->('save');
   $self->app->shutdown_hooks;
   $self->app->shutdown_mcp;
   return;
+}
+
+=method run_notifications
+
+    my $ok = $repl->run_notifications;
+    $ok = $repl->run_notifications(wait_background => 1);
+
+A turn of the notifications that wait for the main conversation (ADR 0027
+E<sect>4): a meta line for each (C<background agent agent_1 finished>),
+then one prompt of them all, in the order their work ended, recorded with
+C<notification> 1. Further options go to
+L<Langertha::Raider::CLI::Runner/run_prompt>. Returns what the runner
+returns, true when nothing was due.
+
+=cut
+
+sub run_notifications {
+  my ( $self, %o ) = @_;
+  my @items = $self->app->take_notifications or return 1;
+  $self->output->say_meta( $_->{label} // 'background task '.( $_->{id} // '?' ).' ended' ) for @items;
+  return $self->runner->run_prompt( join( "\n", map { $_->{text} } @items ),
+    session => scalar $self->_session_for_run, notification => 1, %o );
+}
+
+=method finish_background
+
+At the end of input that is not a terminal: as long as background
+subagents of the main conversation run or their notifications wait, waits
+for them on the loop (L<Langertha::Raider::Application/wait_for_notifications>)
+and delivers them in a turn that waits for the rest
+(L</run_notifications> with C<wait_background>).
+
+=cut
+
+sub finish_background {
+  my ( $self ) = @_;
+  my $app = $self->app;
+  while ( $app->wait_for_notifications ) {
+    $self->run_notifications( wait_background => 1 );
+  }
+  return;
+}
+
+=method read_line
+
+    my $line = $repl->read_line($in);             # input that is not a terminal
+    my $line = $repl->read_line($in, 'raider> '); # a terminal without Term::ReadLine::Gnu
+
+One line from C<$in> without stopping the application's loop (ADR 0027
+E<sect>4): what is there is read without blocking, and while no whole line
+is, the loop runs until C<$in> is readable. Returns the line, C<undef> at
+the end of the input, or a reference (C<\'notifications'>) when
+notifications of background subagents wait for the main conversation and
+no part of a line has come yet -- the REPL then runs them as a turn. With
+C<$prompt>, that is printed first (and a line break before such a turn).
+
+=cut
+
+sub read_line {
+  my ( $self, $in, $prompt ) = @_;
+  my $app = $self->app;
+  my $out = $self->output;
+  if (defined $prompt) {
+    $out->emit($prompt);
+    $out->out->flush;
+  }
+  my $partial = '';
+  while (1) {
+    my ( $state, $chunk ) = $self->_poll_line($in);
+    return $partial.$chunk if $state eq 'line';
+    return length $partial ? $partial : undef if $state eq 'eof';
+    $partial .= $chunk if defined $chunk;
+    if (!length $partial && $app->notifications_pending) {
+      $out->emit("\n") if defined $prompt;
+      return \'notifications';
+    }
+    $self->_await_input($in, notifications => !length $partial);
+  }
+}
+
+# Reads from $in what is there without blocking: ( line => $text ) for a
+# whole line (or the last one, without a newline, at the end), ( partial =>
+# $text ) for the start of one, ( 'none' ) when nothing is there yet, and
+# ( 'eof' ) at the end. A handle that cannot be non-blocking (an in-memory
+# one) is read as it is.
+sub _poll_line {
+  my ( $self, $in ) = @_;
+  my $blocking = eval { $in->blocking(0) };
+  local $!;
+  my $chunk = readline $in;
+  my $again = $!{EAGAIN} || $!{EWOULDBLOCK} ? 1 : 0;
+  eval { $in->blocking($blocking) } if defined $blocking;
+  $in->clearerr if $again;
+  if (defined $chunk) {
+    return ( line => $chunk ) if $chunk =~ /\n\z/ || !$again;
+    return ( partial => $chunk );
+  }
+  return $again ? ('none') : ('eof');
+}
+
+# Runs the loop until $in is readable -- or, with notifications, until a
+# notification for the main conversation is due. True when $in is
+# readable.
+sub _await_input {
+  my ( $self, $in, %o ) = @_;
+  my $app   = $self->app;
+  my $loop  = $app->loop;
+  my $ready = $loop->new_future;
+  $loop->watch_io( handle => $in, on_read_ready => sub { $ready->done(1) unless $ready->is_ready } );
+  my $f = $o{notifications} ? Future->wait_any( $ready, $app->tasks->wait_f('main') ) : $ready;
+  $loop->await($f);
+  $loop->unwatch_io( handle => $in, on_read_ready => 1 );
+  return $ready->is_done ? 1 : 0;
 }
 
 =method ask_user
@@ -559,15 +707,27 @@ sub plan_review {
 =method run_prompt
 
     $repl->run_prompt($text);
+    $repl->run_prompt($text, %run);   # with run options (a /name run request)
 
 Runs one prompt through the runner, recorded in L</session>. The first
-prompt with a L</session_store> starts the session and names it.
+prompt with a L</session_store> starts the session and names it. The
+notifications of background subagents that wait for the main conversation
+go in front of the prompt, each wrapped as Claude Code delivers one next to
+a genuine message (L<Langertha::Raider::Tasks/reminder_text>, ADR 0027
+E<sect>4), after a meta line for each. C<%run> are the run options of
+L<Langertha::Raider::CLI::Runner/run_options>.
 
 =cut
 
 sub run_prompt {
-  my ( $self, $text ) = @_;
-  return $self->runner->run_prompt($text, session => scalar $self->_session_for_run);
+  my ( $self, $text, %run ) = @_;
+  my $app = $self->app;
+  my @items = $app->take_notifications;
+  $self->output->say_meta( $_->{label} // 'background task '.( $_->{id} // '?' ).' ended' ) for @items;
+  my $reminders = join "\n\n", map { $app->tasks->reminder_text( $_->{text} ) } @items;
+  return $self->runner->run_prompt($text, session => scalar $self->_session_for_run,
+    ( map { defined $run{$_} ? ( $_ => $run{$_} ) : () } $self->runner->run_options ),
+    ( @items ? ( reminders => $reminders ) : () ));
 }
 
 =method run_slash
@@ -577,7 +737,9 @@ sub run_prompt {
 A C</...> line (also the first prompt from the command line): resolved by
 L<Langertha::Raider::CLI::Commands/dispatch>. A run request it returns (a
 catalogue entry, C</init>, a path such as C</etc/hosts is broken>) runs as
-the next prompt with its run options, recorded in L</session>. A C</clear>,
+the next prompt with its run options, recorded in L</session> -- through
+L</run_prompt>, so notifications that wait go in front of it as in front
+of a typed line (ADR 0027 E<sect>4). A C</clear>,
 C</reset> or C</new> is recorded there as C<history.cleared>.
 
 =cut
@@ -585,7 +747,7 @@ C</reset> or C</new> is recorded there as C<history.cleared>.
 sub run_slash {
   my ( $self, $line ) = @_;
   my $r = $self->commands->dispatch($line, session => sub { scalar $self->_session_for_run });
-  return $self->runner->run_prompt($r->{prompt}, %$r, session => scalar $self->_session_for_run) if ref $r eq 'HASH';
+  return $self->run_prompt($r->{prompt}, %$r) if ref $r eq 'HASH';
   # A resume must not bring back what /clear removed (ADR 0015).
   $self->runner->record($self->session, 'history.cleared')
     if $r && $self->has_session && $line =~ m{\A/(?:clear|reset|new)(?:\s|\z)};
@@ -794,16 +956,22 @@ sub _session_for_run {
   return $session;
 }
 
-# Line reader on a terminal: { read, impl, add, save, redisplay }.
+# Line reader on a terminal: { read, impl, add, save, redisplay, cleanup }.
+# Both run the application's loop while they wait (ADR 0027 section 4).
 sub _terminal_reader {
   my ($self) = @_;
   # Prefer Term::ReadLine::Gnu (line editing + persistent history).
-  # Fall back to IO::Prompt::Tiny when Gnu isn't installed.
+  # Fall back to a prompt of our own when Gnu isn't installed.
   my $term = Term::ReadLine->new('raider');
-  return {
-    read => sub { prompt('raider>') },
-    impl => 'IO::Prompt::Tiny (install Term::ReadLine::Gnu for history)',
-  } unless $term->ReadLine =~ /Gnu/;
+  unless ($term->ReadLine =~ /Gnu/) {
+    my $out = $self->output;
+    my $ps  = $out->c(prompt => 'raider>').' ';
+    return {
+      read      => sub { $self->read_line($self->in, $ps) },
+      impl      => 'raider (install Term::ReadLine::Gnu for line editing and history)',
+      redisplay => sub { $out->emit($ps); $out->out->flush },
+    };
+  }
 
   $term->ornaments(0);
   my $histfile = path($ENV{HOME} // '.')->child('.raider_history')->stringify;
@@ -816,10 +984,11 @@ sub _terminal_reader {
   # wrapped in \x01...\x02 so readline computes prompt width correctly.
   my $ps = "\x01".color('bright_black')."\x02".'raider> '."\x01".color('reset')."\x02";
   return {
-    read      => sub { $term->readline($ps) },
+    read      => $self->_callback_reader($term, $ps),
     impl      => $term->ReadLine,
     add       => sub { $term->addhistory($_[0]) },
     save      => sub { eval { $term->WriteHistory($histfile) } },
+    cleanup   => sub { eval { $term->callback_handler_remove } },
     redisplay => sub {
       eval {
         $term->replace_line('', 0);
@@ -829,6 +998,34 @@ sub _terminal_reader {
         $term->redisplay;
       };
     },
+  };
+}
+
+# The read of Term::ReadLine::Gnu through its callback interface: the
+# characters of the terminal are fed to readline as the loop sees them
+# arrive, and the loop runs meanwhile. With nothing typed, notifications
+# that are due end the read (\'notifications', see read_line); once
+# something is typed they wait for the line.
+sub _callback_reader {
+  my ( $self, $term, $ps ) = @_;
+  return sub {
+    my $in = $self->in;
+    my ( $line, $got );
+    $term->callback_handler_install( $ps, sub {
+      ( $line ) = @_;
+      $got = 1;
+      $term->callback_handler_remove;
+    } );
+    until ($got) {
+      my $idle = !length( $term->Attribs->{line_buffer} // '' );
+      if ($idle && $self->app->notifications_pending) {
+        $term->callback_handler_remove;
+        $self->output->emit("\n");
+        return \'notifications';
+      }
+      $term->callback_read_char if $self->_await_input($in, notifications => $idle);
+    }
+    return $line;
   };
 }
 

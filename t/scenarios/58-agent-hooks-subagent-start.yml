@@ -54,7 +54,7 @@ expect:
   tools:
     - { name: read_file, text: NOTE }
     - { name: read_file, error: true, text: "\\Ano reads in the scribe\\z" }
-    - { name: agent, text: '\Areading is denied here\z' }
+    - { name: agent, text: '\Areading is denied here\nagentId: agent_1 \(use send_message with to: ''agent_1'' to continue this agent\)\n<usage>subagent_tokens: \d+\ntool_uses: \d+\nduration_ms: \d+</usage>\z' }
   events:
     - { type: hook.ran, hook_event: PreToolUse, outcome: success }
     - { type: hook.ran, hook_event: SubagentStart, outcome: success, matcher: scribe }

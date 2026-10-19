@@ -15,17 +15,19 @@ expect:
   requests:
     - { index: 0, tool_text: "- general-purpose: General-purpose agent for researching complex questions" }
     - { index: 0, tool_text: "(Tools: *)" }
-    - { index: 0, contains: "agent(description, prompt, [subagent_type])" }
+    - { index: 0, contains: "agent(description, prompt, [model], [name], [run_in_background], [subagent_type])" }
     - { index: 1, contains: Read notes.txt and report its content. }
     - { index: 1, absent: What is in notes.txt? Use an agent. }
     - { index: 1, contains: You are an agent for raider }
     - { index: 1, absent: viking shield-maiden }
-    - { index: 1, lacks: [ ask_user, agent, enter_plan_mode ] }
+    - { index: 1, lacks: [ ask_user, enter_plan_mode ] }
+    # Nesting depth 3 (ADR 0027 section 8): a subagent at depth 1 has agent.
+    - { index: 1, contains: "  - agent(description, prompt" }
     - { index: 1, contains: "read_file(path, [limit], [offset], [pages])" }
     - { index: 3, contains: notes.txt says SECRET-NOTE-42 }
   tools:
     - { name: read_file, text: SECRET-NOTE-42 }
-    - { name: agent, text: '\Anotes.txt says SECRET-NOTE-42\z' }
+    - { name: agent, text: '\Anotes.txt says SECRET-NOTE-42\nagentId: agent_1 \(use send_message with to: ''agent_1'' to continue this agent\)\n<usage>subagent_tokens: \d+\ntool_uses: \d+\nduration_ms: \d+</usage>\z' }
   events:
     - { type: tool.call, call: c1, name: agent }
     - { type: agent.started, call: c1, agent: general-purpose, description: Read the notes }

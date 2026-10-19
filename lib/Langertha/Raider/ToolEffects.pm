@@ -51,10 +51,11 @@ C<raider_ask_user>: it puts a question to a person.
 C<skill> is C<read>: it returns a skill file from the local skill directories.
 
 C<bash_output> is C<read>: it returns what a background shell of the session
-wrote. C<kill_shell> has no effect class: it can only stop a shell raider
-itself started with C<bash> (which was C<code> and passed the gate then); it
-starts nothing, and asking before stopping would make stopping harder than
-starting (ADR 0024).
+wrote, or a subagent's status and report. C<kill_shell> has no effect class:
+it can only stop a shell raider itself started with C<bash> (which was
+C<code> and passed the gate then) or a subagent of the session (whose calls
+passed the gate themselves); it starts nothing, and asking before stopping
+would make stopping harder than starting (ADR 0024, ADR 0027).
 
 C<exit_plan_mode> has no effect class: it hands a plan to the person and
 may switch the permission mode of the run (ADR 0021), which changes nothing
@@ -65,7 +66,9 @@ C<task_create>, C<task_update>, C<task_list> and C<task_get> keep the task
 list of the conversation, like C<todo_write>; no effect outside it.
 
 C<agent> has no class of its own (ADR 0020): it starts a subagent, whose
-tool calls carry their effects in the subagent's journal.
+tool calls carry their effects in the subagent's journal. Neither has
+C<send_message> (ADR 0027 E<sect>5): it only drives a subagent, whose calls
+carry their own effects through the policy it inherited.
 
 =cut
 
@@ -87,6 +90,7 @@ my %EFFECTS = (
   agent                  => [],
   ask_user               => [qw( message )],
   enter_plan_mode        => [],
+  send_message           => [],
   exit_plan_mode         => [],
   # skills
   skill                  => [qw( read )],

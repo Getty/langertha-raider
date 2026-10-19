@@ -214,13 +214,50 @@ of its own. Reads only the first line of the journal.
 
 sub parent_of {
   my ( $self, $id ) = @_;
+  my $created = $self->created_of($id) or return;
+  return $created->{parent};
+}
+
+=method created_of
+
+    my $created = $store->created_of($id);   # { type => 'session.created', parent => ..., ... }
+
+The C<session.created> event of the session, read from the first line of
+its journal only, or C<undef> when there is none.
+
+=cut
+
+sub created_of {
+  my ( $self, $id ) = @_;
   my $fh = eval { $self->path_of($id)->openr_raw } or return;
   my $line = <$fh>;
   close $fh;
   return unless defined $line;
   my $event = eval { JSON::MaybeXS->new(utf8 => 1)->decode($line) };
   return unless ref $event eq 'HASH' && ( $event->{type} // '' ) eq 'session.created';
-  return $event->{parent};
+  return $event;
+}
+
+=method children_of
+
+    my @children = $store->children_of($id);   # ( { id => ..., created => { ... } }, ... )
+
+The subagent sessions whose C<parent> is the session C<$id>, newest first,
+each with its C<session.created> (ADR 0020, ADR 0027 E<sect>5: C<agent>,
+C<agent_id>, C<name>, C<depth>, ...). Reads the first line of every journal
+of the scope.
+
+=cut
+
+sub children_of {
+  my ( $self, $id ) = @_;
+  return unless defined $id;
+  my @children;
+  for my $child ($self->ids) {
+    my $created = $self->created_of($child) or next;
+    push @children, { id => $child, created => $created } if ( $created->{parent} // '' ) eq $id;
+  }
+  return @children;
 }
 
 =method is_ref

@@ -7,6 +7,7 @@ use lib 't/lib';
 use Test::Raider::Env qw( isolate_home );
 isolate_home();
 use File::Temp qw( tempdir );
+use JSON::MaybeXS ();
 use Path::Tiny;
 use Langertha::Raider::AgentTools;
 use Langertha::Raider::Application;
@@ -46,15 +47,60 @@ subtest 'the tool text lists every agent with its tools' => sub {
   like( $text, qr/^- general-purpose: General-purpose agent for researching complex questions.* \(Tools: \*\)$/m,
     'the built-in, all tools' );
   like( $text, qr/no memory of this conversation.*self-contained prompt/, 'the prompt must stand alone' );
-  like( $text, qr/final message is returned to you/, 'what comes back' );
-  like( $text, qr/Several agent calls in one message are fine; they run one after the other/, 'several calls: one after the other' );
-  unlike( $text, qr/concurren|in parallel|simultaneous/i, 'no promise of concurrency (ADR 0020 section 4)' );
+  like( $text, qr/final message is returned to you.*with its agent ID and usage/, 'what comes back' );
+  like( $text, qr/not visible to the user/, 'the user does not see it' );
+  like( $text, qr/^When NOT to use the agent tool:$/m, 'when not to use it' );
+  like( $text, qr/Launch multiple agents concurrently whenever possible.*single message with multiple agent calls/,
+    'several calls in one message (ADR 0027 section 9)' );
+  like( $text, qr/run_in_background.*notified automatically.*<task-notification>/s, 'background runs and their notification' );
+  like( $text, qr/use send_message with its agent ID \(or the name you gave it with name\)/, 'send_message continues an agent' );
+  unlike( $text, qr/one after the other/, 'no longer one after the other' );
+  unlike( $text, qr/isolation|worktree/, 'no isolation yet' );
 
-  my ($tool) = @{ $tools->server->tools };
-  is( $tool->name, 'agent', 'one tool named agent' );
+  my @tools = @{ $tools->server->tools };
+  is( [ map { $_->name } @tools ], ['agent'], 'without on_send: one tool named agent' );
+  my ($tool) = @tools;
   is( $tool->description, $text, 'the text is the tool description' );
   is( $tool->input_schema->{required}, [qw( description prompt )], 'description and prompt required' );
-  ok( $tool->input_schema->{properties}{subagent_type}, 'subagent_type optional' );
+  ok( $tool->input_schema->{properties}{$_}, $_.' optional' ) for qw( subagent_type model run_in_background name );
+  is( $tool->input_schema->{properties}{model}{enum}, [qw( sonnet opus haiku )], 'model: the three aliases' );
+  is( $tool->input_schema->{properties}{run_in_background}{type}, 'boolean', 'run_in_background: boolean' );
+
+  my $both = Langertha::Raider::AgentTools->new( catalog => $catalog, on_spawn => sub { die }, on_send => sub { die } );
+  my %by = map { $_->name => $_ } @{ $both->server->tools };
+  is( [ map { $_->name } @{ $both->server->tools } ], [qw( agent send_message )], 'with on_send: agent and send_message' );
+  is( $by{send_message}->input_schema->{required}, [qw( to message )], 'send_message: to and message required' );
+  ok( $by{send_message}->input_schema->{properties}{summary}, 'summary optional' );
+  like( $by{send_message}->description, qr/running agent gets the message at its next tool round/, 'send_message text' );
+};
+
+subtest 'agent: model, name and run_in_background reach on_spawn; send_message reaches on_send' => sub {
+  my ( @spawned, @sent );
+  my $tools = Langertha::Raider::AgentTools->new(
+    catalog  => $catalog,
+    on_spawn => sub { push @spawned, $_[1]; return ( 'ok', 0 ) },
+    on_send  => sub { push @sent, $_[0]; return ( 'queued', 0 ) },
+  );
+  my ($send) = grep { $_->name eq 'send_message' } @{ $tools->server->tools };
+  invoke( $tools->server, { description => 'd', prompt => 'p', model => 'haiku', name => 'rev', run_in_background => JSON::MaybeXS->true } );
+  is( $spawned[0], { description => 'd', prompt => 'p', subagent_type => 'general-purpose', model => 'haiku', name => 'rev',
+    run_in_background => 1 }, 'the call carries model, name and run_in_background' );
+  invoke( $tools->server, { description => 'd', prompt => 'p', name => '  ' } );
+  is( $spawned[1], { description => 'd', prompt => 'p', subagent_type => 'general-purpose', run_in_background => 0 },
+    'a blank name is no name' );
+  my $r = invoke( $tools->server, { description => 'd', prompt => 'p', model => 'gpt-4o' } );
+  ok( $r->{isError}, 'another model: error' );
+  is( text($r), 'Error: model must be one of sonnet, opus, haiku.', 'says which' );
+  is( scalar @spawned, 2, 'and starts nothing' );
+
+  $r = $send->code->( $send, { to => 'agent_1', message => 'more', summary => 'a recap' } );
+  is( text($r), 'queued', 'send_message answers with on_send' );
+  is( $sent[0], { to => 'agent_1', message => 'more', summary => 'a recap' }, 'with the call' );
+  $r = $send->code->( $send, { to => ' ', message => 'more' } );
+  ok( $r->{isError}, 'an empty to: error' );
+  $r = $send->code->( $send, { to => 'agent_1', message => '' } );
+  ok( $r->{isError}, 'an empty message: error' );
+  is( scalar @sent, 1, 'neither reached on_send' );
 };
 
 subtest 'a call goes to on_spawn with the agent; unknown types and empty prompts do not' => sub {
@@ -68,7 +114,8 @@ subtest 'a call goes to on_spawn with the agent; unknown types and empty prompts
   ok( !$r->{isError}, 'succeeds' );
   is( text($r), 'agent text', 'the result is what on_spawn returned' );
   is( $spawned[0][0]{name}, 'general-purpose', 'without subagent_type: general-purpose' );
-  is( $spawned[0][1], { description => 'Look', prompt => 'Find it.', subagent_type => 'general-purpose' }, 'the call' );
+  is( $spawned[0][1], { description => 'Look', prompt => 'Find it.', subagent_type => 'general-purpose',
+    run_in_background => 0 }, 'the call' );
 
   $r = invoke( $tools->server, { description => 'x', prompt => 'y', subagent_type => 'reader' } );
   is( $spawned[1][0]{name}, 'reader', 'the named agent' );
@@ -80,7 +127,7 @@ subtest 'a call goes to on_spawn with the agent; unknown types and empty prompts
   @spawned = ();
   $r = invoke( $tools->server, { description => 'x', prompt => 'y', subagent_type => 'nope' } );
   ok( $r->{isError}, 'unknown subagent_type: error' );
-  is( text($r), "Unknown agent type 'nope'. Available agents: careful, mute, reader, general-purpose.",
+  is( text($r), "Unknown agent type 'nope'. Available agents: careful, mute, reader, general-purpose, Explore, Plan.",
     'names the available agents' );
   $r = invoke( $tools->server, { description => 'x', prompt => "  \n" } );
   ok( $r->{isError}, 'an empty prompt: error' );
@@ -101,17 +148,22 @@ sub app {
 
 subtest 'the application mounts the agent tool below the depth limit' => sub {
   my $app = app();
-  is( $app->max_agent_depth, 1, 'default depth 1' );
+  is( $app->max_agent_depth, 3, 'default depth 3 (ADR 0027)' );
   ok( ( grep { $_->name eq 'agent' } $app->_mounted_tools ), 'agent mounted at depth 0' );
-  like( $app->mission, qr/^  - agent\(description, prompt, \[subagent_type\]\)$/m, 'and described' );
+  like( $app->mission, qr/^  - agent\(description, prompt, \[model\], \[name\], \[run_in_background\], \[subagent_type\]\)$/m,
+    'and described' );
+  like( $app->mission, qr/^  - send_message\(to, message, \[summary\]\)$/m, 'send_message beside it (ADR 0027 section 5)' );
 
   my $none = app( max_agent_depth => 0 );
-  ok( !( grep { $_->name eq 'agent' } $none->_mounted_tools ), 'max_agent_depth 0: no agent tool' );
-  unlike( $none->mission, qr/agent\(/, 'nor its description' );
+  ok( !( grep { $_->name eq 'agent' || $_->name eq 'send_message' } $none->_mounted_tools ),
+    'max_agent_depth 0: no agent tool, no send_message' );
+  unlike( $none->mission, qr/agent\(|send_message\(/, 'nor their description' );
 
-  is( Langertha::Raider::ToolEffects->effects_for('agent'), [], 'no effect class of its own' );
-  my ($entry) = grep { $_->{name} eq 'agent' } @{ $app->explain_config->{tools} };
-  ok( $entry, 'config explain lists it' ) && is( $entry->{effects}, [], 'known, no effects' );
+  for my $name (qw( agent send_message )) {
+    is( Langertha::Raider::ToolEffects->effects_for($name), [], $name.': no effect class of its own' );
+    my ($entry) = grep { $_->{name} eq $name } @{ $app->explain_config->{tools} };
+    ok( $entry, 'config explain lists it' ) && is( $entry->{effects}, [], 'known, no effects' );
+  }
 };
 
 subtest 'build_subagent_engine: the main engine class and arguments, model replaceable' => sub {

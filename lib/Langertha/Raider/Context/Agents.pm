@@ -52,6 +52,8 @@ An agent is a plain hash ref:
       skills        => [ 'getty-perl-core', ... ],   # declared, not resolved
       ignored_keys  => [ 'color', ... ],     # frontmatter keys raider does not use
       builtin       => 0 | 1,
+      one_shot      => 0 | 1,                # 1: cannot be continued (Explore, Plan)
+      memory        => 1 | 0,                # 0: mission without Claude memory (Explore, Plan)
     }
 
 =over
@@ -85,8 +87,19 @@ C<briefing.skills>; a string is split on commas, a C<[a, b]> flow left as a
 string by the lenient reader too; each name once.
 
 =item * B<Precedence.> Roots in the given order, then plugins, then the
-built-in C<general-purpose>. The first agent of a name wins; later ones are
-listed by L</shadowed>, the built-in included when a file shadows it.
+built-ins C<general-purpose>, C<Explore> and C<Plan> (L</builtin_agents>).
+The first agent of a name wins; later ones are listed by L</shadowed>, a
+built-in included when a file shadows it.
+
+=item * B<Built-ins> (ADR 0020 E<sect>1, ADR 0027 E<sect>6).
+C<general-purpose> has every tool and the caller's memory. C<Explore> and
+C<Plan> are read-only by their instructions and their C<disallowed> list
+(C<agent>, C<send_message>, C<write_file>, C<edit_file>, C<multi_edit>,
+C<exit_plan_mode>), one-shot (C<one_shot>: they cannot be continued) and
+without memory (C<memory> 0: their mission carries no Claude memory, no
+F<AGENTS.md> and no packs, see
+L<Langertha::Raider::Application/compile_mission>). File agents have
+C<one_shot> 0 and C<memory> 1.
 
 =back
 
@@ -126,7 +139,8 @@ my %USED_KEY = map { $_ => 1 } qw( name description tools disallowedTools model 
 
 =method builtin_name
 
-The name of the built-in agent: C<general-purpose>.
+The name of the default built-in agent: C<general-purpose>, what the
+C<agent> tool starts without C<subagent_type>.
 
 =method builtin_description
 
@@ -160,6 +174,178 @@ complete it. Do what has been asked; nothing more, nothing less.
   sees nothing else of your work.
 EOM
 
+=method explore_description
+
+=method plan_description
+
+The descriptions of the built-ins C<Explore> and C<Plan>, Claude Code's
+word for word.
+
+=method explore_body
+
+=method plan_body
+
+Their instructions, after Claude Code's prompts for these agents in
+raider's tool names: C<Explore> a read-only file-search specialist,
+C<Plan> a read-only architect that ends with the critical files.
+
+=cut
+
+sub explore_description {
+  "Read-only search agent for broad fan-out searches \x{2014} when answering means sweeping many files,"
+    .' directories, or naming conventions and you only need the conclusion, not the file dumps. It'
+    .' reads excerpts rather than whole files, so it locates code; it doesn\'t review or audit it.'
+    .' Specify search breadth: "quick" for targeted lookups, "medium" for moderate exploration,'
+    .' "very thorough" for multiple locations and naming conventions.';
+}
+
+sub plan_description {
+  'Software architect agent for designing implementation plans. Use this when you need to plan the'
+    .' implementation strategy for a task. Returns step-by-step plans, identifies critical files, and'
+    .' considers architectural trade-offs.';
+}
+
+# The read-only block both Explore and Plan carry.
+sub _read_only_block { <<'EOM' }
+=== CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS ===
+This is a READ-ONLY task. You are STRICTLY PROHIBITED from:
+- Creating new files (no write_file, touch, or file creation of any kind)
+- Modifying existing files (no edit_file operations)
+- Deleting files (no rm or deletion)
+- Moving or copying files (no mv or cp)
+- Creating temporary files anywhere, including /tmp
+- Using redirect operators (>, >>, |) or heredocs to write to files
+- Running ANY commands that change system state
+EOM
+
+sub explore_body {
+  my ( $self ) = @_;
+  return <<'EOM'.$self->_read_only_block.<<'EOM';
+You are a file search specialist for raider. You excel at thoroughly
+navigating and exploring codebases.
+
+EOM
+
+Your role is EXCLUSIVELY to search and analyze existing code. You do NOT
+have access to file editing tools - attempting to edit files will fail.
+
+Your strengths:
+- Rapidly finding files using glob patterns
+- Searching code and text with powerful regex patterns
+- Reading and analyzing file contents
+
+Guidelines:
+- Use glob for broad file pattern matching
+- Use grep for searching file contents with regex
+- Use read_file when you know the specific file path you need to read
+- Use list_files to see what a directory holds
+- Use bash ONLY for read-only operations (ls, git status, git log, git diff,
+  find, cat, head, tail)
+- NEVER use bash for: mkdir, touch, rm, cp, mv, git add, git commit, cpanm,
+  npm install, pip install, or any file creation/modification
+- Adapt your search approach to the thoroughness the caller asked for
+  ("quick", "medium" or "very thorough")
+- Return file paths as absolute paths in your final response
+- For clear communication, avoid using emojis
+- Communicate your final report directly as a regular message - do NOT
+  attempt to create files
+
+NOTE: You are meant to be a fast agent that returns output as quickly as
+possible. In order to achieve this you must:
+- Make efficient use of the tools that you have at your disposal: be smart
+  about how you search for files and implementations
+- Wherever possible, make several independent tool calls in one turn for
+  grepping and reading files, so they run in parallel
+
+Complete the search request efficiently and report your findings clearly.
+EOM
+}
+
+sub plan_body {
+  my ( $self ) = @_;
+  return <<'EOM'.$self->_read_only_block.<<'EOM';
+You are a software architect and planning specialist for raider. Your role
+is to explore the codebase and design implementation plans.
+
+EOM
+
+Your role is EXCLUSIVELY to explore the codebase and design implementation
+plans. You do NOT have access to file editing tools - attempting to edit
+files will fail.
+
+You will be provided with a set of requirements and optionally a perspective
+on how to approach the design process.
+
+## Your Process
+
+1. **Understand Requirements**: Focus on the requirements provided and apply
+   your assigned perspective throughout the design process.
+
+2. **Explore Thoroughly**:
+   - Read any files provided to you in the initial prompt
+   - Find existing patterns and conventions using glob, grep and read_file
+   - Understand the current architecture
+   - Identify similar features as reference
+   - Trace through relevant code paths
+   - Use bash ONLY for read-only operations (ls, git status, git log,
+     git diff, find, cat, head, tail)
+   - NEVER use bash for: mkdir, touch, rm, cp, mv, git add, git commit,
+     cpanm, npm install, pip install, or any file creation/modification
+
+3. **Design Solution**:
+   - Create an implementation approach based on your assigned perspective
+   - Consider trade-offs and architectural decisions
+   - Follow existing patterns where appropriate
+
+4. **Detail the Plan**:
+   - Provide a step-by-step implementation strategy
+   - Identify dependencies and sequencing
+   - Anticipate potential challenges
+
+## Required Output
+
+End your response with:
+
+### Critical Files for Implementation
+List 3-5 files most critical for implementing this plan:
+- /abs/path/to/file1 - [Brief reason: e.g., "Core logic to modify"]
+- /abs/path/to/file2 - [Brief reason: e.g., "Interfaces to implement"]
+- /abs/path/to/file3 - [Brief reason: e.g., "Pattern to follow"]
+
+REMEMBER: You can ONLY explore and plan. You CANNOT and MUST NOT write,
+edit, or modify any files. You do NOT have access to file editing tools.
+EOM
+}
+
+=method builtin_agents
+
+    for my $spec ($agents->builtin_agents) { ... }
+
+The built-in agents in catalogue order -- C<general-purpose>, C<Explore>,
+C<Plan> -- each a hash ref C<name>, C<description>, C<body>, C<disallowed>,
+C<one_shot>, C<memory>.
+
+=method read_only_disallowed
+
+The tools C<Explore> and C<Plan> go without: C<agent>, C<send_message>,
+C<write_file>, C<edit_file>, C<multi_edit>, C<exit_plan_mode>.
+
+=cut
+
+sub read_only_disallowed { qw( agent send_message write_file edit_file multi_edit exit_plan_mode ) }
+
+sub builtin_agents {
+  my ( $self ) = @_;
+  return (
+    { name => $self->builtin_name, description => $self->builtin_description, body => $self->builtin_body,
+      disallowed => [], one_shot => 0, memory => 1 },
+    { name => 'Explore', description => $self->explore_description, body => $self->explore_body,
+      disallowed => [ $self->read_only_disallowed ], one_shot => 1, memory => 0 },
+    { name => 'Plan', description => $self->plan_description, body => $self->plan_body,
+      disallowed => [ $self->read_only_disallowed ], one_shot => 1, memory => 0 },
+  );
+}
+
 has _catalog => (
   is         => 'ro',
   isa        => 'HashRef',
@@ -185,26 +371,29 @@ sub _build__catalog {
     }
   }
 
-  my $builtin = $self->builtin_name;
-  if (my $winner = $cat{by_name}{$builtin}) {
-    push @{ $cat{shadowed} }, { name => $builtin, source => 'built-in', file => undef, by => $winner->{source} };
-  }
-  else {
+  for my $spec ($self->builtin_agents) {
+    my $builtin = $spec->{name};
+    if (my $winner = $cat{by_name}{$builtin}) {
+      push @{ $cat{shadowed} }, { name => $builtin, source => 'built-in', file => undef, by => $winner->{source} };
+      next;
+    }
     my $agent = {
       name          => $builtin,
-      description   => $self->builtin_description,
+      description   => $spec->{description},
       file          => undef,
       dir           => undef,
       source        => 'built-in',
-      body          => $self->builtin_body,
+      body          => $spec->{body},
       frontmatter   => {},
       tools         => undef,
-      disallowed    => [],
+      disallowed    => [ @{ $spec->{disallowed} } ],
       unknown_tools => [],
       model         => undef,
       skills        => [],
       ignored_keys  => [],
       builtin       => 1,
+      one_shot      => $spec->{one_shot} ? 1 : 0,
+      memory        => $spec->{memory} ? 1 : 0,
     };
     push @{ $cat{agents} }, $agent;
     $cat{by_name}{$builtin} = $agent;
@@ -276,6 +465,8 @@ sub _add_file {
       $fm->{skills}, ( ref $briefing eq 'HASH' ? $briefing->{skills} : () ) ),
     ignored_keys  => [ sort grep { !$USED_KEY{$_} } keys %$fm ],
     builtin       => 0,
+    one_shot      => 0,
+    memory        => 1,
   };
   push @{ $cat->{agents} }, $agent;
   $cat->{by_name}{$name} = $agent;
@@ -349,7 +540,7 @@ sub _unique {
     for my $a ($agents->agents) { say $a->{name}.' ('.$a->{source}.')' }
 
 Every agent that won its name, in precedence order: roots in the given
-order, plugins in the given order, the built-in last.
+order, plugins in the given order, the built-ins last.
 
 =method shadowed
 

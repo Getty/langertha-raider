@@ -179,7 +179,7 @@ subtest 'spawn: briefed with the skill read from its source' => sub {
   like( user_text( $app->mock_engine->requests->[1] ),
     qr{<skill name="foo" dir="\Q$src\E/skills/foo">\nFOO-FROM-SKILLETOR\n</skill>\n\n---\n\n# Original task\n\nTHE-TASK\z},
     'the body and the source dir' );
-  is( $app->mock_engine->results->[-1]{result}{content}[0]{text}, 'child answer', 'the caller gets the answer' );
+  like( $app->mock_engine->results->[-1]{result}{content}[0]{text}, qr/\Achild answer\nagentId: agent_1 /, 'the caller gets the answer' );
 };
 
 subtest 'spawn: a template is refused with the reason; without a reason the plain note' => sub {

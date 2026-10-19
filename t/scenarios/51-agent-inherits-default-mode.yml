@@ -15,7 +15,7 @@ expect:
     - name: write_file
       error: true
       text: "\\APermission to use write_file has been denied\\. Reason: default mode asks before this call: write_file changes files; nobody can approve it in this run\\. To allow it, add a rule such as 'Edit\\(/\\*\\*\\)'.*--permission-mode acceptEdits"
-    - { name: agent, text: '\Acould not write a.txt\z' }
+    - { name: agent, text: '\Acould not write a.txt\nagentId: agent_1 \(use send_message with to: ''agent_1'' to continue this agent\)\n<usage>subagent_tokens: \d+\ntool_uses: \d+\nduration_ms: \d+</usage>\z' }
   events:
     - { type: agent.started, call: c1, agent: general-purpose }
     - { type: agent.finished, call: c1, status: completed }

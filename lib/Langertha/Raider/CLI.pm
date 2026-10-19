@@ -81,7 +81,7 @@ itself is L<raider>.
 Of the names the Application gained after the inventory of ADR 0017, only
 the constructor arguments that mirror an option or config key apply here
 as public: C<claude>, C<permission_mode>, C<skip_permissions>,
-C<max_agent_depth> and C<agent_models>. The others (C<context>,
+C<max_agent_depth>, C<max_concurrent_agents> and C<agent_models>. The others (C<context>,
 C<permissions>, C<hooks>, C<tool_gate>, C<todos>, ...) are internal and may
 change without notice (ADR 0017, Addendum 1).
 

@@ -122,8 +122,14 @@ for my $case (
     kill $signal => $pid;
     my $status = finish($pid, $tool_pid, $stub);
     is($status, 0, 'raider left the REPL with exit status 0');
-    like($out->slurp, qr/cancelling the turn; press Ctrl-C again within 2s to quit.*^turn cancelled$/ms,
-      'the first Ctrl-C said so') if $signal eq 'INT';
+    # The second Ctrl-C follows as soon as the journal has run.finished; the
+    # runner prints "turn cancelled" only after the application has written
+    # it, so the second one may leave raider before that line. The single
+    # Ctrl-C below checks it.
+    if ($signal eq 'INT') {
+      like($out->slurp, qr/\(cancelling the turn; press Ctrl-C again within 2s to quit\)/, 'the first Ctrl-C said so');
+      unlike($out->slurp, qr/^turn cancelled\n.*cancelling the turn/ms, 'not after the turn ended');
+    }
     like($out->slurp, qr/bye\.\n\z/, 'and said bye');
 
     my @events = journal_events($out);

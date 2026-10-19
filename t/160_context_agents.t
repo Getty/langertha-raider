@@ -15,8 +15,8 @@ use Langertha::Raider::Context;
 use Langertha::Raider::CLI;
 
 # Agent files are Claude Code's Markdown + frontmatter in every root. The
-# first agent of a name wins, plugins are plugin:agent, the built-in
-# general-purpose comes last. Nothing here starts an agent.
+# first agent of a name wins, plugins are plugin:agent, the built-ins
+# general-purpose, Explore and Plan come last. Nothing here starts an agent.
 
 local %ENV = %ENV;
 clear_engine_env();
@@ -61,8 +61,8 @@ subtest 'roots: recursive walk, hidden skipped, precedence, shadowing' => sub {
     { dir => "$w/missing", source => 'missing' },
     { dir => "$w/b", source => 'root b' },
   ]);
-  is(names($c), [qw( dup reviewer zeta deep other general-purpose )],
-    'files of a directory sorted, then its subdirectories; roots in order; built-in last');
+  is(names($c), [qw( dup reviewer zeta deep other general-purpose Explore Plan )],
+    'files of a directory sorted, then its subdirectories; roots in order; built-ins last');
   is($c->find('zeta')->{description}, 'Named after the file.', 'name falls back to the file name');
   is($c->find('dup')->{description}, 'dup in a, files before subdirectories', 'first of a name wins inside a root');
   like($c->find('reviewer'), { source => 'root a', file => "$w/a/reviewer.md", dir => "$w/a", body => "Body.\n", builtin => 0 },
@@ -84,7 +84,7 @@ subtest 'frontmatter: tools, disallowedTools, model, skills, ignored keys' => su
   put($d, 'list.md', agent_md(name => 'list', description => 'd',
     tools => [qw( Read Grep Bash mcp__github__create_issue perl_eval NotebookEdit Read read_file )]));
   put($d, 'string.md', agent_md(name => 'string', description => 'd', tools => 'Read, Edit,MultiEdit , WebFetch',
-    disallowedTools => 'Write, KillShell, SendMessage'));
+    disallowedTools => 'Write, KillShell, SendMessage, ListAgents'));
   put($d, 'star.md', agent_md(name => 'star', description => 'd', tools => '*', disallowedTools => [ 'Bash', 'ask_user' ]));
   put($d, 'empty.md', agent_md(name => 'empty', description => 'd', tools => ''));
   put($d, 'none.md', agent_md(name => 'none', description => 'd', tools => [ 'NotebookEdit' ]));
@@ -106,9 +106,9 @@ subtest 'frontmatter: tools, disallowedTools, model, skills, ignored keys' => su
   }, 'list: Claude names mapped, raider and mcp names kept, unknown reported, each once');
   like($c->find('string'), {
     tools         => [qw( read_file edit_file multi_edit web_fetch )],
-    disallowed    => [qw( write_file kill_shell )],
-    unknown_tools => [ 'SendMessage' ],
-  }, 'comma-separated string; MultiEdit and KillShell mapped (ADR 0025); disallowed mapped, unknown reported');
+    disallowed    => [qw( write_file kill_shell send_message )],
+    unknown_tools => [ 'ListAgents' ],
+  }, 'comma-separated string; MultiEdit, KillShell (ADR 0025) and SendMessage (ADR 0027) mapped; disallowed mapped, unknown reported');
   like($c->find('star'), { tools => undef, disallowed => [qw( bash ask_user )] }, '* means every tool');
   is($c->find('empty')->{tools}, undef, 'empty tools: every tool');
   is($c->find('none')->{tools}, [], 'only unknown names: no tool');
@@ -170,7 +170,7 @@ subtest 'general-purpose: built-in, shadowable' => sub {
 
   put($w, 'gp/general-purpose.md', agent_md(description => 'My own general-purpose.'));
   my $own = catalog(roots => [ { dir => "$w/gp", source => 'gp' } ]);
-  is(names($own), [ 'general-purpose' ], 'one general-purpose');
+  is(names($own), [qw( general-purpose Explore Plan )], 'one general-purpose');
   is($own->find('general-purpose')->{source}, 'gp', 'the file wins');
   is([ $own->shadowed ], [ { name => 'general-purpose', source => 'built-in', file => undef, by => 'gp' } ],
     'the built-in is reported as shadowed');
@@ -196,7 +196,7 @@ subtest 'plugins: agent_dirs and plugin:agent names' => sub {
     roots   => [ { dir => "$w/proot", source => 'proot' } ],
     plugins => [ { name => 'kit', dirs => [ $plugins->agent_dirs($entry) ] } ],
   );
-  is(names($c), [qw( helper kit:helper kit:inner kit:one kit:two general-purpose )],
+  is(names($c), [qw( helper kit:helper kit:inner kit:one kit:two general-purpose Explore Plan )],
     'plugin agents after the roots, named plugin:agent, never shadowed by a root');
   is($c->find('kit:helper')->{source}, 'plugin kit', 'source');
 };
@@ -247,6 +247,11 @@ subtest 'report: plain data' => sub {
       { name => 'general-purpose', source => 'built-in', file => undef, tools => '*', disallowed => [],
         model => { declared => undef, inherit => 1, reason => 'no model set' }, skills => [],
         unknown_tools => [], ignored_keys => [] },
+      ( map { {
+        name => $_, source => 'built-in', file => undef, tools => '*',
+        disallowed => [qw( agent send_message write_file edit_file multi_edit exit_plan_mode )],
+        model => { declared => undef, inherit => 1, reason => 'no model set' }, skills => [],
+        unknown_tools => [], ignored_keys => [] } } qw( Explore Plan ) ),
     ],
     shadowed => [],
     problems => [ { file => "$w/rep/bad.md", reason => 'no description: not an agent' } ],
@@ -283,7 +288,7 @@ subtest 'context: roots per layout' => sub {
   is([ map { $_->{source} } @{ $c->agent_roots } ],
     [ '.raider/agents', '~/.raider/agents', '.claude/agents', '~/.claude/agents' ], 'root order');
   my $cat = $c->agent_catalog;
-  is(names($cat), [qw( dup proj-native home-native both proj-claude user-claude helper:tidy general-purpose )],
+  is(names($cat), [qw( dup proj-native home-native both proj-claude user-claude helper:tidy general-purpose Explore Plan )],
     'native, then project .claude/agents before the user\'s, then enabled plugins, then the built-in');
   is($cat->find('dup')->{description}, 'dup from .raider/agents', 'project native first');
   is($cat->find('both')->{description}, 'both from .claude/agents', 'Claude project before user');
@@ -291,7 +296,8 @@ subtest 'context: roots per layout' => sub {
   is([ sort map { "$_->{name} $_->{source} by $_->{by}" } $cat->shadowed ],
     [ 'both ~/.claude/agents by .claude/agents', 'dup ~/.raider/agents by .raider/agents' ], 'shadowed');
   like($c->report, {
-    agents          => [ { name => 'dup' }, {}, {}, {}, {}, {}, { name => 'helper:tidy', source => 'plugin helper' }, { name => 'general-purpose' } ],
+    agents          => [ { name => 'dup' }, {}, {}, {}, {}, {}, { name => 'helper:tidy', source => 'plugin helper' }, { name => 'general-purpose' },
+      { name => 'Explore' }, { name => 'Plan' } ],
     shadowed_agents => [ {}, {} ],
     agent_problems  => [],
   }, 'report carries the agents');
@@ -301,11 +307,11 @@ subtest 'context: roots per layout' => sub {
   put($native, '.claude/agents/c.md', agent_md(description => 'not read outside the Claude layout'));
   my $nc = Langertha::Raider::Context->new(root => "$native");
   ok(!$nc->claude_layout, 'no Claude layout');
-  is(names($nc->agent_catalog), [qw( n dup home-native general-purpose )], 'native roots only, no plugins');
+  is(names($nc->agent_catalog), [qw( n dup home-native general-purpose Explore Plan )], 'native roots only, no plugins');
 
   my $bare = Langertha::Raider::Context->new(root => "$p", bare => 1);
   is($bare->agent_roots, [], 'bare: no roots');
-  is(names($bare->agent_catalog), [ 'general-purpose' ], 'bare: the built-in only');
+  is(names($bare->agent_catalog), [qw( general-purpose Explore Plan )], 'bare: the built-ins only');
 };
 
 subtest 'context: CLAUDE_CONFIG_DIR is the user Claude directory' => sub {
@@ -370,14 +376,17 @@ subtest 'application: config keys and explain_config' => sub {
   my $oai = Langertha::Raider::CLI->new(%a, engine => 'openai')->explain_config;
   like([ grep { $_->{name} eq 'rev' } @{ $oai->{agents} } ], [ { model => { inherit => 1,
     reason => 'model sonnet: inherited, engine openai is not the Anthropic API' } } ], 'inherited under openai');
-  is($oai->{agents}[-1]{name}, 'general-purpose', 'the built-in last');
+  is([ map { $_->{name} } @{ $oai->{agents} }[-3 .. -1] ], [qw( general-purpose Explore Plan )], 'the built-ins last');
 
   my $flag = Langertha::Raider::CLI->new(%a, engine => 'openai', engine_options => { max_agent_depth => 0 });
   is($flag->max_agent_depth, 0, '-o max_agent_depth= overrides the config');
   my $plain = project();
-  is(Langertha::Raider::CLI->new(%a, root => "$plain", engine => 'openai')->max_agent_depth, 1, 'default 1');
-  is(Langertha::Raider::CLI->new(%a, root => "$plain", engine => 'openai',
-    engine_options => { max_agent_depth => 'deep' })->max_agent_depth, 1, 'not an integer: default');
+  is(Langertha::Raider::CLI->new(%a, root => "$plain", engine => 'openai')->max_agent_depth, 3, 'default 3 (ADR 0027)');
+  my $deep = Langertha::Raider::CLI->new(%a, root => "$plain", engine => 'openai',
+    engine_options => { max_agent_depth => 'deep' });
+  is($deep->max_agent_depth, 3, 'not an integer: default');
+  like([ grep { $_->{key} eq 'max_agent_depth' } @{ $deep->explain_config->{ignored} } ],
+    [ { reason => 'not a non-negative integer' } ], 'listed as ignored');
   is(Langertha::Raider::CLI->new(%a, root => "$plain", engine => 'openai')->agent_models, {}, 'no agent_models');
 };
 

@@ -51,7 +51,8 @@ subtest 'the tool set: the caller\'s, filtered, without ask_user and enter_plan_
   is( names( $gp->tool_servers ), [ grep { !$never{$_} } @parent ],
     'all tools: every tool but ask_user and enter_plan_mode, in order' );
   my $deep = child( $app, agent(), depth => 2 );
-  is( names( $deep->tool_servers ), [ grep { !$never{$_} && $_ ne 'agent' } @parent ], 'at the depth limit: no agent' );
+  is( names( $deep->tool_servers ), [ grep { !$never{$_} && $_ ne 'agent' && $_ ne 'send_message' } @parent ],
+    'at the depth limit: no agent, no send_message' );
   is( names( child( $app, agent( tools => [qw( read_file enter_plan_mode )] ) )->tool_servers ), ['read_file'],
     'enter_plan_mode goes even when listed: only the main session enters plan mode' );
 
@@ -141,9 +142,9 @@ subtest 'a run: own todo list, child session, agent.* events in the caller only'
   my ($started)  = grep { $_->{type} eq 'agent.started' } @events;
   my ($finished) = grep { $_->{type} eq 'agent.finished' } @events;
   like( $started, { call => 'c2', agent => 'general-purpose', description => 'Sub task', model => 'virtual',
-    session => qr/\S/ }, 'agent.started' );
-  like( $finished, { call => 'c2', agent => 'general-purpose', status => 'completed', session => $started->{session} },
-    'agent.finished' );
+    session => qr/\S/, agent_id => 'agent_1', background => F() }, 'agent.started' );
+  like( $finished, { call => 'c2', agent => 'general-purpose', status => 'completed', session => $started->{session},
+    agent_id => 'agent_1' }, 'agent.finished' );
 
   my $store = $app->session_store;
   my $child_id = $started->{session};
@@ -155,8 +156,8 @@ subtest 'a run: own todo list, child session, agent.* events in the caller only'
     'and not the subagent\'s tool calls' );
 
   my $child = $store->read($child_id);
-  like( $child->created, { parent => $session->id, parent_call => 'c2', agent => 'general-purpose', depth => 1 },
-    'session.created names parent, call, agent, depth' );
+  like( $child->created, { parent => $session->id, parent_call => 'c2', agent => 'general-purpose', depth => 1,
+    agent_id => 'agent_1' }, 'session.created names parent, call, agent, depth, agent ID' );
   is( [ map { $_->{type} } @{ $child->events } ],
     [qw( session.created run.started message tool.call todo.updated tool.result message run.finished )],
     'the child journals one run' );
@@ -232,7 +233,8 @@ subtest 'a failing subagent is an error result with the reason; the caller goes 
   is( $outcome->{response}, 'went on', 'the caller answers' );
   my $r = $app->mock_engine->results->[-1];
   ok( $r->{result}{isError}, 'the agent call failed' );
-  like( $r->{result}{content}[0]{text}, qr/\AAgent 'general-purpose' failed: .*503/s, 'with the reason' );
+  like( $r->{result}{content}[0]{text}, qr/\AAgent 'general-purpose' \(agent_1\) failed: .*503/s,
+    'with the agent ID and the reason (ADR 0027 section 2)' );
   my ($finished) = grep { $_->{type} eq 'agent.finished' } @events;
   is( $finished->{status}, 'failed', 'agent.finished failed' );
   my $child = $app->session_store->read( $finished->{session} );
@@ -255,7 +257,7 @@ subtest 'an engine that cannot be built fails the call, not the caller' => sub {
     script => [ { tool_calls => [ [ agent => { description => 'd', prompt => 'p' } ] ] }, { text => 'ok' } ],
   );
   is( '' . $app->run('go'), 'ok', 'the caller answers' );
-  is( $app->mock_engine->results->[-1]{result}{content}[0]{text}, "Agent 'general-purpose' failed: no engine here",
+  is( $app->mock_engine->results->[-1]{result}{content}[0]{text}, "Agent 'general-purpose' (agent_1) failed: no engine here",
     'the reason' );
   my ($started) = grep { $_->{type} eq 'agent.started' } @events;
   ok( $started && !exists $started->{model}, 'agent.started without a model' );
@@ -315,7 +317,7 @@ subtest 'an unknown subagent_type in a run starts nothing' => sub {
     script   => [ { tool_calls => [ [ agent => { description => 'd', prompt => 'p', subagent_type => 'nope' } ] ] }, { text => 'ok' } ],
   );
   is( '' . $app->run('go'), 'ok', 'the caller answers' );
-  like( $app->mock_engine->results->[-1]{result}{content}[0]{text}, qr/\AUnknown agent type 'nope'\. Available agents: general-purpose\.\z/,
+  like( $app->mock_engine->results->[-1]{result}{content}[0]{text}, qr/\AUnknown agent type 'nope'\. Available agents: general-purpose, Explore, Plan\.\z/,
     'names the available agents' );
   is( [ grep { $_->{type} =~ /\Aagent\./ } @events ], [], 'no agent.* event' );
   is( scalar @{ $app->mock_engine->requests }, 2, 'no subagent request' );

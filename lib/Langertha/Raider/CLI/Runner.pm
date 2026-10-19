@@ -82,6 +82,13 @@ also when it failed or was interrupted; a machine document then names the
 session in C<session> (C<id>, C<path>). A journal write that fails is a
 warning (L</journal_error>); the run goes on.
 
+C<notification>, C<reminders> and C<wait_background> go to the application
+as they are (ADR 0027: a turn that delivers notifications of background
+subagents, notifications in front of the prompt, a run that waits for its
+background subagents before it ends --
+L<Langertha::Raider::Application/run_prompt>); a one-shot run passes
+C<wait_background>.
+
 With C<catch_signals>, a C<SIGINT> during the run cancels it (L</cancel_run>):
 it ends as C<cancelled> at its next safe point, its outcome is printed or
 written as always, and then the process dies of C<SIGINT>
@@ -125,7 +132,7 @@ sub run_prompt {
 
   my $end = $app->run_prompt($text,
     ( $o{session} ? ( session => $o{session} ) : () ),
-    ( map { defined $o{$_} ? ( $_ => $o{$_} ) : () } $self->run_options ),
+    ( map { defined $o{$_} ? ( $_ => $o{$_} ) : () } $self->run_options, qw( notification reminders wait_background ) ),
     on_event => sub { $self->event(@_) },
   );
   # The run has ended: no signal may cut its outcome short any more.

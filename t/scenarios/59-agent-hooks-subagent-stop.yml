@@ -31,7 +31,7 @@ expect:
     - { index: 2, contains: "SubagentStop hook feedback:\nname your sources" }
     - { index: 2, contains: "a draft" }
   tools:
-    - { name: agent, text: '\Aa draft, sources named\z' }
+    - { name: agent, text: '\Aa draft, sources named\nagentId: agent_1 \(use send_message with to: ''agent_1'' to continue this agent\)\n<usage>subagent_tokens: \d+\ntool_uses: \d+\nduration_ms: \d+</usage>\z' }
   events:
     - { type: agent.started, call: c1, agent: scribe }
     - { type: hook.ran, hook_event: SubagentStop, outcome: block, exit: 2 }

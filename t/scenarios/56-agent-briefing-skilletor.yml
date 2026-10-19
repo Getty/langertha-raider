@@ -23,7 +23,7 @@ expect:
     - { index: 1, contains: "# Briefing — pre-loaded skills\n" }
     - { index: 1, contains: "/skill-src/skills/notes\">\nSKILLETOR-NOTES-BODY: one line per note.\n</skill>\n\n---\n\n# Original task\n\nSummarise the day in notes." }
   tools:
-    - { name: agent, text: '\A- shipped skilletor\z' }
+    - { name: agent, text: '\A- shipped skilletor\nagentId: agent_1 \(use send_message with to: ''agent_1'' to continue this agent\)\n<usage>subagent_tokens: \d+\ntool_uses: \d+\nduration_ms: \d+</usage>\z' }
   events:
     - { type: agent.started, call: c1, agent: scribe }
     - { type: agent.finished, call: c1, agent: scribe, status: completed }

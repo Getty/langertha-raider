@@ -93,7 +93,7 @@ included); "listed" means the name only appears in Claude Code's tool lists, nev
 | `ExitPlanMode` | 2 | `exit_plan_mode` |
 | `TaskList`, `TaskGet`, `EnterPlanMode` | listed | `task_list`, `task_get`, `enter_plan_mode` |
 | `MultiEdit`, `TodoWrite`, `BashOutput`, `KillShell`, `KillBash`, `LS`, `Task` | older versions | `multi_edit`, `todo_write`, `bash_output`, `kill_shell`, `list_files`, `agent` |
-| `SendMessage` | 1241 | unknown: a message to another running agent of an agent team; raider has no teammates (stream A builds sub-agents that return, not peers) |
+| `SendMessage` | 1241 | `send_message` since ADR 0027 §5: continues a subagent by agent ID or name (was unknown here: raider has no teammates) |
 | `SubagentHandback` | 726 | unknown: a sub-agent handing its result back; raider's sub-agent ends with its answer (stream A) |
 | `ListAgents`, `TeamCreate`, `TeamDelete`, `AgentOutput`, `AgentOutputTool` | 279, removed | unknown: the agent-team machinery, same reason |
 | `ToolSearch` | 737 | unknown: loads deferred tool schemas; raider mounts the whole active tool set (ADR 0005), nothing is deferred |

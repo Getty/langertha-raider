@@ -20,5 +20,5 @@ expect:
   tools:
     - { name: write_file, error: true, text: 'plan mode: write_file changes files' }
     - { name: exit_plan_mode, text: '\ANobody can approve the plan in a subagent\. Stay in plan mode' }
-    - { name: agent, text: '\ACHILD-PLAN\z' }
+    - { name: agent, text: '\ACHILD-PLAN\nagentId: agent_1 \(use send_message with to: ''agent_1'' to continue this agent\)\n<usage>subagent_tokens: \d+\ntool_uses: \d+\nduration_ms: \d+</usage>\z' }
     - { name: write_file, error: true, text: 'plan mode: write_file changes files' }

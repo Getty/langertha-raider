@@ -26,6 +26,11 @@ Revision history for Langertha-Raider
       a path such as `/etc/hosts is broken` stays a prompt. In command
       bodies $N counts from 0 as in Claude Code ($0 is the first argument).
       See [Slash commands like Claude Code].
+    - INCOMPATIBLE: subagents nest up to three levels by default
+      (max_agent_depth 3, was 1; max_agent_depth: 1 restores it), the result
+      of an agent call ends with an agentId line and a <usage> block, and a
+      one-shot run waits for the background agents it started before it ends
+      (ADR 0027). See [Claude Code layout and skills].
 
   [Release order]
     - Skilletor 0.001 (the perl/ dist of the skilletor repository) goes to
@@ -138,7 +143,8 @@ Revision history for Langertha-Raider
       addendum): task_create and task_update run them before the change, with
       task_id, task_subject and task_description; exit 2 undoes the change
       and the model reads "TaskCreated hook error: STDERR". todo_write fires
-      none.
+      none. A subagent's own task list fires them too, with its agent_id,
+      agent_type and permission_mode; their reports go to its journal.
     - A resumed (--continue, --resume) or forked session gets its task list
       back from the journal's last todo.updated (not after /clear; ids
       continue). Only for the task tools.
@@ -661,6 +667,89 @@ Revision history for Langertha-Raider
       file's tools / disallowedTools, TodoWrite and the Task* names are one
       family, Edit and MultiEdit are one, and Bash brings bash_output and
       kill_shell.
+    - Built-in Explore and Plan agents beside general-purpose (ADR 0027
+      section 6), with Claude Code's descriptions: read-only by their
+      instructions and without agent, send_message, write_file, edit_file,
+      multi_edit and exit_plan_mode; their mission has no CLAUDE.md,
+      AGENTS.md or packs, only their instructions, the tools and the skill
+      listing. A file agent of the same name replaces either, as for
+      general-purpose.
+    - Subagents nest up to three levels by default (max_agent_depth 3, was
+      1; ADR 0027 section 8). Without the config key,
+      CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH sets it in the Claude layout
+      (also from the settings env); config explain shows where the value
+      comes from and lists a value that does not fit as ignored.
+    - Background subagents (ADR 0027 sections 1-5): every subagent gets an
+      agent ID (agent_1, agent_2, ...) in the application's task registry,
+      and its result ends with Claude Code's trailer -- the agentId line and
+      <usage> with subagent_tokens, tool_uses and duration_ms; a failed or
+      cancelled call names the ID. agent takes run_in_background, model and
+      name: a background agent answers at once ("Async agent launched
+      successfully."), runs on the loop, cannot ask for permissions, and
+      its end comes back as a <task-notification> message -- before the
+      next model request, at the prompt as a turn of its own, or in front
+      of the next line typed. A run that would end waits for the background
+      agents it started (subagents, raider -p, the end of piped REPL input);
+      the first Ctrl-C leaves them running, leaving raider stops them.
+      agent.started gains agent_id and background, agent.finished agent_id,
+      session.created of a child session agent_id and name.
+    - New tool send_message (Claude Code's SendMessage) beside agent: a
+      running agent gets the message before its next request, a finished one
+      is resumed in the background with its history (also one of an earlier
+      process, found in the session's child sessions); Explore and Plan are
+      one-shot. The agent tool text follows Claude Code's current one.
+    - The REPL runs the event loop while it waits for input (with
+      Term::ReadLine::Gnu through its callback interface, else with a prompt
+      of its own instead of IO::Prompt::Tiny; Ctrl-D now leaves there too).
+    - The agent calls of one model turn run at the same time (ADR 0027
+      section 9), each through the gate, the hooks and the plugins, their
+      results in call order; any other call between them runs on its own.
+      agent and send_message no longer wait inside tool code: a foreground
+      agent is a Future the caller's raid awaits, so one started by a
+      background agent no longer holds up the main run. At most
+      max_concurrent_agents subagent runs at once (config key; without it
+      CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS in the Claude layout; default 20,
+      shown by config explain); a spawn or resume beyond it is an error
+      result telling the model not to retry now. A Ctrl-C cuts off the
+      agent calls and the run ends once their agents have.
+    - Langertha::Raider: new attribute async_tools -- a tool whose call is a
+      handler returning a Future instead of an MCP call, concurrent ones
+      dispatched together within a turn. plugin_before_tool_call and
+      plugin_after_tool_call get the call's context as a further argument
+      (the tool call id; plugins may record keys there), so the Events
+      plugin gives every tool.result the id of its own tool.call. An
+      async tool may carry applies, asked with the tool's source in the
+      raid, so it stands in for one server's tool only.
+    - kill_shell (Claude Code's TaskStop) and bash_output (TaskOutput) take
+      agent IDs and agent names too (ADR 0027 section 10): kill_shell stops
+      a running agent ("Successfully stopped task: agent_1 (DESCRIPTION)",
+      then its "was stopped" notification), bash_output answers with the
+      agent's status and, once it has ended, its report in <output>; with
+      block it waits for the agent's end on the loop.
+    - Background shells are entries of the task registry (bash_N) and notify
+      the run that started them -- the main conversation or a subagent --
+      when they end on their own or are stopped, in Claude Code's form
+      (<status> completed, failed or killed; "Background command "..."
+      completed (exit code N)", "failed with exit code N", "was stopped");
+      ADR 0024's "no notification" no longer holds, and bash's texts say
+      "You will be notified when it completes." Nothing waits for a
+      background shell: a run, raider -p included, ends while one runs.
+      bash_output with block lets the loop run while it waits. A subagent's
+      background shells outlive its run, as before.
+    - The first Ctrl-C no longer ends the foreground command of a
+      background subagent: it belongs to the session, like a background
+      shell (BashTools background_pids). Leaving raider still ends it.
+    - A background subagent takes its own copy of the run rules (a
+      /command's allowed-tools) when it starts: a later command's rules do
+      not reach it, the end of the one that started it does not take them
+      away. Foreground subagents share the run's. /clear, /reset and /new
+      stop the conversation's background subagents without a notification
+      and drop the notifications that wait; background shells go on and
+      still notify.
+    - maint/claude-log-to-scenario: SendMessage is left out with a note
+      (raider would resume the agent in the background, which the draft does
+      not replay); app: { max_agent_depth: N } only for nesting deeper than
+      raider's default of 3; Explore and Plan agents stay Explore and Plan.
 
   [Permissions]
     - INCOMPATIBLE: every tool call of raider now passes a permission policy

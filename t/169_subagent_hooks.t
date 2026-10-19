@@ -118,7 +118,7 @@ subtest 'SubagentStart continue: false fails the agent before its first request'
   is( scalar @{ $app->mock_engine->requests }, 2, 'no child request' );
   my $r = $app->mock_engine->results->[-1];
   ok( $r->{result}{isError}, 'the agent call failed' );
-  is( $r->{result}{content}[0]{text}, "Agent 'scribe' failed: a SubagentStart hook stopped it: no agents today", 'with the reason' );
+  is( $r->{result}{content}[0]{text}, "Agent 'scribe' (agent_1) failed: a SubagentStart hook stopped it: no agents today", 'with the reason' );
   my ($finished) = grep { $_->{type} eq 'agent.finished' } @$events;
   is( $finished->{status}, 'failed', 'agent.finished failed' );
   like( [ grep { $_->{type} eq 'hook.message' } @$events ], [ { hook_event => 'SubagentStart', kind => 'stopped', text => 'no agents today' } ],
@@ -139,7 +139,43 @@ subtest 'continue: false in a subagent\'s tool hook cancels the subagent, not th
   is( scalar @{ $app->mock_engine->requests }, 3, 'the subagent makes no request after the stop' );
   is( $outcome->{status}, 'completed', 'the caller completes' );
   is( $outcome->{response}, 'the caller goes on', 'and answers' );
-  is( $app->mock_engine->results->[-1]{result}{content}[0]{text}, "Agent 'scribe' was cancelled.", 'the agent was cancelled' );
+  is( $app->mock_engine->results->[-1]{result}{content}[0]{text}, "Agent 'scribe' (agent_1) was cancelled.", 'the agent was cancelled' );
+};
+
+subtest 'a subagent\'s own task list fires TaskCreated and TaskCompleted, reported to its journal' => sub {
+  my $root = project(
+    hooks   => {
+      TaskCreated   => [ { hooks => [ hook('created') ] } ],
+      TaskCompleted => [ { hooks => [ hook( record => 'completed' ) ] } ],
+    },
+    scripts => { created => q{input=$(cat); printf '%s' "$input" > "$CLAUDE_PROJECT_DIR/created.json"; case "$input" in *'"task_subject":"Vague"'*) echo "be specific" >&2; exit 2;; esac} },
+  );
+  my ( $app, $events ) = app_for( $root, $spawn,
+    { tool_calls => [ [ task_create => { subject => 'Vague', description => 'x' } ] ] },
+    { tool_calls => [ [ task_create => { subject => 'Write notes', description => 'short ones' } ] ] },
+    { tool_calls => [ [ task_update => { taskId => '1', status => 'completed' } ] ] },
+    { text => 'child done' }, { text => 'parent done' } );
+  my $session = $app->create_session;
+  is( $app->run_prompt( 'go', session => $session )->{response}, 'parent done', 'the run completes' );
+  my ($started) = grep { $_->{type} eq 'agent.started' } @$events;
+  my $child = $started->{session};
+
+  my @results = map { [ $_->{tool_call}->name, $_->{result}{content}[0]{text}, $_->{result}{isError} ? 1 : 0 ] }
+    grep { $_->{tool_call}->name =~ /\Atask_/ } @{ $app->mock_engine->results };
+  is( \@results, [
+    [ task_create => 'TaskCreated hook error: be specific', 1 ],
+    [ task_create => 'Task #1 created successfully: Write notes', 0 ],
+    [ task_update => 'Updated task #1 status', 0 ],
+  ], 'the block refuses the first creation, the rest goes on' );
+  like( input_of( $root, 'created' ), { hook_event_name => 'TaskCreated', task_subject => 'Write notes',
+    agent_id => $child, agent_type => 'scribe', permission_mode => 'bypassPermissions', session_id => $session->id },
+    'TaskCreated carries the subagent\'s fields' );
+  like( input_of( $root, 'completed' ), { hook_event_name => 'TaskCompleted', task_id => '1', agent_type => 'scribe' },
+    'so does TaskCompleted' );
+  is( [ grep { $_->{type} eq 'hook.ran' } @$events ], [], 'nothing in the caller\'s stream' );
+  is( [ map { [ $_->{hook_event}, $_->{outcome} ] } grep { $_->{type} eq 'hook.ran' } @{ $app->session_store->read($child)->events } ],
+    [ [ TaskCreated => 'block' ], [ TaskCreated => 'success' ], [ TaskCompleted => 'success' ] ], 'the subagent\'s journal' );
+  is( $app->todos, [], 'the caller\'s list is untouched' );
 };
 
 subtest 'SubagentStop that never lets go: at most stop_hook_limit continuations' => sub {
@@ -151,7 +187,8 @@ subtest 'SubagentStop that never lets go: at most stop_hook_limit continuations'
   my ( $app, $events ) = app_for( $root, $spawn, ( map { { text => 'answer '.$_ } } 0 .. $limit ), { text => 'parent' } );
   is( '' . $app->run('go'), 'parent', 'the caller answers' );
   is( scalar @{ $app->mock_engine->requests }, 1 + ( $limit + 1 ) + 1, 'the subagent went on '.$limit.' times' );
-  is( $app->mock_engine->results->[-1]{result}{content}[0]{text}, 'answer '.$limit, 'the caller gets the last answer' );
+  like( $app->mock_engine->results->[-1]{result}{content}[0]{text}, qr/\Aanswer $limit\nagentId: agent_1 /,
+    'the caller gets the last answer' );
   like( [ grep { $_->{type} eq 'hook.message' && $_->{kind} eq 'error' } @$events ],
     [ { hook_event => 'SubagentStop', text => qr/kept agent 'scribe' going 8 times in a row/ } ], 'the cut is reported' );
 };

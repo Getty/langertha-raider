@@ -18,18 +18,22 @@ use Langertha::Raider::TodoTools;
 
 =synopsis
 
-    # The agent tool of a run at depth 0 (what the application mounts):
-    my $server = Langertha::Raider::Subagent->agent_tool_server(
+    # The agent tools of a run at depth 0 (what the application mounts):
+    my $agent_tools = Langertha::Raider::Subagent->agent_tools(
       app    => $app,
       depth  => 0,
-      caller => sub { {
-        servers => $app->_tool_servers,      # the caller's active tool set
-        session => $session,                 # or undef
-        call    => 'c3',                     # the agent call's id
-        event   => sub { $app->event(@_) },  # the caller's event stream
-        policy  => $app->permissions,        # the caller's permission policy
+      caller => sub { my ( %ctx ) = @_; {    # %ctx: the agent call's context
+        servers  => $app->_tool_servers,      # the caller's active tool set
+        session  => $session,                 # or undef
+        call     => $ctx{call},               # the agent call's id (c3)
+        event    => sub { $app->event(@_) },  # the caller's event stream
+        policy   => $app->permissions,        # the caller's permission policy
+        task_id  => undef,                    # the calling subagent's agent ID
+        detached => 0,                        # the caller runs in the background
       } },
     );
+    my $server = $agent_tools->server;        # agent, send_message
+    my $raider = Langertha::Raider->new( ..., async_tools => $agent_tools->async_tools );
 
     # What one agent call does:
     my $sub = Langertha::Raider::Subagent->new(
@@ -37,24 +41,42 @@ use Langertha::Raider::TodoTools;
       caller_servers => \@servers, on_caller_event => sub { ... },
       caller_policy => $app->permissions,
     );
-    my ( $text, $is_error ) = $sub->run;
+    my ( $text, $is_error ) = await $sub->foreground_f; # foreground, on the loop
+    my ( $text, $is_error ) = $sub->start_background;   # 'Async agent launched successfully. ...'
 
 =description
 
 B<Internal module.> Its interface may change without notice.
 
-The subagent run of ADR 0020 E<sect>4: one call of the C<agent> tool
-(L<Langertha::Raider::AgentTools>) becomes a new L<Langertha::Raider> in
-the same process, on the loop of the L</app> (ADR 0016), and the call's
-result is the subagent's last assistant text.
+The subagent run of ADR 0020 E<sect>4 and ADR 0027: one call of the
+C<agent> tool (L<Langertha::Raider::AgentTools>) becomes a new
+L<Langertha::Raider> in the same process, on the loop of the L</app> (ADR
+0016). In the foreground the call's result is the subagent's last assistant
+text with its agent ID and usage (L</result_text>); in the background
+(C<run_in_background>) the call answers at once (L</launch_text>) and the
+end of the run is a C<< <task-notification> >> for the caller
+(L</notification>).
 
 =over
+
+=item * B<Agent ID and registry> (ADR 0027 E<sect>1). Every run that
+starts gets an agent ID, C<agent_N> (L</task_id>), and an entry in the
+application's L<Langertha::Raider::Tasks> -- status, description, name,
+the C<agent> call id, its caller (the I<recipient> of its notifications:
+C<main>, or the agent ID of the calling subagent), the report and usage of
+its last run, and the subagent itself. The entry stays after the run, so
+C<send_message> can continue the agent (L</send_message>). The ID skips the
+agent IDs of the earlier child sessions of the caller's session (a resumed
+session), so it never names two agents there.
 
 =item * B<Own context.> The raider starts with an empty history and gets
 only the prompt. Its mission is compiled by the application like the
 caller's (L<Langertha::Raider::Application/compile_mission>), with the
 agent's body in the place of the persona and the native instructions --
-what C<-M> replaces (ADR 0014).
+what C<-M> replaces (ADR 0014). An agent without memory (C<memory> 0: the
+built-ins C<Explore> and C<Plan>, ADR 0027 E<sect>6) gets no Claude
+memory, no F<AGENTS.md> and no packs, only its body, the skill listing
+when its set has C<skill>, and its tools.
 
 =item * B<Own tool set> (L</tool_servers>). The caller's active set, each
 tool kept when the agent's C<tools> allows it and C<disallowedTools> does
@@ -67,11 +89,13 @@ enters plan mode). The task-list tools get an instance of their own, so the
 subagent's list never overwrites the caller's; the file tools get one over
 the subagent's own L</file_read_state>, so it reads a file before it writes
 it, as the caller must (ADR 0023); background shells stay the
-application's. C<agent> gets one for this depth -- or goes, when this run is
-at L<Langertha::Raider::Application/max_agent_depth>. A server whose tools
-all stay is mounted as it is; otherwise a new L<MCP::Server> carries the
-tools that stay. Prompt and catalogue derive from this set alone; the skill
-listing stays only when the set has the C<skill> tool.
+application's. C<agent> and C<send_message> get instances for this depth --
+or go, when this run is at
+L<Langertha::Raider::Application/max_agent_depth>. C<send_message> stays
+exactly when C<agent> does (and is not disallowed itself). A server whose
+tools all stay is mounted as it is; otherwise a new L<MCP::Server> carries
+the tools that stay. Prompt and catalogue derive from this set alone; the
+skill listing stays only when the set has the C<skill> tool.
 
 =item * B<Briefing> (L</briefing>, ADR 0020 E<sect>6). The skills the agent
 declares are resolved through L<Langertha::Raider::Context/skill_resolver>
@@ -79,10 +103,10 @@ and put in front of the prompt in the briefing plugin's format
 (L<Langertha::Raider::Briefing>); that is the subagent's prompt
 (L</briefed_prompt>). A skill that does not resolve refuses the call: the
 result is the error C<briefing: agent 'NAME' references unknown skill(s):
-a, b>, and nothing starts -- no session, no C<agent.started>, no request.
-Above 64 kB of skill text the run goes ahead, and the caller's stream and
-journal get C<agent.warning> (C<call>, C<agent>, C<message>: the size
-note) before C<agent.started>.
+a, b>, and nothing starts -- no agent ID, no session, no C<agent.started>,
+no request. Above 64 kB of skill text the run goes ahead, and the caller's
+stream and journal get C<agent.warning> (C<call>, C<agent>, C<message>:
+the size note) before C<agent.started>.
 
 =item * B<Permissions> (L</permissions>, ADR 0021). The caller's policy
 through L<Langertha::Raider::Permissions/for_subrun>: the mode the caller
@@ -91,14 +115,17 @@ the B<same> session rules. Every tool call of the subagent passes the
 application's gate (L<Langertha::Raider::Application/tool_gate>) with this
 policy; a call it asks about goes to the same person
 (L<Langertha::Raider::Application/on_permission_request>) or, with nobody to
-ask, is refused as in the caller. Its C<permission.*> events go to the
-subagent's journal. C<exit_plan_mode> gets an instance of its own that never
-switches a mode: a subagent in plan mode gives its plan as its answer, to
-the caller.
+ask, is refused as in the caller. A L</detached> subagent -- one in the
+background, or started by one -- never asks: such a call is refused with a
+reason that says it runs in the background (ADR 0027 E<sect>3). Its
+C<permission.*> events go to the subagent's journal. C<exit_plan_mode> gets
+an instance of its own that never switches a mode: a subagent in plan mode
+gives its plan as its answer, to the caller.
 
 =item * B<Engine.> One engine of the caller's class and arguments, built by
 L<Langertha::Raider::Application/build_subagent_engine> over this set's
-clients, on the same loop. Its model is the agent's C<model> as
+clients, on the same loop. Its model is the call's C<model> (L</model>),
+else the agent's C<model>, as
 L<Langertha::Raider::Context::Agents/resolve_model> maps it under the
 caller's engine and L<Langertha::Raider::Application/agent_models>
 (L</model_resolution>, ADR 0020 E<sect>5): a resolved model replaces the
@@ -107,15 +134,21 @@ engine really uses.
 
 =item * B<Journal.> When the caller has a session, the subagent gets its own
 session in the same store, whose C<session.created> carries C<parent>,
-C<parent_call>, C<agent> and C<depth>, and runs one journaled run there --
-C<run.started>, the briefed prompt and the answer as C<message>, every C<tool.call>,
-C<tool.result> and C<todo.updated>, and C<run.finished>. The caller gets
-only C<agent.started> (C<call>, C<agent>, C<description>, C<session>,
-C<model>) and C<agent.finished> (C<call>, C<agent>, C<session>,
-C<status>).
+C<parent_call>, C<agent>, C<depth>, C<agent_id> and the C<name> given at
+spawn, and runs one journaled run there per run of the agent --
+C<run.started>, the briefed prompt (or the message it was continued with)
+and the answer as C<message>, every C<tool.call>, C<tool.result> and
+C<todo.updated>, a delivered notification as a user C<message> with
+C<notification> 1, and C<run.finished>. The caller gets only
+C<agent.started> (C<call>, C<agent>, C<agent_id>, C<background>,
+C<description>, C<session>, C<model>; C<resumed> for a continued run) and
+C<agent.finished> (C<call>, C<agent>, C<agent_id>, C<session>, C<status>),
+through its event stream -- for a subagent of the main run that ended
+between two runs, straight into the session it was started from
+(L<Langertha::Raider::Application/caller_event>).
 
 =item * B<Hooks> (Claude layout, ADR 0022, ADR 0020 E<sect>6). Before
-the run C<SubagentStart> fires (matcher on C<agent_type>) with
+the first run C<SubagentStart> fires (matcher on C<agent_type>) with
 C<agent_id> -- the subagent's session id, or C<local-agent-PID-ADDR> without
 a session -- and C<agent_type>, the agent's name; its
 C<additionalContext> goes in front of the briefed prompt as a
@@ -130,13 +163,43 @@ and the run goes on. The reports of both go to the caller's stream
 C<PreToolUse> and C<PostToolUse> hooks as the caller's do, with
 C<agent_id>, C<agent_type> and its own C<permission_mode> in the input;
 those reports go to its journal, and a C<continue: false> there cancels the
-subagent only.
+subagent only. Its own task list fires C<TaskCreated> and C<TaskCompleted>
+the same way, before the change, with the same fields; a block refuses the
+change with the hook's reason as the tool's error result. A continued run
+fires no C<SubagentStart>.
+
+=item * B<Messages and children.> What waits for the subagent in the
+registry's queue -- the notifications of its own background subagents, the
+messages C<send_message> hands it -- goes into its raid before its next
+model request (L<Langertha::Raider/on_iteration>). A run that would end
+with a final answer while background subagents it started still run waits
+for them on the loop and goes on with their notifications as its next
+message (ADR 0027 E<sect>3); it ends when it answers with nothing left.
+
+=item * B<On the loop> (ADR 0027 E<sect>9). C<agent> and C<send_message>
+are asynchronous tools of the caller's raider
+(L<Langertha::Raider/async_tools>): no tool code waits for a subagent, a
+foreground run is a Future the caller's raid awaits, and the C<agent> calls
+of one model turn run at the same time, each with its own agent ID and
+result. At most L<Langertha::Raider::Application/max_concurrent_agents>
+subagent runs of the application run at once -- all depths, foreground and
+background, resumed ones too; beyond that a spawn or a resume is refused
+with C<Concurrent subagent limit reached (N running). Do not retry this
+call now; wait for running agents to finish.>, and nothing starts. The
+agent call id a subagent knows (its C<caller_call>, the C<tool-use-id> of
+its notification) comes from the call's context, not from the last call
+of the caller's run.
 
 =item * B<End.> A completed run answers with the subagent's text; a failed
 one with an error result giving the reason; a cancelled one -- the
-application cancels every live subagent with its run
-(L<Langertha::Raider::Application/cancel_run>) -- with an error result.
-The subagent gets the caller's C<max_iterations>.
+application cancels every live foreground subagent with its run
+(L<Langertha::Raider::Application/cancel_run>), and L</cancel> reaches the
+subagent's own children -- with an error result. A caller's cancel that
+cuts the C<agent> call off cancels the subagent too; its run ends on the
+loop, held by the registry. Failed and cancelled
+results name the agent ID. A run that ends that way first stops the
+subagents it started and waits for them. The subagent gets the caller's
+C<max_iterations>.
 
 =back
 
@@ -152,8 +215,8 @@ has app => (
 =attr app
 
 The L<Langertha::Raider::Application> of the main run, which builds the
-engine and the mission and owns the loop and the session store. Required,
-held weakly.
+engine and the mission and owns the loop, the session store and the
+registry. Required, held weakly.
 
 =cut
 
@@ -190,7 +253,7 @@ has prompt => (
 
 =attr prompt
 
-The task, the subagent's only user message. Required.
+The task, the subagent's first user message. Required.
 
 =cut
 
@@ -202,7 +265,60 @@ has description => (
 
 =attr description
 
-The short label of the call, for C<agent.started>.
+The short label of the call, for C<agent.started> and the notification.
+
+=cut
+
+has name => (
+  is  => 'ro',
+  isa => 'Maybe[Str]',
+);
+
+=attr name
+
+The C<name> the call gave the agent, by which C<send_message> can address
+it, if any.
+
+=cut
+
+has model => (
+  is  => 'ro',
+  isa => 'Maybe[Str]',
+);
+
+=attr model
+
+The C<model> of the call (C<sonnet>, C<opus>, C<haiku>), which replaces
+the agent's own, if any.
+
+=cut
+
+has background => (
+  is      => 'ro',
+  isa     => 'Bool',
+  default => 0,
+  writer  => '_set_background',
+);
+
+=attr background
+
+True when the run goes on in the background (C<run_in_background>, and
+every continued run).
+
+=cut
+
+has task_id => (
+  is        => 'ro',
+  isa       => 'Str',
+  writer    => '_set_task_id',
+  predicate => 'has_task_id',
+);
+
+=attr task_id
+
+The agent ID (C<agent_1>), once the run is registered: what the model sees
+and addresses (ADR 0027 E<sect>1). Not the same as L</agent_id>, the id the
+hooks get.
 
 =cut
 
@@ -221,6 +337,7 @@ The caller's active tool set, as L<MCP::Server> objects. Required.
 has caller_session => (
   is        => 'ro',
   predicate => 'has_caller_session',
+  writer    => '_set_caller_session',
 );
 
 =attr caller_session
@@ -230,13 +347,15 @@ The caller's L<Langertha::Raider::Session>, if it has one.
 =cut
 
 has caller_call => (
-  is  => 'ro',
-  isa => 'Maybe[Str]',
+  is     => 'ro',
+  isa    => 'Maybe[Str]',
+  writer => '_set_caller_call',
 );
 
 =attr caller_call
 
-The id of the caller's C<agent> tool call (C<c3>), as its journal names it.
+The id of the caller's C<agent> tool call (C<c3>), as its journal names it
+-- for a continued run, the id of the C<send_message> call.
 
 =cut
 
@@ -244,12 +363,39 @@ has on_caller_event => (
   is       => 'ro',
   isa      => 'CodeRef',
   required => 1,
+  writer   => '_set_on_caller_event',
 );
 
 =attr on_caller_event
 
 The caller's event stream, called as C<< ->($type, %payload) >> with
 C<agent.started> and C<agent.finished>. Required.
+
+=cut
+
+has caller_task_id => (
+  is     => 'ro',
+  isa    => 'Maybe[Str]',
+  writer => '_set_caller_task_id',
+);
+
+=attr caller_task_id
+
+The agent ID of the calling subagent; undef for a subagent of the main
+run. See L</recipient>.
+
+=cut
+
+has caller_detached => (
+  is      => 'ro',
+  isa     => 'Bool',
+  default => 0,
+  writer  => '_set_caller_detached',
+);
+
+=attr caller_detached
+
+True when the caller runs detached (L</detached>).
 
 =cut
 
@@ -344,8 +490,9 @@ has agent_id => (
 
 =attr agent_id
 
-The C<agent_id> of the hook inputs: the subagent's session id, else
-C<local-agent-PID-ADDR>, unique while the subagent runs.
+The C<agent_id> of the hook inputs (ADR 0020 E<sect>7): the subagent's
+session id, else C<local-agent-PID-ADDR>, unique while the subagent runs.
+The model addresses the agent by L</task_id>.
 
 =cut
 
@@ -364,9 +511,9 @@ has model_resolution => (
 
 =attr model_resolution
 
-What the agent's C<model> means under the caller's engine
-(L<Langertha::Raider::Context::Agents/resolve_model>): C<< { model => ... } >>
-or C<< { inherit => 1, reason => ... } >>.
+What the call's L</model>, else the agent's C<model>, means under the
+caller's engine (L<Langertha::Raider::Context::Agents/resolve_model>):
+C<< { model => ... } >> or C<< { inherit => 1, reason => ... } >>.
 
 =cut
 
@@ -422,7 +569,8 @@ has raider => (
 
 =attr raider
 
-The subagent's L<Langertha::Raider>, built once.
+The subagent's L<Langertha::Raider>, built once; it keeps the history
+from one run of the agent to the next.
 
 =cut
 
@@ -449,7 +597,7 @@ has cancel_requested => (
 
 =attr cancel_requested
 
-True once L</cancel> was called.
+True once L</cancel> was called, until the agent is continued.
 
 =cut
 
@@ -488,92 +636,449 @@ counts as unread until the subagent reads it itself.
 has _own_todos       => ( is => 'ro', init_arg => undef, lazy => 1, builder => '_build_own_todos' );
 has _own_file_server => ( is => 'ro', init_arg => undef, lazy => 1, builder => '_build_own_file_server' );
 
-has _mcps    => ( is => 'ro', init_arg => undef, lazy => 1, builder => '_build_mcps', predicate => '_has_mcps' );
-has _call    => ( is => 'rw', init_arg => undef );
-has _run_id  => ( is => 'rw', init_arg => undef );
-has _t0      => ( is => 'rw', init_arg => undef );
-has _model   => ( is => 'rw', init_arg => undef );
-has _journal_failed => ( is => 'rw', init_arg => undef, default => 0 );
+has last_outcome => (
+  is       => 'ro',
+  isa      => 'HashRef',
+  init_arg => undef,
+  writer   => '_set_last_outcome',
+);
 
-=method agent_tool_server
+=attr last_outcome
 
-    my $server = Langertha::Raider::Subagent->agent_tool_server(
-      app => $app, depth => $depth, caller => sub { { servers, session, call, event, policy } });
-
-The L<MCP::Server> with the C<agent> tool for a run at C<$depth>, over the
-agent catalogue of the application's context. Every call asks C<caller>
-for the state of the calling run at that moment -- its active tool set,
-session, the id of the call, its event stream and its permission policy
--- and runs a new subagent of the invocant class at C<$depth + 1>
-(L</run>).
+The outcome of the last run that ended (see L</run_f>).
 
 =cut
 
-sub agent_tool_server {
+has _mcps    => ( is => 'ro', init_arg => undef, lazy => 1, builder => '_build_mcps', predicate => '_has_mcps' );
+has _agent_tools => ( is => 'ro', init_arg => undef, lazy => 1, builder => '_build_agent_tools' );
+has _run_id  => ( is => 'rw', init_arg => undef );
+has _t0      => ( is => 'rw', init_arg => undef );
+has _model   => ( is => 'rw', init_arg => undef );
+has _tool_uses => ( is => 'rw', init_arg => undef, default => 0 );
+has _last_tokens => ( is => 'rw', init_arg => undef, default => 0 );
+has _journal_failed => ( is => 'rw', init_arg => undef, default => 0 );
+
+=method recipient
+
+Who gets the notifications of this subagent: L</caller_task_id>, or
+C<main> for a subagent of the main run.
+
+=method detached
+
+True when nobody waits for the subagent at the keyboard: it runs in the
+L</background>, or its caller does (L</caller_detached>).
+
+=method one_shot
+
+True for an agent that cannot be continued (the built-ins C<Explore> and
+C<Plan>, ADR 0027 E<sect>6).
+
+=cut
+
+sub recipient { $_[0]->caller_task_id // 'main' }
+
+sub detached { $_[0]->background || $_[0]->caller_detached ? 1 : 0 }
+
+sub one_shot { $_[0]->agent->{one_shot} ? 1 : 0 }
+
+=method agent_tools
+
+    my $agent_tools = Langertha::Raider::Subagent->agent_tools(
+      app => $app, depth => $depth,
+      caller => sub { my ( %ctx ) = @_; { servers, session, call, event, policy, task_id, detached } });
+
+The L<Langertha::Raider::AgentTools> with the tools C<agent> and
+C<send_message> for a run at C<$depth>, over the agent catalogue of the
+application's context: its C<server> for the tool set, its C<async_tools>
+for the raider of that run. Every call asks C<caller> -- with the call's
+context (L<Langertha::Raider/async_tools>) -- for the state of the calling
+run at that moment: its active tool set, session, the id of the call (the
+context's C<call>), its event stream, its permission policy, its agent ID
+(undef for the main run) and whether it runs detached. An C<agent> call
+runs a new subagent of the invocant class at C<$depth + 1> (L</spawn_f>), a
+C<send_message> call goes to L</send_message>.
+
+=method agent_tool_server
+
+    my $server = Langertha::Raider::Subagent->agent_tool_server(%args);
+
+The C<server> of L</agent_tools>.
+
+=cut
+
+sub agent_tools {
   my ( $class, %arg ) = @_;
   my ( $app, $depth, $caller ) = @arg{qw( app depth caller )};
   weaken $app;
   return Langertha::Raider::AgentTools->new(
     catalog  => $app->context->agent_catalog,
     on_spawn => sub {
-      my ( $agent, $call ) = @_;
-      my $c = $caller->();
-      return $class->new(
-        app             => $app,
-        agent           => $agent,
-        depth           => $depth + 1,
-        description     => $call->{description},
-        prompt          => $call->{prompt},
-        caller_servers  => $c->{servers},
-        on_caller_event => $c->{event},
-        caller_call     => $c->{call},
-        ( $c->{session} ? ( caller_session => $c->{session} ) : () ),
-        ( $c->{policy}  ? ( caller_policy  => $c->{policy} )  : () ),
-      )->run;
+      my ( $agent, $call, %ctx ) = @_;
+      return $class->spawn_f( app => $app, depth => $depth, caller => $caller->(%ctx), agent => $agent, call => $call );
     },
-  )->server;
+    on_send  => sub {
+      my ( $message, %ctx ) = @_;
+      return $class->send_message( app => $app, depth => $depth, caller => $caller->(%ctx),
+        to => $message->{to}, message => $message->{message} );
+    },
+  );
 }
+
+sub agent_tool_server {
+  my ( $class, %arg ) = @_;
+  return $class->agent_tools(%arg)->server;
+}
+
+=method spawn_f
+
+    my ( $text, $is_error ) = await Langertha::Raider::Subagent->spawn_f(
+      app => $app, depth => 0, caller => \%caller, agent => $agent,
+      call => { description, prompt, model, name, run_in_background },
+    );
+
+One C<agent> call: a new subagent at C<$depth + 1>; a briefing that does
+not resolve refuses it, so does the concurrency limit (L</limit_refusal>);
+else it runs in the foreground (L</foreground_f>) or starts in the
+background (L</start_background>). A Future of the tool result.
+
+=cut
+
+sub spawn_f {
+  my ( $class, %arg ) = @_;
+  my ( $app, $depth, $c, $agent, $call ) = @arg{qw( app depth caller agent call )};
+  my $sub = $class->new(
+    $class->_caller_args($c),
+    app            => $app,
+    agent          => $agent,
+    depth          => $depth + 1,
+    description    => $call->{description} // '',
+    prompt         => $call->{prompt},
+    background     => $call->{run_in_background} ? 1 : 0,
+    caller_servers => $c->{servers},
+    ( defined $call->{model} ? ( model => $call->{model} ) : () ),
+    ( defined $call->{name}  ? ( name  => $call->{name} )  : () ),
+    ( $c->{policy} ? ( caller_policy => $c->{policy} ) : () ),
+  );
+  my $briefing = $sub->briefing;
+  return Future->done( $briefing->missing_note, 1 ) if $briefing->has_missing;
+  if ( defined( my $refusal = $class->limit_refusal($app) ) ) {
+    return Future->done( $refusal, 1 );
+  }
+  return $sub->background ? Future->done( $sub->start_background ) : $sub->foreground_f;
+}
+
+=method limit_refusal
+
+    my $text = Langertha::Raider::Subagent->limit_refusal($app);
+
+The error text when L<Langertha::Raider::Application/max_concurrent_agents>
+subagent runs of the application already run (ADR 0027 E<sect>9) -- every
+C<agent> entry of the registry that is C<running>, at any depth, in the
+foreground or the background -- else nothing.
+
+=cut
+
+sub limit_refusal {
+  my ( $class, $app ) = @_;
+  my $running = () = $app->tasks->running( kind => 'agent' );
+  return if $running < $app->max_concurrent_agents;
+  return 'Concurrent subagent limit reached ('.$running.' running). Do not retry this call now;'
+    .' wait for running agents to finish.';
+}
+
+# The constructor arguments a caller hash gives (see agent_tool_server).
+sub _caller_args {
+  my ( $class, $c ) = @_;
+  return (
+    on_caller_event => $c->{event},
+    caller_call     => $c->{call},
+    caller_task_id  => $c->{task_id},
+    caller_detached => $c->{detached} ? 1 : 0,
+    ( $c->{session} ? ( caller_session => $c->{session} ) : () ),
+  );
+}
+
+=method foreground_f
+
+    my ( $text, $is_error ) = await $sub->foreground_f;
+
+Registers the subagent and runs it in the foreground (L</run_f>) on the
+application's loop; a Future of the tool result (L</result_text>), which
+the caller's raider awaits. While it runs, the application knows it as
+live, so cancelling the main run cancels it -- unless it is L</detached>;
+then only its caller's L</cancel> reaches it. Cancelling the returned
+Future -- a cancel cut the C<agent> call off -- cancels the subagent; its
+run still ends in order on the loop (the registry holds it).
 
 =method run
 
     my ( $text, $is_error ) = $sub->run;
 
-Runs the subagent to its end on the application's loop (L</run_f>) and
-returns the tool result: the subagent's text, or an error text with a true
-C<$is_error> for a failed or cancelled run. While it runs, the application
-knows it as live, so cancelling the main run cancels it.
+L</foreground_f>, waited for on the application's loop: the synchronous
+wrapper for a library caller outside the loop. Never call it from code that
+runs on the loop -- a tool, a hook --: that is what L</foreground_f> is for.
 
 =cut
 
-sub run {
+sub foreground_f {
   my ( $self ) = @_;
-  my $app  = $self->app;
+  my $app = $self->app;
+  my $briefing = $self->briefing;
+  return Future->done( $briefing->missing_note, 1 ) if $briefing->has_missing;
+  $self->_register;
   my $live = $app->_live_subagents;
   my $key  = refaddr $self;
-  $live->{$key} = $self;
-  weaken $live->{$key};
-  $self->cancel if $app->has_run && $app->_run->{cancelled};
+  unless ( $self->detached ) {
+    $live->{$key} = $self;
+    weaken $live->{$key};
+    $self->cancel if $app->has_run && $app->_run->{cancelled};
+  }
   my $f = $self->run_f;
-  $app->loop->await($f);
-  delete $live->{$key};
-  my $outcome = $f->get;
-  my $name = $self->agent->{name};
-  return ( $outcome->{text} // '', 0 ) if $outcome->{status} eq 'completed';
-  return ( $outcome->{error}, 1 ) if $outcome->{status} eq 'refused';
-  return ( 'Agent \''.$name.'\' was cancelled.', 1 ) if $outcome->{status} eq 'cancelled';
-  return ( 'Agent \''.$name.'\' failed: '.$outcome->{error}, 1 );
+  $app->tasks->set( $self->task_id, future => $f );
+  $f->on_ready( sub { delete $live->{$key} } );
+  weaken( my $weak = $self );
+  return $f->without_cancel->then( sub {
+    my ( $outcome ) = @_;
+    return Future->done( $weak ? $weak->result_text($outcome) : ( 'the subagent is gone', 1 ) );
+  } )->on_cancel( sub { $weak->cancel if $weak } );
+}
+
+sub run {
+  my ( $self ) = @_;
+  my $f = $self->foreground_f;
+  $self->app->loop->await($f);
+  return $f->get;
+}
+
+=method start_background
+
+    my ( $text, $is_error ) = $sub->start_background;
+
+Registers the subagent, starts its run (L</run_f>) on the application's
+loop with the next turn of the loop, and returns at once with
+L</launch_text>. The registry holds the run; its end becomes a
+notification for L</recipient> (L</notification>).
+
+=cut
+
+sub start_background {
+  my ( $self ) = @_;
+  my $app = $self->app;
+  my $briefing = $self->briefing;
+  return ( $briefing->missing_note, 1 ) if $briefing->has_missing;
+  $self->_set_background(1);
+  # It outlives the run it was started in: its own copy of the run rules.
+  $self->permissions->own_run_rules;
+  $self->_register;
+  my $f = $app->loop->delay_future( after => 0 )->then( sub { $self->run_f } );
+  $app->tasks->set( $self->task_id, future => $f );
+  return ( $self->launch_text, 0 );
+}
+
+=method send_message
+
+    my ( $text, $is_error ) = Langertha::Raider::Subagent->send_message(
+      app => $app, depth => 0, caller => \%caller, to => 'agent_1', message => '...');
+
+The C<send_message> tool (ADR 0027 E<sect>5). C<to> is an agent ID or a
+name given at spawn (L<Langertha::Raider::Tasks/find>); an ID the registry
+does not know is looked up among the child sessions of the caller's session
+(L</restore>). A running agent gets the message before its next model
+request (C<Message queued for delivery to agent_1 at its next tool
+round.>); a finished one is continued in the background (L</resume>),
+unless the concurrency limit refuses it (L</limit_refusal>). Error
+results: C<No agent found with ID or name: X>, C<Agent agent_1 (Explore) is
+one-shot and cannot be continued.>, and for a background shell
+C<bash_1 is a background shell, not an agent; read it with bash_output.>
+
+=cut
+
+sub send_message {
+  my ( $class, %arg ) = @_;
+  my ( $app, $c, $to, $message ) = @arg{qw( app caller to message )};
+  my $tasks = $app->tasks;
+  my $entry = $tasks->find($to);
+  unless ($entry) {
+    my ( $sub, $error ) = $class->restore(%arg);
+    return ( $error, 1 ) if defined $error;
+    return ( 'No agent found with ID or name: '.$to, 1 ) unless $sub;
+    $entry = $tasks->get( $sub->task_id );
+  }
+  my $id = $entry->{id};
+  return ( $id.' is a background shell, not an agent; read it with bash_output.', 1 ) if $entry->{kind} eq 'bash';
+  return ( $id.' is not an agent.', 1 ) unless $entry->{kind} eq 'agent' && $entry->{subagent};
+  my $sub = $entry->{subagent};
+  return ( 'Agent '.$id.' ('.$sub->agent->{name}.') is one-shot and cannot be continued.', 1 ) if $sub->one_shot;
+  if ( $entry->{status} eq 'running' ) {
+    $tasks->post( $id, $message );
+    return ( 'Message queued for delivery to '.$id.' at its next tool round.', 0 );
+  }
+  if ( defined( my $refusal = $class->limit_refusal($app) ) ) {
+    return ( $refusal, 1 );
+  }
+  return $sub->resume( $message, $c );
+}
+
+=method restore
+
+    my ( $sub, $error ) = Langertha::Raider::Subagent->restore(
+      app => $app, depth => 0, caller => \%caller, to => 'agent_1');
+
+An agent of an earlier process: the newest child session of the caller's
+session whose C<session.created> has C<agent_id> (or C<name>) C<to>. Its
+agent is looked up by name in the current catalogue; its history is
+replayed into a new subagent (ADR 0015), which takes the session over and
+is registered under the agent ID, finished. Returns the subagent, an error
+text (the agent is not defined any more, is one-shot, or its session cannot
+be opened), or nothing when there is no such session.
+
+=cut
+
+sub restore {
+  my ( $class, %arg ) = @_;
+  my ( $app, $depth, $c, $to ) = @arg{qw( app depth caller to )};
+  my $parent = $c->{session} or return;
+  my $store = $app->session_store;
+  my ($child) = grep {
+    my $created = $_->{created};
+    defined $created->{agent_id} && ( $created->{agent_id} eq $to || ( defined $created->{name} && $created->{name} eq $to ) )
+  } $store->children_of( $parent->id );
+  return unless $child;
+  my $created = $child->{created};
+  my $id = $created->{agent_id};
+  return if $app->tasks->get($id);
+  my $type = $created->{agent} // '';
+  my $agent = $app->context->agent_catalog->find($type)
+    or return ( undef, 'Agent '.$id.' cannot be continued: its agent type \''.$type.'\' is not defined any more.' );
+  return ( undef, 'Agent '.$id.' ('.$agent->{name}.') is one-shot and cannot be continued.' ) if $agent->{one_shot};
+  my $journal = eval { $store->read( $child->{id} ) }
+    or return ( undef, 'Agent '.$id.' cannot be continued: '.$class->_error_text($@) );
+  my $history = $journal->history_messages;
+  my ($first) = map { $_->{content} } grep { ( $_->{role} // '' ) eq 'user' } @$history;
+  my $parent_journal = eval { $store->read( $parent->id ) };
+  my ($started) = grep { $_->{type} eq 'agent.started' && ( $_->{session} // '' ) eq $child->{id} }
+    $parent_journal ? @{ $parent_journal->events } : ();
+  my $sub = $class->new(
+    $class->_caller_args($c),
+    app            => $app,
+    agent          => $agent,
+    depth          => $created->{depth} // $depth + 1,
+    description    => $started && defined $started->{description} ? $started->{description} : '',
+    prompt         => $first // '',
+    caller_servers => $c->{servers},
+    ( defined $created->{name} ? ( name => $created->{name} ) : () ),
+    ( $c->{policy} ? ( caller_policy => $c->{policy} ) : () ),
+  );
+  my $session = eval { $store->open( $child->{id} ) }
+    or return ( undef, 'Agent '.$id.' cannot be continued: '.$class->_error_text($@) );
+  $sub->_set_session($session);
+  my $raider = $sub->raider;
+  $raider->add_history( $_->{role}, $_->{content} ) for @$history;
+  $raider->add_session_history( @{ $journal->session_history_messages } );
+  $sub->_set_task_id($id);
+  $sub->_register( status => 'completed', background => 1 );
+  return $sub;
+}
+
+sub _error_text {
+  my ( $class, $error ) = @_;
+  $error = "$error";
+  $error =~ s/ at \S+ line \d+\.?\n?\z//;
+  $error =~ s/\s+\z//;
+  return $error;
+}
+
+=method resume
+
+    my ( $text, $is_error ) = $sub->resume( $message, \%caller );
+
+Continues a finished subagent (ADR 0027 E<sect>5): its caller becomes the
+given one, and a new run (L</resume_f>) of it starts in the background with
+the next turn of the loop, with its history and C<$message> as the next
+user message, in a new run of its child session. Returns
+C<Resuming agent agent_1 in the background. You will be notified when it
+finishes.>
+
+=cut
+
+sub resume {
+  my ( $self, $message, $c ) = @_;
+  my $app = $self->app;
+  $self->_set_on_caller_event( $c->{event} );
+  $self->_set_caller_call( $c->{call} );
+  $self->_set_caller_task_id( $c->{task_id} );
+  $self->_set_caller_detached( $c->{detached} ? 1 : 0 );
+  $self->_set_caller_session( $c->{session} ) if $c->{session};
+  $self->_set_background(1);
+  $self->permissions->own_run_rules;
+  $self->_set_cancel_requested(0);
+  $self->raider->clear_cancel if $self->_has_raider;
+  my $f = $app->loop->delay_future( after => 0 )->then( sub { $self->resume_f($message) } );
+  $app->tasks->set( $self->task_id,
+    status      => 'running',
+    quiet       => 0,
+    background  => 1,
+    recipient   => $self->recipient,
+    tool_use_id => $self->caller_call,
+    future      => $f,
+  );
+  return ( 'Resuming agent '.$self->task_id.' in the background. You will be notified when it finishes.', 0 );
+}
+
+# Registers the subagent in the application's registry, with an agent ID
+# unless it has one.
+sub _register {
+  my ( $self, %fields ) = @_;
+  my $tasks = $self->app->tasks;
+  unless ( $self->has_task_id ) {
+    my ( $taken ) = $self->_taken_ids;
+    $self->_set_task_id( $tasks->next_id( 'agent', $taken ? ( taken => $taken ) : () ) );
+  }
+  weaken( my $weak = $self );
+  return $tasks->add(
+    id          => $self->task_id,
+    kind        => 'agent',
+    agent       => $self->agent->{name},
+    description => $self->description,
+    name        => $self->name,
+    tool_use_id => $self->caller_call,
+    recipient   => $self->recipient,
+    background  => $self->background,
+    subagent    => $self,
+    stop        => sub { $weak->cancel if $weak },
+    %fields,
+  );
+}
+
+# The agent IDs the child sessions of the caller's session already carry
+# (a resumed session), so a new agent never takes one of them.
+sub _taken_ids {
+  my ( $self ) = @_;
+  return unless $self->has_caller_session;
+  my %taken = map { defined $_->{created}{agent_id} ? ( $_->{created}{agent_id} => 1 ) : () }
+    eval { $self->app->session_store->children_of( $self->caller_session->id ) };
+  return sub { $taken{ $_[0] } };
 }
 
 =method run_f
 
     my $outcome = await $sub->run_f;
 
-The run itself: starts the journal and C<agent.started>, raids with the
-briefed prompt, ends the journal and C<agent.finished>. Never fails;
-returns the outcome as a hash reference: C<status> (C<completed>,
-C<failed>, C<cancelled>, or C<refused> when a declared skill does not
-resolve -- then nothing ran), C<text> of a completed run, C<error> of a
-failed or refused one.
+The first run: starts the journal and C<agent.started>, raids with the
+briefed prompt (and goes on as long as notifications and messages come,
+see L</DESCRIPTION>), ends the journal, the registry entry, C<agent.finished>
+and -- in the background -- the notification. Never fails; returns the
+outcome as a hash reference: C<status> (C<completed>, C<failed>,
+C<cancelled>, or C<refused> when a declared skill does not resolve -- then
+nothing ran), C<text> of a completed run, C<error> of a failed or refused
+one, and C<usage> (L</usage_pairs>) of one that ran.
+
+=method resume_f
+
+    my $outcome = await $sub->resume_f($message);
+
+A further run of a finished subagent with C<$message> as the next user
+message; otherwise as L</run_f>.
 
 =cut
 
@@ -581,7 +1086,19 @@ async sub run_f {
   my ( $self ) = @_;
   my $briefing = $self->briefing;
   return { status => 'refused', error => $briefing->missing_note } if $briefing->has_missing;
-  my $outcome = await Future->call( sub { $self->_raid_f } )->then(
+  return await $self->_run_with_f( sub { $self->_raid_f } );
+}
+
+async sub resume_f {
+  my ( $self, $message ) = @_;
+  return await $self->_run_with_f( sub { $self->_resume_raid_f($message) } );
+}
+
+async sub _run_with_f {
+  my ( $self, $code ) = @_;
+  $self->_t0( Time::HiRes::time() );
+  $self->_tool_uses(0);
+  my $outcome = await Future->call($code)->then(
     sub { Future->done( $self->_outcome_of( $_[0] ) ) },
     sub {
       my ( $error ) = @_;
@@ -590,6 +1107,8 @@ async sub run_f {
       Future->done( { status => 'failed', error => $error } );
     },
   );
+  await $self->_end_children_f;
+  $outcome->{usage} = $self->usage_pairs;
   $self->_finish($outcome);
   return $outcome;
 }
@@ -601,13 +1120,96 @@ async sub _raid_f {
   $self->_begin($start);
   die 'a SubagentStart hook stopped it'.( defined $start->stop_reason ? ': '.$start->stop_reason : '' )."\n"
     if $start && $start->stopped;
+  await $self->_initialize_mcps_f;
   my $raider = $self->raider;
-  for my $mcp ( @{ $self->_mcps } ) {
-    await $mcp->initialize;
-  }
   $raider->cancel if $self->cancel_requested;
   my $result = await $raider->raid_f( $self->sent_prompt );
-  return await $self->_after_answer_f($result);
+  return await $self->_until_done_f($result);
+}
+
+async sub _resume_raid_f {
+  my ( $self, $message ) = @_;
+  $self->_reopen_session;
+  $self->_begin_resume($message);
+  await $self->_initialize_mcps_f;
+  my $raider = $self->raider;
+  $raider->cancel if $self->cancel_requested;
+  my $result = await $raider->raid_f($message);
+  return await $self->_until_done_f($result);
+}
+
+# The clients of the tool set on the loop (again, for a continued run) and
+# initialized.
+async sub _initialize_mcps_f {
+  my ( $self ) = @_;
+  my $loop = $self->app->loop;
+  for my $mcp ( @{ $self->_mcps } ) {
+    $loop->add($mcp) unless $mcp->loop;
+    await $mcp->initialize;
+  }
+  return;
+}
+
+# After a final answer: SubagentStop (_after_answer_f), then the
+# notifications and messages that wait or are still to come from running
+# background children, as the next message; until an answer leaves nothing.
+async sub _until_done_f {
+  my ( $self, $result ) = @_;
+  while (1) {
+    $result = await $self->_after_answer_f($result);
+    return $result unless blessed $result && $result->can('is_final') && $result->is_final;
+    return $result if $self->cancel_requested;
+    return $result unless await $self->_wait_messages_f;
+    $self->event( 'message', role => 'assistant', content => "$result" );
+    $result = await $self->raider->raid_f( $self->_take_messages );
+  }
+}
+
+# True once something waits for this subagent in the registry; while
+# nothing does but background children of it run, waits for them on the
+# loop. False when neither, or once the subagent is cancelled.
+async sub _wait_messages_f {
+  my ( $self ) = @_;
+  my $app = $self->app or return 0;
+  return 0 unless $self->has_task_id;
+  my $tasks = $app->tasks;
+  my $me = $self->task_id;
+  while (1) {
+    return 1 if $tasks->pending($me);
+    return 0 unless $tasks->running( kind => 'agent', recipient => $me, background => 1 );
+    await $self->raider->_until_cancelled( $tasks->wait_f($me) );
+    return 0 if $self->cancel_requested;
+  }
+}
+
+# Takes what waits for this subagent in the registry as user messages and
+# journals each (a notification with notification 1). Returns the texts.
+sub _take_messages {
+  my ( $self ) = @_;
+  my $app = $self->app or return;
+  return unless $self->has_task_id;
+  my @texts;
+  for my $m ( $app->tasks->take_messages( $self->task_id ) ) {
+    $self->event( 'message', role => 'user', content => $m->{content}, ( $m->{notification} ? ( notification => 1 ) : () ) );
+    push @texts, $m->{content};
+  }
+  return @texts;
+}
+
+# A run that ends while child agents of it still run stops them and waits
+# for their end; what waits for this subagent is dropped. Its background
+# shells stay: they belong to the application (ADR 0024).
+async sub _end_children_f {
+  my ( $self ) = @_;
+  my $app = $self->app or return;
+  return unless $self->has_task_id;
+  my $tasks = $app->tasks;
+  my @running = $tasks->running( kind => 'agent', recipient => $self->task_id );
+  $tasks->stop( $_->{id} ) for @running;
+  my @futures = grep { defined && !$_->is_ready } map { $_->{future} } @running;
+  await Future->wait_all(@futures) if @futures;
+  $tasks->discard( $self->task_id );
+  return;
 }
 
 # The pairs every hook input of this subagent carries besides the caller's
@@ -692,8 +1294,9 @@ sub approval_binding {
 
 =method cancel
 
-Asks the run to stop (L<Langertha::Raider/cancel>); only sets flags, so a
-signal handler may call it.
+Asks the run to stop (L<Langertha::Raider/cancel>), and every subagent it
+started that still runs (L<Langertha::Raider::Tasks/stop>); only sets flags,
+so a signal handler may call it.
 
 =cut
 
@@ -701,6 +1304,11 @@ sub cancel {
   my ( $self ) = @_;
   $self->_set_cancel_requested(1);
   $self->raider->cancel if $self->_has_raider;
+  my $app = $self->app;
+  if ( $app && $self->has_task_id ) {
+    my $tasks = $app->tasks;
+    $tasks->stop( $_->{id} ) for $tasks->running( kind => 'agent', recipient => $self->task_id );
+  }
   return;
 }
 
@@ -710,22 +1318,161 @@ sub cancel {
 
 One event of the subagent's own run: into its journal for the types the
 application journals (L<Langertha::Raider::Application/is_journal_type>),
-nowhere else.
+nowhere else. A C<tool.call> counts as one of its L</usage_pairs>
+C<tool_uses>; a C<model.usage> of its own model calls (C<purpose> C<chat>)
+sets its C<subagent_tokens>.
 
 =cut
 
 sub event {
   my ( $self, $type, %payload ) = @_;
-  $self->_call( $payload{call} ) if $type eq 'tool.call';
-  $self->_append( $type, run => $self->_run_id, %payload ) if $self->app->is_journal_type($type);
+  $self->_tool_uses( $self->_tool_uses + 1 ) if $type eq 'tool.call';
+  $self->_last_tokens( ( $payload{input_tokens} // 0 ) + ( $payload{output_tokens} // 0 ) )
+    if $type eq 'model.usage' && ( $payload{purpose} // 'chat' ) eq 'chat';
+  my $app = $self->app or return;
+  $self->_append( $type, run => $self->_run_id, %payload ) if $app->is_journal_type($type);
   return;
+}
+
+=method usage_pairs
+
+    my $pairs = $sub->usage_pairs;   # [ subagent_tokens => 1200, tool_uses => 4, duration_ms => 5300 ]
+
+The usage of the current (or last) run, in the order the result and the
+notification show it (ADR 0027 E<sect>2): C<subagent_tokens> -- input plus
+output tokens of the subagent's last model call that reported usage, from
+its C<model.usage> event (the one the application's token ledger counts,
+ADR 0026), C<0> before any --, C<tool_uses> -- the tool calls of this run --,
+C<duration_ms> -- its wall clock.
+
+=cut
+
+sub usage_pairs {
+  my ( $self ) = @_;
+  my $tokens = $self->_last_tokens;
+  my $t0 = $self->_t0 // Time::HiRes::time();
+  return [
+    subagent_tokens => 0 + $tokens,
+    tool_uses       => 0 + $self->_tool_uses,
+    duration_ms     => int( ( Time::HiRes::time() - $t0 ) * 1000 ),
+  ];
+}
+
+=method agent_id_line
+
+    agentId: agent_1 (use send_message with to: 'agent_1' to continue this agent)
+
+The line that names the agent ID in a result; for a L</one_shot> agent
+only C<agentId: agent_1>.
+
+=cut
+
+sub agent_id_line {
+  my ( $self ) = @_;
+  my $id = $self->task_id;
+  return 'agentId: '.$id if $self->one_shot;
+  return 'agentId: '.$id.' (use send_message with to: \''.$id.'\' to continue this agent)';
+}
+
+=method result_text
+
+    my ( $text, $is_error ) = $sub->result_text($outcome);
+
+The tool result of a foreground run (ADR 0027 E<sect>2). Completed: the
+report, then L</agent_id_line> (not for a L</one_shot> agent) and
+
+    <usage>subagent_tokens: N
+    tool_uses: N
+    duration_ms: N</usage>
+
+Refused: the refusal. Cancelled: C<Agent 'NAME' (agent_1) was cancelled.>,
+failed: C<Agent 'NAME' (agent_1) failed: REASON> -- both errors, the agent ID
+left out for a one-shot agent.
+
+=cut
+
+sub result_text {
+  my ( $self, $outcome ) = @_;
+  my $status = $outcome->{status};
+  return ( $outcome->{error}, 1 ) if $status eq 'refused';
+  my $who = 'Agent \''.$self->agent->{name}.'\''.( $self->one_shot || !$self->has_task_id ? '' : ' ('.$self->task_id.')' );
+  return ( $who.' was cancelled.', 1 ) if $status eq 'cancelled';
+  return ( $who.' failed: '.$outcome->{error}, 1 ) unless $status eq 'completed';
+  my @usage = @{ $outcome->{usage} // $self->usage_pairs };
+  my @lines;
+  while ( my ( $k, $v ) = splice @usage, 0, 2 ) {
+    push @lines, $k.': '.$v;
+  }
+  return ( join( "\n",
+    $outcome->{text} // '',
+    ( $self->one_shot ? () : $self->agent_id_line ),
+    '<usage>'.join( "\n", @lines ).'</usage>',
+  ), 0 );
+}
+
+=method launch_text
+
+The answer of a background start (ADR 0027 E<sect>3):
+
+    Async agent launched successfully.
+    agentId: agent_1 (use send_message with to: 'agent_1' to continue this agent)
+    The agent is working in the background. You will be notified automatically when it completes. ...
+    Do not duplicate this agent's work -- ...
+
+=cut
+
+sub launch_text {
+  my ( $self ) = @_;
+  return join "\n",
+    'Async agent launched successfully.',
+    $self->agent_id_line,
+    "The agent is working in the background. You will be notified automatically when it completes. You know nothing about its results until that notification arrives \x{2014} do not report, assume, or predict them; continue other work or respond to the user in the meantime.",
+    "Do not duplicate this agent's work \x{2014} avoid working with the same files or topics it is using.";
+}
+
+=method notification
+
+    my ( $text, $label ) = $sub->notification($outcome);
+
+The C<< <task-notification> >> of a run that ended (ADR 0027 E<sect>4,
+L<Langertha::Raider::Tasks/notification_text>) and the line a surface shows
+for it (C<background agent agent_1 finished>). C<completed>: summary
+C<Agent "DESCRIPTION" finished> and the report as C<result>; C<failed>:
+summary C<Agent "DESCRIPTION" failed: REASON>; C<killed> (a cancelled run):
+summary C<Agent "DESCRIPTION" was stopped>. Each with the usage. Without a
+description the agent's name stands in.
+
+=cut
+
+sub notification {
+  my ( $self, $outcome ) = @_;
+  my $tasks  = $self->app->tasks;
+  my $status = $self->_registry_status( $outcome->{status} );
+  my $label  = length $self->description ? $self->description : $self->agent->{name};
+  my ( $summary, $verb ) = $status eq 'completed' ? ( 'Agent "'.$label.'" finished', 'finished' )
+                         : $status eq 'killed'    ? ( 'Agent "'.$label.'" was stopped', 'was stopped' )
+                         :                          ( 'Agent "'.$label.'" failed: '.( $outcome->{error} // 'unknown error' ), 'failed' );
+  my $text = $tasks->notification_text(
+    task_id     => $self->task_id,
+    tool_use_id => $self->caller_call,
+    status      => $status,
+    summary     => $summary,
+    ( $status eq 'completed' ? ( result => $outcome->{text} // '' ) : () ),
+    usage       => $outcome->{usage} // $self->usage_pairs,
+  );
+  return ( $text, 'background agent '.$self->task_id.' '.$verb );
+}
+
+# The registry status of an outcome status.
+sub _registry_status {
+  my ( $self, $status ) = @_;
+  return $status eq 'completed' ? 'completed' : $status eq 'cancelled' ? 'killed' : 'failed';
 }
 
 # The subagent's own session (when the caller has one) and its run id.
 sub _open_session {
   my ( $self ) = @_;
   my $app = $self->app;
-  $self->_t0( Time::HiRes::time() );
   if ( $self->has_caller_session ) {
     my $session = eval {
       $app->session_store->create(
@@ -733,6 +1480,8 @@ sub _open_session {
         ( defined $self->caller_call ? ( parent_call => $self->caller_call ) : () ),
         agent  => $self->agent->{name},
         depth  => $self->depth,
+        ( $self->has_task_id ? ( agent_id => $self->task_id ) : () ),
+        ( defined $self->name ? ( name => $self->name ) : () ),
       );
     };
     if ($session) {
@@ -743,6 +1492,25 @@ sub _open_session {
       $self->_report_journal_error( $self->caller_session, $@ );
     }
   }
+  return;
+}
+
+# The child session again for a continued run: opened anew when the last
+# run released it.
+sub _reopen_session {
+  my ( $self ) = @_;
+  my $session = $self->session or return;
+  unless ( $session->is_open ) {
+    my $again = eval { $self->app->session_store->open( $session->id ) };
+    unless ($again) {
+      $self->_report_journal_error( $session, $@ );
+      return;
+    }
+    $session = $again;
+    $self->_set_session($session);
+  }
+  $self->_journal_failed(0);
+  $self->_run_id( $session->next_run );
   return;
 }
 
@@ -759,13 +1527,7 @@ sub _begin {
     agent   => $self->agent->{name},
     message => $self->briefing->size_note,
   ) ) if $self->briefing->oversized;
-  $self->on_caller_event->( 'agent.started', $self->_defined(
-    call        => $self->caller_call,
-    agent       => $self->agent->{name},
-    description => $self->description,
-    session     => $self->session ? $self->session->id : undef,
-    model       => $model,
-  ) );
+  $self->_agent_started;
   $self->event( 'run.started', engine => $app->engine_name, defined $model ? ( model => $model ) : () );
   return if $start && $start->stopped;
   my $context = $start ? $start->context : undef;
@@ -776,15 +1538,45 @@ sub _begin {
   return;
 }
 
+# agent.started and the start of the journal of a continued run.
+sub _begin_resume {
+  my ( $self, $message ) = @_;
+  my $model = eval { $self->engine->chat_model };
+  $self->_model($model);
+  $self->_agent_started( resumed => JSON::MaybeXS->true );
+  $self->event( 'run.started', engine => $self->app->engine_name, defined $model ? ( model => $model ) : () );
+  $self->event( 'message', role => 'user', content => $message );
+  return;
+}
+
+sub _agent_started {
+  my ( $self, %more ) = @_;
+  $self->on_caller_event->( 'agent.started', $self->_defined(
+    call        => $self->caller_call,
+    agent       => $self->agent->{name},
+    agent_id    => $self->has_task_id ? $self->task_id : undef,
+    background  => $self->background ? JSON::MaybeXS->true : JSON::MaybeXS->false,
+    description => $self->description,
+    session     => $self->session ? $self->session->id : undef,
+    model       => $self->_model,
+    %more,
+  ) );
+  return;
+}
+
 sub _outcome_of {
   my ( $self, $result ) = @_;
   return { status => 'cancelled' } if blessed $result && $result->can('is_cancelled') && $result->is_cancelled;
+  return { status => 'cancelled' } if $self->cancel_requested;
   return { status => 'completed', text => "$result" };
 }
 
+# The end of a run: the journal, agent.finished, the registry entry and --
+# in the background -- the notification for the recipient, last.
 sub _finish {
   my ( $self, $outcome ) = @_;
   my $app = $self->app;
+  $self->_set_last_outcome($outcome);
   $self->event( 'message', role => 'assistant', content => $outcome->{text} ) if $outcome->{status} eq 'completed';
   if ( my $session = $self->session ) {
     my $metrics = $self->_has_raider ? $self->raider->metrics : undef;
@@ -801,11 +1593,23 @@ sub _finish {
     $_->loop && $_->loop->remove($_) for @{ $self->_mcps };
   }
   $self->on_caller_event->( 'agent.finished', $self->_defined(
-    call    => $self->caller_call,
-    agent   => $self->agent->{name},
-    session => $self->session ? $self->session->id : undef,
-    status  => $outcome->{status},
+    call     => $self->caller_call,
+    agent    => $self->agent->{name},
+    agent_id => $self->has_task_id ? $self->task_id : undef,
+    session  => $self->session ? $self->session->id : undef,
+    status   => $outcome->{status},
   ) );
+  return unless $app && $self->has_task_id;
+  my $tasks = $app->tasks;
+  $tasks->finish( $self->task_id, $self->_registry_status( $outcome->{status} ),
+    report => $outcome->{text},
+    error  => $outcome->{error},
+    usage  => $outcome->{usage},
+  );
+  if ( $self->background && !$tasks->get( $self->task_id )->{quiet} ) {
+    my ( $text, $label ) = $self->notification($outcome);
+    $tasks->notify( $self->recipient, $text, id => $self->task_id, label => $label );
+  }
   return;
 }
 
@@ -870,9 +1674,11 @@ sub _with_families {
 # task-list tools its own, over its own list.
 sub _own_tools {
   my ( $self ) = @_;
+  my $nested = $self->depth < $self->app->max_agent_depth;
   my %own = (
     exit_plan_mode => sub { $self->_own_plan_tool },
-    agent          => sub { $self->depth < $self->app->max_agent_depth ? $self->_own_agent_tool : undef },
+    agent          => sub { $nested ? $self->_own_agent_tool('agent') : undef },
+    send_message   => sub { $nested ? $self->_own_agent_tool('send_message') : undef },
   );
   for my $server ( $self->_own_file_server, $self->_own_todos->server, $self->_own_todos->task_server ) {
     for my $tool ( @{ $server->tools } ) {
@@ -889,11 +1695,17 @@ sub _build_tool_servers {
   my %deny  = ( $self->_with_families( @{ $agent->{disallowed} // [] } ), map { $_ => 1 } @NEVER );
   my $all   = !defined $agent->{tools};
   my %own   = $self->_own_tools;
+  # send_message goes with agent: allowed when agent is, unless denied itself.
+  my $ok = sub {
+    my ( $name ) = @_;
+    return 0 if $deny{$name};
+    return $all || $allow{$name} ? 1 : 0 unless $name eq 'send_message';
+    return !$deny{agent} && ( $all || $allow{agent} || $allow{send_message} ) ? 1 : 0;
+  };
   my @servers;
   for my $server ( @{ $self->caller_servers } ) {
     my @tools = @{ $server->tools };
-    my @kept = map { $own{ $_->name } ? ( $own{ $_->name }->() // () ) : $_ }
-      grep { !$deny{ $_->name } && ( $all || $allow{ $_->name } ) } @tools;
+    my @kept = map { $own{ $_->name } ? ( $own{ $_->name }->() // () ) : $_ } grep { $ok->( $_->name ) } @tools;
     next unless @kept;
     my $same = @kept == @tools && !grep { refaddr $kept[$_] != refaddr $tools[$_] } 0 .. $#kept;
     push @servers, $same ? $server : MCP::Server->new( name => $server->name, version => $server->version, tools => \@kept );
@@ -904,12 +1716,26 @@ sub _build_tool_servers {
 sub _build_own_todos {
   my ( $self ) = @_;
   weaken( my $weak = $self );
-  return Langertha::Raider::TodoTools->new( on_update => sub {
-    my ( $list ) = @_;
-    my $sub = $weak or return;
-    $sub->_set_todos($list);
-    $sub->event( 'todo.updated', todos => [ map { { %$_ } } @$list ] );
-  } );
+  return Langertha::Raider::TodoTools->new(
+    on_update => sub {
+      my ( $list ) = @_;
+      my $sub = $weak or return;
+      $sub->_set_todos($list);
+      $sub->event( 'todo.updated', todos => [ map { { %$_ } } @$list ] );
+    },
+    # TaskCreated / TaskCompleted as in the main run, with this subagent's
+    # hook fields; the reports go to its journal, a stop cancels it.
+    before_task => sub {
+      my ( $event, $task ) = @_;
+      my $sub = $weak or return;
+      my $app = $sub->app or return;
+      return $app->_task_hook( $event, $task,
+        input    => sub { $weak ? $weak->_hook_fields : () },
+        on_event => sub { $weak->event(@_) if $weak },
+        on_stop  => sub { $weak->cancel if $weak },
+      );
+    },
+  );
 }
 
 sub _build_own_file_server {
@@ -924,20 +1750,36 @@ sub _build_own_file_server {
 
 sub _build_file_read_state { Langertha::Raider::FileTools::ReadState->new }
 
+# The tool $name (agent or send_message) of this subagent's own agent tool
+# server, for a caller at its depth.
 sub _own_agent_tool {
+  my ( $self, $name ) = @_;
+  my ($tool) = grep { $_->name eq $name } @{ $self->_agent_tools->server->tools };
+  return $tool;
+}
+
+# The agent tools of a caller at this subagent's depth: the call id comes
+# with each call (its context), so calls that run at the same time keep
+# theirs.
+sub _build_agent_tools {
   my ( $self ) = @_;
   weaken( my $weak = $self );
-  return ref($self)->agent_tool_server(
+  return ref($self)->agent_tools(
     app    => $self->app,
     depth  => $self->depth,
-    caller => sub { {
-      servers => $weak->tool_servers,
-      session => $weak->session,
-      call    => $weak->_call,
-      event   => sub { $weak->event(@_) if $weak },
-      policy  => $weak->permissions,
-    } },
-  )->tools->[0];
+    caller => sub {
+      my ( %ctx ) = @_;
+      return {
+        servers  => $weak->tool_servers,
+        session  => $weak->session,
+        call     => $ctx{call} // $ctx{id},
+        event    => sub { $weak->event(@_) if $weak },
+        policy   => $weak->permissions,
+        task_id  => $weak->has_task_id ? $weak->task_id : undef,
+        detached => $weak->detached,
+      };
+    },
+  );
 }
 
 # exit_plan_mode of the subagent: nobody reviews a subagent's plan and its
@@ -982,7 +1824,7 @@ sub _build_briefed_prompt {
 sub _build_model_resolution {
   my ( $self ) = @_;
   my $app = $self->app;
-  return $app->context->agent_catalog->resolve_model( $self->agent->{model},
+  return $app->context->agent_catalog->resolve_model( $self->model // $self->agent->{model},
     engine_class => scalar eval { $app->_engine_class },
     engine_name  => $app->engine_name,
     agent_models => $app->agent_models,
@@ -991,7 +1833,8 @@ sub _build_model_resolution {
 
 sub _build_mission {
   my ( $self ) = @_;
-  return $self->app->compile_mission( $self->agent->{body} // '', $self->tool_servers );
+  return $self->app->compile_mission( $self->agent->{body} // '', $self->tool_servers,
+    memory => $self->agent->{memory} // 1 );
 }
 
 sub _build_mcps {
@@ -1020,18 +1863,29 @@ sub _build_raider {
   );
   return Langertha::Raider->new(
     _tool_gate                 => $app->tool_gate(
-      policy   => $self->permissions,
-      on_event => sub { $weak->event(@_) if $weak },
-      binding  => sub { $weak ? $weak->approval_binding : () },
+      policy     => $self->permissions,
+      on_event   => sub { $weak->event(@_) if $weak },
+      binding    => sub { $weak ? $weak->approval_binding : () },
+      unattended => sub { $weak && $weak->detached ? 'this agent runs in the background' : undef },
     ),
     ( $app->context->claude_layout
       ? ( _tool_hook => $app->tool_hook( %hook, on_event => sub { $weak->event(@_) if $weak } ) ) : () ),
+    # agent and send_message run on the loop (ADR 0027 section 9); the shell
+    # tools know this run as their caller (its notifications, detached).
+    async_tools                => {
+      ( $self->depth < $app->max_agent_depth ? %{ $self->_agent_tools->async_tools } : () ),
+      %{ $app->_shell_async_tools(
+        recipient => sub { $weak && $weak->has_task_id ? $weak->task_id : 'main' },
+        detached  => sub { $weak ? $weak->detached : 0 },
+      ) },
+    },
     engine                     => $self->engine,
     mission                    => $self->mission,
     max_iterations             => $app->max_iterations,
     max_context_tokens         => $app->max_context_tokens,
     context_compress_threshold => $app->context_compress_threshold,
     plugins                    => [ $app->run_plugins( sub { $weak->event(@_) if $weak }, %hook ) ],
+    on_iteration               => sub { $weak ? [ $weak->_take_messages ] : undef },
   );
 }
 
@@ -1044,6 +1898,8 @@ __PACKAGE__->meta->make_immutable;
 =over
 
 =item * L<Langertha::Raider::AgentTools>
+
+=item * L<Langertha::Raider::Tasks>
 
 =item * L<Langertha::Raider::Application>
 

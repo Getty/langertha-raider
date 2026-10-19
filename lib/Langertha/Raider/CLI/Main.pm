@@ -42,7 +42,9 @@ Everything F<raider> does with its command line: the C<hall>, C<acp>,
 C<config explain>, C<config migrate>, C<session>, C<provider inspect>,
 C<provider add>, C<provider list>, C<provider show> and C<provider remove> subcommands, option parsing, the skill exports, and
 then either the REPL (L<Langertha::Raider::CLI::REPL>) or one prompt
-(L<Langertha::Raider::CLI::Runner>). L</run> returns the exit status.
+(L<Langertha::Raider::CLI::Runner>), which ends only once the background
+subagents it started have ended and their notifications have been answered
+(ADR 0027 E<sect>3). L</run> returns the exit status.
 
 C<-p> / C<--print> (ADR 0030 E<sect>4, as Claude Code) makes it one prompt
 even on a terminal: from the words given, else read from standard input to
@@ -836,7 +838,9 @@ sub run {
   }
   # Nobody can approve a project MCP server here: it stays off (ADR 0029).
   $self->_warn($_."\n") for $app->mcp_notes;
-  my $ok = $runner->run_prompt($text, %run, machine => $machine, session => scalar $session_for->(), catch_signals => 1);
+  # A one-shot run waits for its background agents (ADR 0027 section 3).
+  my $ok = $runner->run_prompt($text, %run, machine => $machine, session => scalar $session_for->(), catch_signals => 1,
+    wait_background => 1);
   $app->shutdown_hooks;   # async hooks end with the run, as with claude -p
   $app->shutdown_mcp;     # so do the configured MCP servers (ADR 0029)
   return $ok ? EXIT_OK : EXIT_RUN_ERROR;

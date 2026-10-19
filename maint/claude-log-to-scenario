@@ -56,8 +56,12 @@ C<Agent> becomes C<agent>, C<MultiEdit> C<multi_edit>, C<TaskCreate>
 C<task_create>, the C<Bash> timeout becomes seconds, ...). A section with
 C<TodoWrite> gets C<app: { task_tools: false }>, so the scenario mounts
 C<todo_write> instead of the task tools. A tool raider does not have
-(C<ToolSearch>, C<SendMessage>, C<Monitor>, ...) and every C<mcp__*> tool (a
-scenario mounts no MCP server) is left out and noted in a comment.
+(C<ToolSearch>, C<Monitor>, ...) and every C<mcp__*> tool (a scenario mounts
+no MCP server) is left out and noted in a comment. So is C<SendMessage>,
+although raider has it (C<send_message>): it continues a finished agent in
+the background, whose responses would come on the loop in an order the
+draft cannot fix, so the draft replays only a subagent's first run (see
+Subagents).
 
 =item * Paths: under the project root (the C<cwd> the log records, or
 C<--root>) they become relative; under the home (C<$HOME>, or C<--home>)
@@ -97,7 +101,7 @@ that subagent's first run (up to the next message to it, a C<SendMessage> of
 the caller, which is left out and noted), then those of the next subagent,
 then the caller's next response; nested subagents the same way, with
 C<app: { max_agent_depth: N }> when they go deeper than raider's default of
-1. In C<expect: tools:> a subagent's calls come before those of the response
+3. In C<expect: tools:> a subagent's calls come before those of the response
 that started it, as raider records them, and the C<agent> call is anchored on
 the subagent's answer. A subagent that hands its report back with
 C<SubagentHandback> answers with its message (raider's subagent answers with
@@ -110,14 +114,16 @@ C<files:> through the same redaction, without its C<skills:> and
 C<briefing:> keys: their skills are not in the scenario, and raider refuses
 to start an agent whose skills it cannot resolve. Every other type -- Claude
 Code's own (C<Explore>, C<Plan>, ...), a user or plugin agent, an agent file
-that is gone or unreadable -- becomes C<general-purpose>, raider's one
-built-in agent, and is noted.
+that is gone or unreadable -- becomes C<general-purpose>, and is noted.
+C<Explore> and C<Plan> stay: raider has them built in (ADR 0027).
 
 =item * An C<Agent> call without a subagent log: run in the foreground, the
 subagent answers at once with what Claude Code returned (without the
 C<agentId>/C<usage> lines it appends); run in the background or failed, the
 call is left out and noted. A background agent with a log runs to its end in
-raider, at the call: raider has no background subagents.
+raider, at the call: the draft's call has no C<run_in_background>, so the
+replay keeps Claude Code's order of responses (replaying raider's own
+background agents and their notifications is not done yet).
 
 =back
 
@@ -217,8 +223,9 @@ my $FALSE = JSON::MaybeXS->false;
 my $tools = 'Langertha::Raider::ToolNames';
 my $agents = 'Langertha::Raider::Context::Agents';
 
-# Claude Code's own agent types besides general-purpose: raider has none of them.
-my %CLAUDE_AGENT = map { $_ => 1 } qw( Explore Plan claude claude-code-guide output-style-setup statusline-setup );
+# Claude Code's own agent types besides general-purpose that raider has not
+# built in (it has Explore and Plan, ADR 0027).
+my %CLAUDE_AGENT = map { $_ => 1 } qw( claude claude-code-guide output-style-setup statusline-setup );
 
 # Keys written first in a flow mapping, the way the hand-written scenarios read.
 my %KEY_RANK = (
@@ -679,6 +686,8 @@ sub translate_call {
   return ( [], 'left out '.$name.': an MCP tool, the scenario mounts no MCP server' ) if $tools->is_mcp($name);
   my $tool = $tools->raider_name($name);
   return ( [], 'left out '.$name.': raider has no such tool' ) unless defined $tool;
+  return ( [], 'left out '.$name.' to '.( $input->{to} // '?' ).': continuing an agent runs it in the background in raider, '
+    .'which the draft does not replay' ) if $tool eq 'send_message';
   my $args = $tools->raider_input( $tool, $input );
   my %mapped;
   for my $key ( path_keys( $tool, $args ) ) {
@@ -835,6 +844,9 @@ sub subagent_run {
   my ( $ctx, $log, $use, $result, $call, $depth ) = @_;
   my $label = 'Agent ('.one_line( $use->{input}{description} // '', 50 ).')';
   my $background = is_background( $use, $result );
+  # The draft replays a subagent at its call, in the foreground (raider's
+  # background agents would answer with a launch notice and notify later).
+  delete $call->[1]{run_in_background};
   my $file = subagent_log_file( $log, $use, $result );
   my ( $sub, $steps, $later, $answer );
   if ($file) {
@@ -890,8 +902,8 @@ sub agent_answer {
 # The agent a call names, as the scenario can give it: an agent file in the
 # project's .claude/agents goes into files: (redacted, without the skills it
 # declares -- they are not in the scenario and raider refuses a spawn whose
-# skills it cannot resolve); any other type becomes general-purpose, raider's
-# one built-in agent. Notes for the head of the scenario.
+# skills it cannot resolve); raider's built-ins (Explore, Plan) stay; any
+# other type becomes general-purpose. Notes for the head of the scenario.
 sub agent_type {
   my ( $ctx, $args ) = @_;
   my $type = $args->{subagent_type};
@@ -908,6 +920,8 @@ sub carry_agent {
   my $standin = sub { return { keep => 0, why => $_[0], file_notes => [] } };
   my $dir   = path( $ctx->{root}, '.claude', 'agents' );
   my $agent = $agents->new( roots => [ { dir => "$dir", source => '.claude/agents' } ] )->find($type);
+  # raider's own built-in of that name (Explore, Plan)
+  return { keep => 1, file_notes => [] } if $agent && !$agent->{file};
   return $standin->( $CLAUDE_AGENT{$type}
     ? "Claude Code's built-in agent, raider has no such agent"
     : 'no such agent file in .claude/agents of the project (a user or plugin agent, or gone)' )
@@ -971,7 +985,7 @@ sub scenario_yaml {
   my $no_prompt = !defined $prompts[0];
   $prompts[0] //= 'go';
   if ( @prompts > 1 ) { $doc{prompts} = \@prompts } else { $doc{prompt} = $prompts[0] }
-  $doc{app}{max_agent_depth} = $ctx->{depth} if $ctx->{depth} > 1;
+  $doc{app}{max_agent_depth} = $ctx->{depth} if $ctx->{depth} > 3;
   # A session of the TodoWrite era: raider mounts todo_write instead of the task tools.
   $doc{app}{task_tools}      = $FALSE        if $ctx->{todo_write};
   $doc{files}  = $ctx->{files}      if %{ $ctx->{files} };
@@ -984,7 +998,7 @@ sub scenario_yaml {
   $out .= "# no user prompt before the section: a placeholder\n" if $no_prompt;
   $out .= exists $doc{prompts} ? dump_key( 0, prompts => $doc{prompts} ) : dump_key( 0, prompt => $doc{prompt} );
   if ( $doc{app} ) {
-    $out .= "# subagents of subagents: raider allows that only above its default depth of 1\n"
+    $out .= "# subagents nested deeper than raider's default depth of 3\n"
       if exists $doc{app}{max_agent_depth};
     $out .= "# a session of the TodoWrite era: todo_write instead of the task tools (ADR 0025)\n"
       if exists $doc{app}{task_tools};

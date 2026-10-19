@@ -802,6 +802,58 @@ has _tool_hook => (
   predicate => '_has_tool_hook',
 );
 
+has async_tools => (
+  is      => 'ro',
+  isa     => 'HashRef',
+  default => sub { {} },
+);
+
+=attr async_tools
+
+Optional HashRef of asynchronous in-process tools (ADR 0027 E<sect>9), by
+tool name. A value is the handler, or a HashRef with the handler as
+C<code> and C<< concurrent => 1 >>:
+
+    async_tools => {
+        agent        => { code => \&spawn_agent_f, concurrent => 1 },
+        send_message => \&send_message_f,
+    },
+
+    sub spawn_agent_f {
+        my ( $input, %ctx ) = @_;          # $ctx{id}: the model's tool call id
+        return $future;                    # of an MCP result { content => [...], isError => ... }
+    }
+
+The tool itself still comes from a tool source -- an MCP server, the
+inline L</tools> -- which carries its name, description and inputSchema,
+so the prompt and the tool list do not change; only its call is different.
+A call of a tool with a handler takes the whole path of any tool call --
+C<plugin_before_tool_call>, the tool hook, the inputSchema check, the gate,
+C<plugin_after_tool_call>, L</cancel> -- and in the place of the source's
+C<call_tool> the handler's Future is awaited: it runs on the raid's loop
+while nothing else waits for it, and is abandoned (cancelled) like any tool
+call when a cancel cuts it off. A handler that dies or whose Future fails
+gives an error result. C<%ctx> is the call's context: C<id>, the tool call
+id of the model's reply (undef when the engine's reply has none), and what
+the plugins recorded on it (see L</plugins>).
+
+A HashRef may also carry C<applies>, a code reference asked with the
+source the tool comes from in this raid (the MCP client that offers it): a
+false answer leaves the call to that source, as if there were no handler.
+So a handler can stand in for one particular server's tool and leave a
+tool of the same name from another source alone:
+
+    async_tools => { bash => { code => \&bash_f, applies => sub { $mine{ refaddr $_[0] } } } },
+
+Consecutive calls of one model turn whose tools are C<concurrent> run at
+the same time: each through the whole path above, their results appended
+in the order of the calls. Any other call -- and a self-tool always --
+ends such a group; nothing else changes the order. When a call of a group
+ends the raid (L</cancel>), the other calls of the group are still awaited
+first.
+
+=cut
+
 has _inline_mcp => (
   is => 'rw',
   predicate => 'has_inline_mcp',
@@ -2642,23 +2694,118 @@ sub _trace_tool_turn {
 # Result that ends the raid when a cancel, an interactive self-tool or an
 # abort stops the batch; nothing when the whole batch ran. The iteration's
 # batch runs here, and so does the rest of a batch respond_f resumes (k120).
+# Consecutive calls of concurrent async_tools run as one group
+# (_dispatch_group_f, ADR 0027 section 9); every other call runs alone, in
+# order. A group never holds a self-tool, so it never pauses.
 async sub _execute_tool_calls_f {
   my ( $self, $state, $iter, $tool_calls, $echo_data, $results ) = @_;
 
-  for my $tc_idx (0 .. $#$tool_calls) {
-    # Safe point: no further tool call once a cancel is requested.
+  my $tc_idx = 0;
+  while ($tc_idx <= $#$tool_calls) {
+    # Safe point: no further tool call (or group) once a cancel is requested.
     return $self->_cancelled_result($state) if $self->cancel_requested;
+    my $last = $tc_idx;
+    if ($self->_concurrent_call($state, $tool_calls->[$tc_idx])) {
+      $last++ while $last < $#$tool_calls
+        && $self->_concurrent_call($state, $tool_calls->[$last + 1]);
+    }
     # Only the calls AFTER a pausing self-tool are still pending. The ones
     # before it already ran and sit in $results; carrying them too (as a plain
     # "everything but $tc" filter did) re-runs their side effects and emits a
     # second tool_result for the same tool_use id on resume — a 400 on strict
     # providers like Anthropic.
-    my $stop = await $self->_dispatch_tool_call_f($state, $iter, $echo_data,
-      $tool_calls->[$tc_idx], [ @$tool_calls[$tc_idx+1 .. $#$tool_calls] ], $results);
+    my $remaining = [ @$tool_calls[$last+1 .. $#$tool_calls] ];
+    my $stop = $last > $tc_idx
+      ? await $self->_dispatch_group_f($state, $iter, $echo_data,
+          [ @$tool_calls[$tc_idx .. $last] ], $remaining, $results)
+      : await $self->_dispatch_tool_call_f($state, $iter, $echo_data,
+          $tool_calls->[$tc_idx], $remaining, $results);
     return $stop if defined $stop;
+    $tc_idx = $last + 1;
   }
 
   return;
+}
+
+# The async tool $name as { code => CodeRef, concurrent => 0|1 }, or nothing
+# (see async_tools); $mcp is the source that offers $name in this raid, which
+# a handler's applies may decline.
+sub _async_tool {
+  my ( $self, $name, $mcp ) = @_;
+  return unless defined $name;
+  my $tool = $self->async_tools->{$name} or return;
+  return { code => $tool, concurrent => 0 } if ref $tool eq 'CODE';
+  return unless ref $tool eq 'HASH' && ref $tool->{code} eq 'CODE';
+  return if ref $tool->{applies} eq 'CODE' && !$tool->{applies}->($mcp);
+  return { code => $tool->{code}, concurrent => $tool->{concurrent} ? 1 : 0 };
+}
+
+# Whether the call $tc may run at the same time as its concurrent
+# neighbours: its tool, by the name the model called, is a concurrent async
+# tool that a source offers -- never a self-tool.
+sub _concurrent_call {
+  my ( $self, $state, $tc ) = @_;
+  my ( $name ) = $self->_tool_call_name_input($state->{engine}, $tc);
+  return 0 unless defined $name && $state->{tool_server_map}{$name};
+  my $tool = $self->_async_tool($name, $state->{tool_server_map}{$name}) or return 0;
+  return $tool->{concurrent};
+}
+
+# Dispatches the calls of $group at the same time, each through
+# _dispatch_tool_call_f with results of its own, and pushes their results
+# onto $results in call order once all of them are done -- a call whose
+# result is ready waits for the calls before it, a stop (or a failure) of
+# one waits for the others. Then a failure is rethrown, else the first stop
+# returned. One result per tool_use id holds as in a single dispatch; a
+# continuation a member saved (a plugin renamed a call to a pausing
+# self-tool) gets the merged results, so respond_f re-runs nothing.
+async sub _dispatch_group_f {
+  my ( $self, $state, $iter, $echo_data, $group, $remaining_tcs, $results ) = @_;
+  my @own = map { [] } @$group;
+  my @f = map {
+    my $i = $_;
+    Future->call(sub {
+      $self->_dispatch_tool_call_f($state, $iter, $echo_data, $group->[$i], $remaining_tcs, $own[$i]);
+    });
+  } 0 .. $#$group;
+  await Future->wait_all(@f);
+  if ( my ($failed) = grep { $_->is_failed } @f ) {
+    $failed->get;   # rethrows
+  }
+  my ( $stop, $stop_results );
+  for my $i (0 .. $#$group) {
+    push @$results, @{ $own[$i] };
+    next if defined $stop || !$f[$i]->is_done;
+    ( $stop ) = $f[$i]->get;
+    $stop_results = $own[$i] if defined $stop;
+  }
+  if ( defined $stop && $self->has_continuation ) {
+    my $cont = $self->_continuation;
+    $cont->{results_so_far} = $results if refaddr($cont->{results_so_far}) == refaddr($stop_results);
+  }
+  return $stop;
+}
+
+# The context of one tool call: the model's tool call id, for the
+# plugin hooks (their last argument) and an async tool's handler; plugins
+# may record their own keys in it.
+sub _tool_call_context {
+  my ( $self, $tc ) = @_;
+  my $id = blessed $tc ? $tc->id : ref $tc eq 'HASH' ? $tc->{id} : undef;
+  return { id => $id };
+}
+
+# plugin_before_tool_call through every plugin, as
+# Langertha::Role::PluginHost->plugin_pipeline_tool_call_f, with the call's
+# context as the last argument.
+async sub _plugin_before_tool_call_f {
+  my ( $self, $name, $input, $ctx ) = @_;
+  for my $plugin (@{$self->plugin_instances}) {
+    my @result = await $plugin->plugin_before_tool_call($name, $input, $ctx);
+    return () unless @result;
+    ( $name, $input ) = @result;
+  }
+  return ( $name, $input );
 }
 
 # Dispatches one tool call: the single path every call of a raid takes, in
@@ -2673,6 +2820,7 @@ async sub _dispatch_tool_call_f {
   my ( $self, $state, $iter, $echo_data, $tc, $remaining_tcs, $results ) = @_;
   my $engine = $state->{engine};
   my ( $name, $input ) = $self->_tool_call_name_input($engine, $tc);
+  my $ctx = $self->_tool_call_context($tc);
 
   # A call whose arguments the model did not send as valid JSON must not run
   # the tool on {} -- answer it with an error result the model can retry, as
@@ -2684,7 +2832,7 @@ async sub _dispatch_tool_call_f {
   }
 
   # Plugin hook: inspect/transform before tool execution
-  my @plugin_tc = await $self->plugin_pipeline_tool_call_f($name, $input);
+  my @plugin_tc = await $self->_plugin_before_tool_call_f($name, $input, $ctx);
   unless (@plugin_tc) {
     # Plugin returned empty list — skip this tool call
     my $skip_result = {
@@ -2712,7 +2860,7 @@ async sub _dispatch_tool_call_f {
   # the gate and any approval -- "unknown tool", not a permission question
   # about a tool that does not exist. _call_mcp_tool_f answers the error.
   unless ( $self_tool || $state->{tool_server_map}{$name} ) {
-    my $result = await $self->_call_mcp_tool_f($state, $iter, $name, $input, $tool_t0);
+    my $result = await $self->_call_mcp_tool_f($state, $iter, $name, $input, $tool_t0, $ctx);
     push @$results, { tool_call => $tc, result => $result };
     ${$state->{raid_tool_calls}}++;
     return;
@@ -2728,7 +2876,7 @@ async sub _dispatch_tool_call_f {
     $hook = {} unless ref $hook eq 'HASH';
     if ( ( $hook->{decision} // '' ) eq 'deny' ) {
       my $result = await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0,
-        $self->_gate_refused_tool_result($name, { verdict => 'deny', reason => $hook->{reason}, message => $hook->{message} }), 1);
+        $self->_gate_refused_tool_result($name, { verdict => 'deny', reason => $hook->{reason}, message => $hook->{message} }), 1, $ctx);
       push @$results, { tool_call => $tc, result => $result };
       ${$state->{raid_tool_calls}}++;
       return;
@@ -2743,7 +2891,7 @@ async sub _dispatch_tool_call_f {
   # against the schema, and the error result takes the same
   # plugin_after_tool_call path as any other result: one tool.result.
   if ( my $invalid = $self->_invalid_args_tool_result($state, $name, $input) ) {
-    my $result = await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0, $invalid, 1);
+    my $result = await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0, $invalid, 1, $ctx);
     push @$results, { tool_call => $tc, result => $result };
     ${$state->{raid_tool_calls}}++;
     return;
@@ -2763,7 +2911,7 @@ async sub _dispatch_tool_call_f {
   });
   unless ( $verdict->{verdict} eq 'allow' ) {
     my $result = await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0,
-      $self->_gate_refused_tool_result($name, $verdict), 1);
+      $self->_gate_refused_tool_result($name, $verdict), 1, $ctx);
     push @$results, { tool_call => $tc, result => $result };
     ${$state->{raid_tool_calls}}++;
     return;
@@ -2776,7 +2924,7 @@ async sub _dispatch_tool_call_f {
 
     # Handle interactive self-tool results
     return $self->_pause_raid($state, $iter, $echo_data, $tc, $name, $input,
-      $tool_t0, $remaining_tcs, $results, $self_result)
+      $tool_t0, $remaining_tcs, $results, $self_result, $ctx)
       if $self_result->{type} eq 'question' || $self_result->{type} eq 'pause';
 
     return $self->_abort_raid($state, $self_result)
@@ -2784,15 +2932,15 @@ async sub _dispatch_tool_call_f {
 
     if ($self_result->{type} eq 'wait') {
       $result = await $self->_wait_self_tool_f(
-        $state, $iter, $name, $input, $tool_t0, $self_result->{seconds});
+        $state, $iter, $name, $input, $tool_t0, $self_result->{seconds}, $ctx);
     }
     else {
       # type eq 'result' — normal self-tool result
-      $result = await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0, $self_result);
+      $result = await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0, $self_result, undef, $ctx);
     }
   }
   else {
-    $result = await $self->_call_mcp_tool_f($state, $iter, $name, $input, $tool_t0);
+    $result = await $self->_call_mcp_tool_f($state, $iter, $name, $input, $tool_t0, $ctx);
   }
 
   push @$results, { tool_call => $tc, result => $result };
@@ -2807,7 +2955,7 @@ async sub _dispatch_tool_call_f {
 # calls of the batch after $tc, $results those that already ran.
 sub _pause_raid {
   my ( $self, $state, $iter, $echo_data, $tc, $name, $input, $tool_t0,
-    $remaining_tcs, $results, $self_result ) = @_;
+    $remaining_tcs, $results, $self_result, $ctx ) = @_;
   $self->_continuation({
     state          => $state,
     iteration      => $iter->{iteration},
@@ -2816,6 +2964,7 @@ sub _pause_raid {
     pending_name   => $name,
     pending_input  => $input,
     pending_t0     => $tool_t0,
+    pending_ctx    => $ctx,
     remaining_tcs  => $remaining_tcs,
     results_so_far => $results,
     iter_span_id   => $iter->{span_id},
@@ -2848,22 +2997,25 @@ sub _abort_raid {
 # the wait short. Returns the tool result -- a cancelled one after a cancel,
 # as for a cut-off MCP call -- through plugin_after_tool_call (k134).
 async sub _wait_self_tool_f {
-  my ( $self, $state, $iter, $name, $input, $tool_t0, $seconds ) = @_;
+  my ( $self, $state, $iter, $name, $input, $tool_t0, $seconds, $ctx ) = @_;
   my $engine = $state->{engine};
   my $loop = $engine->async_loop // IO::Async::Loop->new;
   await $self->_until_cancelled($loop->delay_future(after => $seconds));
   my $result = $self->cancel_requested
     ? $self->_cancelled_tool_result($name)
     : { content => [{ type => 'text', text => "Waited $seconds seconds." }] };
-  return await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0, $result);
+  return await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0, $result, undef, $ctx);
 }
 
-# Calls the tool $name on the MCP source that registered it. A name no server
-# offers is answered with an error result so the batch runs to the end and the
-# model can correct itself, instead of dying and losing the whole raid (core
-# k332). A failed call, or one a cancel cut off, is an error result too.
+# Calls the tool $name on the MCP source that registered it -- or, for an
+# async tool (async_tools), awaits its handler's Future in that place. A name
+# no server offers is answered with an error result so the batch runs to the
+# end and the model can correct itself, instead of dying and losing the whole
+# raid (core k332). A failed call, or one a cancel cut off, is an error result
+# too; once a cancel is requested no call starts (a call of a group whose
+# hooks were still running).
 async sub _call_mcp_tool_f {
-  my ( $self, $state, $iter, $name, $input, $tool_t0 ) = @_;
+  my ( $self, $state, $iter, $name, $input, $tool_t0, $ctx ) = @_;
   my $mcp = $state->{tool_server_map}{$name};
   unless ($mcp) {
     # Claude Code's words (ADR 0026); a name that differs from a tool only in
@@ -2875,8 +3027,13 @@ async sub _call_mcp_tool_f {
       isError => JSON->true,
     };
   }
+  return await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0,
+    $self->_cancelled_tool_result($name), 1, $ctx) if $self->cancel_requested;
 
-  my $call_f = $mcp->call_tool($name, $input)->else(sub {
+  my $async = $self->_async_tool($name, $mcp);
+  my $call_f = ( $async
+    ? Future->call($async->{code}, $input, %{ $ctx // {} })
+    : $mcp->call_tool($name, $input) )->else(sub {
     my ( $error ) = @_;
     Future->done({
       content => [{ type => 'text', text => "Error calling tool '$name': $error" }],
@@ -2887,7 +3044,7 @@ async sub _call_mcp_tool_f {
   $result = $self->_cancelled_tool_result($name) if $self->_cut_off($call_f, $result);
   $result = $self->_without_foreign_messages($state, $name, $result);
 
-  return await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0, $result, 1);
+  return await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0, $result, 1, $ctx);
 }
 
 # The _meta key under which a tool result hands the raider user messages to
@@ -2928,12 +3085,13 @@ sub _result_messages {
 # Runs the plugin_after_tool_call hook on a tool's result and traces the call
 # as a Langfuse span under the iteration span. With $flag_errors an error
 # result gets level ERROR (MCP calls; self-tool results carry no level).
+# $ctx is the call's context (_tool_call_context), the hook's last argument.
 async sub _after_tool_call_f {
-  my ( $self, $state, $iter, $name, $input, $tool_t0, $result, $flag_errors ) = @_;
+  my ( $self, $state, $iter, $name, $input, $tool_t0, $result, $flag_errors, $ctx ) = @_;
 
   # Plugin hook: transform tool result
   for my $plugin (@{$self->plugin_instances}) {
-    $result = await $plugin->plugin_after_tool_call($name, $input, $result);
+    $result = await $plugin->plugin_after_tool_call($name, $input, $result, $ctx);
   }
 
   if ($state->{langfuse}) {
@@ -3031,7 +3189,7 @@ async sub _respond_f {
   # tool.call event gets its tool.result (k134).
   my $answer_result = await $self->_after_tool_call_f($state, $iter,
     $cont->{pending_name}, $cont->{pending_input}, $cont->{pending_t0},
-    { content => [{ type => 'text', text => "$answer" }] });
+    { content => [{ type => 'text', text => "$answer" }] }, undef, $cont->{pending_ctx});
   push @results, { tool_call => $pending_tc, result => $answer_result };
   ${$state->{raid_tool_calls}}++;
 
@@ -3133,6 +3291,15 @@ Besides the tool-calling hooks every L<Langertha::Plugin> has, a raider
 calls C<plugin_before_raid> (the raid's messages), C<plugin_build_conversation>
 (the conversation sent to the model) and C<plugin_after_raid> (the final
 L<Langertha::Raider::Result>); the contract is in L<Langertha::Plugin>.
+
+A raider passes one more argument to C<plugin_before_tool_call> and
+C<plugin_after_tool_call>, after the ones L<Langertha::Plugin> names: the
+call's context, a HashRef that is the same for both hooks of one call. It
+holds C<id>, the tool call id of the model's reply (undef when the reply
+has none). A plugin may record keys of its own in it -- the only way to
+tell which call a result belongs to while calls run at the same time
+(L</async_tools>) -- and an async tool's handler gets them as its C<%ctx>.
+A plugin that ignores the argument works as before.
 
 =cut
 

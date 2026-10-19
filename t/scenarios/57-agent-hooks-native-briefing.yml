@@ -38,7 +38,7 @@ expect:
     - { index: 1, contains: "NOTES-SKILL-BODY\n</skill>\n\n---\n\n# Original task\n\nREWRITTEN-TASK" }
     - { index: 1, absent: ORIGINAL-TASK }
   tools:
-    - { name: agent, text: '\A- noted\z' }
+    - { name: agent, text: '\A- noted\nagentId: agent_1 \(use send_message with to: ''agent_1'' to continue this agent\)\n<usage>subagent_tokens: \d+\ntool_uses: \d+\nduration_ms: \d+</usage>\z' }
   events:
     - { type: hook.ran, hook_event: PreToolUse, outcome: skipped, message: "briefing.skills are loaded by raider itself (native_briefing)" }
     - { type: hook.ran, hook_event: PreToolUse, outcome: success, exit: 0 }

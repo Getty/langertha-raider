@@ -633,12 +633,14 @@ eval, and reports what it installed. It never loops. (Note that `perl -c` runs
   first use (the banner shows `(saved)`) — `--claude` as `claude: true`.
 - An **agent** is a subagent definition in Claude Code's format (Markdown with
   frontmatter) in `.raider/agents/`, `~/.raider/agents/` and, in the Claude layout,
-  `.claude/agents/`, `~/.claude/agents/` and enabled plugins; `general-purpose` is
-  built in. The model starts one with the `agent` tool: it runs in the same process
+  `.claude/agents/`, `~/.claude/agents/` and enabled plugins; `general-purpose`, and
+  the read-only `Explore` and `Plan` (no CLAUDE.md in their prompt), are built in.
+  The model starts one with the `agent` tool: it runs in the same process
   with an empty history, the agent file as its instructions and the caller's tools
   filtered by `tools` / `disallowedTools` (never `ask_user`), and its last text comes
   back as the tool result. With a session it journals into a child session of its
-  own. Subagents cannot start subagents unless `max_agent_depth` is raised. The
+  own. Subagents nest up to three levels (`max_agent_depth`, or
+  `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` in the Claude layout; `1` turns nesting off). The
   skills an agent declares (`skills`, `briefing.skills`) are put in front of its task
   as the briefing plugin does, and its `model` applies under the Anthropic API.
 

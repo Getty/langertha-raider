@@ -192,7 +192,7 @@ the session and the other way round. Lives in memory only.
 
 =cut
 
-has run_rules => ( is => 'ro', isa => 'ArrayRef', default => sub { [] } );
+has run_rules => ( is => 'ro', isa => 'ArrayRef', default => sub { [] }, writer => '_set_run_rules' );
 
 =attr run_rules
 
@@ -201,7 +201,8 @@ C<allowed-tools> of a C</name> run or of an entry the model loaded with the
 C<skill> tool (ADR 0030 E<sect>3), as L<Langertha::Raider::Permissions::Rule>
 objects with their source (C</NAME allowed-tools>). Shared with every policy
 L</for_subrun> derives, like L</session_rules>, and emptied in place by
-L</clear_run_rules> when the run ends.
+L</clear_run_rules> when the run ends -- unless a policy took its own copy
+(L</own_run_rules>).
 
 =cut
 
@@ -562,7 +563,22 @@ mode does not take the session with it); a session rule allowed in either
 holds in both. A sub-run never gets more than its parent had: there is no
 argument to widen it.
 
+=method own_run_rules
+
+    $policy_of_subagent->own_run_rules;
+
+Takes this policy's own copy of the L</run_rules> it shares, as they are
+now: rules a later run adds do not reach it, and the end of the run that
+had them does not take them away. A background subagent does this when it
+starts (ADR 0027): it outlives the run it was started in.
+
 =cut
+
+sub own_run_rules {
+  my ( $self ) = @_;
+  $self->_set_run_rules( [ @{ $self->run_rules } ] );
+  return;
+}
 
 #### Deciding
 
