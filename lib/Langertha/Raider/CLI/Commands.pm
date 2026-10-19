@@ -88,7 +88,7 @@ sub cmd_help {
     '  /clear                reset conversation history',
     '  /metrics              show cumulative raid metrics',
     '  /stats                show token usage (when trace is on)',
-    '  /reload               reload the instructions file, re-detect packs',
+    '  /reload               reload instructions, memory, settings and skills; re-detect packs',
     '  /prompt               launch the prompt-builder (edits the instructions file)',
     '  /skill [PATH]         export plain-markdown skill doc',
     '  /skill-claude [PATH]  export Claude Code SKILL.md with frontmatter',
@@ -141,15 +141,23 @@ sub cmd_stats {
 sub cmd_reload {
   my ($self) = @_;
   my $app = $self->app;
+  my $context = $app->reload_context;
   my @detected = $app->redetect_packs;
   my $new = $app->reload_mission;
   my $source = $app->mission_source;
   my $file   = $app->instructions->label;
   my $status = $source eq '-M'  ? '-M mission kept, '.$file.' not used'
+             : $source eq q(claude base) ? q(Claude Code base text (no persona))
              : $source eq $file ? 'custom ('.$file.' loaded)'
              :                    'Langertha (default, no '.$file.')';
   $self->output->say_meta('mission reloaded: '.$status.' ('.length($new).' chars)');
   $self->output->say_meta('detected packs: '.join(', ', @detected)) if @detected;
+  return unless $context->claude_layout;
+  my @memory = $context->instruction_items;
+  my @skills = $context->skill_catalog->listed;
+  $self->output->say_meta('context reloaded: layout '.$context->mode.', '
+    .scalar(@memory).' instruction file'.( @memory == 1 ? '' : 's').', '
+    .scalar(@skills).' listed skill'.( @skills == 1 ? '' : 's'));
   return;
 }
 

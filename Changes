@@ -142,7 +142,7 @@ Revision history for Langertha-Raider
       not as skills: [claude] (which still means the same when read). In a
       Claude-mode project nothing is saved any more, so no .raider.yml
       appears there. --openai / --codex load AGENTS.md as an instructions
-      item; skills: entries of type: file are no longer read.
+      item.
     - Changed: skills are no longer glued into the system prompt in full.
       The prompt lists every skill as "name: description" (frontmatter), and
       the model loads one with the new skill tool, which returns its body
@@ -157,6 +157,29 @@ Revision history for Langertha-Raider
       frontmatter YAML rejects but Claude Code reads (an unquoted ": " in a
       description) is read line by line as key: value, so such a skill keeps
       its description.
+    - Changed: in Claude mode (only Claude files, no .raider/) raider is
+      Claude Code, not Langertha: its default persona and the packs that are
+      on only by default (caveman) are off; the instructions are the
+      CLAUDE.md hierarchy plus a neutral base text. --pack, packs: and
+      detection still apply, -M still replaces the base text, and a raider
+      project with claude: true keeps its persona. config explain shows
+      "instructions: claude base" and the default packs as switched off by
+      the layout.
+    - /reload reads the Claude memory, settings (env included) and skills
+      again, and mounts or drops the skill tool as the skills change.
+    - Fixed: -o claude=false (and perl=, detect= with false/no/off/0, also from
+      a config file or the API) is false; the boolean words go through one
+      parser and anything else croaks.
+    - Fixed: a skills: entry of type file was silently dropped. It is a
+      skill now (one flat *.md file, also --skills FILE); a missing file is
+      shown by config explain, and an entry with an unknown type or no path
+      croaks.
+    - Skills can appear while working, like in Claude Code: the first file
+      tool that touches a subtree reads its .claude/skills, and a skill with
+      paths: in its frontmatter (globs, a list or comma separated) is listed
+      only once a matching file is touched. Both are announced in a
+      second system-reminder block of that tool result. In the Claude layout
+      the skill tool is always mounted.
 
   [CLI and REPL]
     - bin/raider is a thin wrapper around internal

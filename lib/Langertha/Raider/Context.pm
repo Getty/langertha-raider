@@ -25,6 +25,8 @@ use Langertha::Raider::Context::Skills;
     my @items = $context->prompt_items;         # memory, AGENTS.md, skill listing
     my $skills = $context->skill_catalog;       # Langertha::Raider::Context::Skills
     my $more  = $context->nested_memory_for('lib/Foo.pm');   # or undef
+    my @notes = $context->nested_reminders_for('lib/Foo.pm');  # CLAUDE.md, skills
+    $context->reload;                           # /reload: read it all again
     my $report = $context->report;              # for config explain
 
 =head1 DESCRIPTION
@@ -44,6 +46,8 @@ roots in the precedence of ADR 0019 E<sect>4:
 
 =item 1. L</skill_specs>, in their order. C<< { type => 'claude', path } >>
 is a directory of skill directories (F<*/SKILL.md>);
+C<< { type => 'file', path } >> one skill file (so is a C<dir> spec naming a
+file);
 C<< { type => 'dir', path, glob } >> a directory of flat F<*.md> skills;
 C<< { type => 'dir', path } >> without C<glob> (C<--skills DIR>, a string
 in C<skills:>) is both. A relative path is relative to L</root>.
@@ -56,6 +60,10 @@ F<.claude/skills> and F<.agents/skills> of the project directory
 every installed and enabled plugin as C<plugin:skill>.
 
 =back
+
+Skills can also arrive during a session: the F<.claude/skills> of a subtree
+a tool touches, and skills with C<paths:> frontmatter once a matching file is
+touched (L</nested_skills_for>, ADR 0019 Addendum 1).
 
 A directory that appears twice is read once, at its first place. With
 L</bare> nothing is read at all: mode C<bare>, no memory, no settings, no
@@ -238,6 +246,7 @@ sub _build_memory {
     home        => $self->home,
     claude_home => $self->claude_home,
     walk_dirs   => [ $self->layout->walk_dirs ],
+    _delivered  => $self->_nested_delivered,
   );
 }
 
@@ -300,6 +309,11 @@ sub _build_skill_roots {
     next unless defined $rel && !ref $rel && length $rel;
     my $dir  = path($rel)->absolute($root);
     my $type = $spec->{type} // 'dir';
+    $type = 'file' if $type eq 'dir' && -f $dir;   # --skills FILE
+    if ($type eq 'file') {
+      push @roots, { dir => $dir->parent->stringify, file => $dir->stringify, source => $rel, layout => 'file' };
+      next;
+    }
     my @layouts = $type eq 'claude' ? ('skills')
       : $type eq 'dir' ? ( defined $spec->{glob} ? ('flat') : qw( skills flat ) )
       : ();
@@ -325,11 +339,13 @@ sub _build_skill_roots {
     my $project = $self->layout->project_dir;
     for my $sub (qw( .claude .agents )) {
       my $dir = $project->child($sub, 'skills');
-      push @roots, { dir => $dir->stringify, source => $self->_root_label($dir), layout => 'skills' };
+      push @roots, { dir => $dir->stringify, source => $self->_root_label($dir), layout => 'skills', base => $project->stringify };
     }
+    # Nested .claude/skills met while working below root (nested_reminders_for).
+    push @roots, @{ $self->_nested_skill_roots };
   }
   my %seen;
-  return [ grep { !$seen{ $self->_real($_->{dir}).' '.$_->{layout} }++ } @roots ];
+  return [ grep { !$seen{ $self->_real($_->{file} // $_->{dir}).' '.$_->{layout} }++ } @roots ];
 }
 
 =attr skill_catalog
@@ -339,8 +355,14 @@ Claude layout, the skill directories of L</plugins>.
 
 =method has_listed_skills
 
-True when the catalogue lists at least one skill to the model: then the
-C<skill> tool is mounted.
+True when the catalogue lists at least one skill to the model.
+
+=method skill_tool_wanted
+
+True when the C<skill> tool is mounted: in the Claude layout always (a
+nested F<.claude/skills> or a skill with C<paths:> can bring skills in
+later in the session, as in Claude Code), elsewhere when the catalogue
+holds a skill the model can invoke, now or once a file activates it.
 
 =cut
 
@@ -355,14 +377,43 @@ sub _build_skill_catalog {
   my ( $self ) = @_;
   my $plugins = $self->plugins;
   return $self->skills_class->new(
-    roots   => $self->skill_roots,
-    plugins => $plugins
+    roots     => $self->skill_roots,
+    base      => $self->root,
+    activated => $self->_activated_skills,
+    plugins   => $plugins
       ? [ map { { name => $_->{name}, dirs => [ $plugins->skill_dirs($_) ] } } @{ $plugins->plugins } ]
       : [],
   );
 }
 
 sub has_listed_skills { scalar( () = $_[0]->skill_catalog->listed ) ? 1 : 0 }
+
+sub skill_tool_wanted {
+  my ( $self ) = @_;
+  return 0 if $self->bare;
+  return 1 if $self->claude_layout;
+  return scalar( () = $self->skill_catalog->invocable ) ? 1 : 0;
+}
+
+# Kept across a reload: the names of path-activated skills, the nested
+# skill roots found, and the roots already looked at.
+has _activated_skills => (
+  is       => 'ro',
+  init_arg => undef,
+  default  => sub { {} },
+);
+
+has _nested_skill_roots => (
+  is       => 'ro',
+  init_arg => undef,
+  default  => sub { [] },
+);
+
+has _nested_skill_dirs_seen => (
+  is       => 'ro',
+  init_arg => undef,
+  default  => sub { {} },
+);
 
 =attr agents_md
 
@@ -485,20 +536,62 @@ has _env_done => (
   default  => 0,
 );
 
+# What the environment held before apply_env set a key: { KEY => value|undef }.
+has _env_before => (
+  is       => 'ro',
+  init_arg => undef,
+  default  => sub { {} },
+);
+
 sub apply_env {
   my ( $self ) = @_;
   unless ($self->_env_done) {
     $self->_env_done(1);
-    if (my $settings = $self->settings) {
-      my $values = $settings->env_values;
-      for my $key (sort keys %$values) {
-        $ENV{$key} = $values->{$key};
-        push @{ $self->applied_env }, $key;
-      }
+    my $values = $self->settings ? $self->settings->env_values : {};
+    # A key an earlier run set that the settings no longer carry: back to what it was.
+    for my $key (grep { !exists $values->{$_} } @{ $self->applied_env }) {
+      my $before = delete $self->_env_before->{$key};
+      defined $before ? ( $ENV{$key} = $before ) : delete $ENV{$key};
+    }
+    @{ $self->applied_env } = ();
+    for my $key (sort keys %$values) {
+      $self->_env_before->{$key} = $ENV{$key} unless exists $self->_env_before->{$key};
+      $ENV{$key} = $values->{$key};
+      push @{ $self->applied_env }, $key;
     }
   }
   return @{ $self->applied_env };
 }
+
+=method reload
+
+    $context->reload;
+
+Reads everything again that was read from disk: the layout mode, the
+memory files, the settings (and their C<env>, applied again -- a key the
+settings no longer carry gets back the value it had before), the enabled
+plugins and the skill catalogue, as C</reload> in the REPL does. What was
+decided from the constructor arguments (C<--claude>, C<claude:>, C<--bare>,
+the explicit skill directories) stays. The nested F<CLAUDE.md> files
+already handed out in this session are not handed out again. Returns the
+object.
+
+=cut
+
+sub reload {
+  my ( $self ) = @_;
+  $self->$_ for qw( clear_layout clear_memory clear_settings clear_plugins
+    clear_skill_roots clear_skill_catalog clear_agents_md );
+  $self->_env_done(0);
+  $self->apply_env;
+  return $self;
+}
+
+has _nested_delivered => (
+  is       => 'ro',
+  init_arg => undef,
+  default  => sub { {} },
+);
 
 =method nested_memory_for
 
@@ -516,6 +609,71 @@ sub nested_memory_for {
   my $memory = $self->memory or return;
   my $text = $memory->nested_text($memory->nested_for($path));
   return $text;
+}
+
+=method nested_skills_for
+
+    my $text = $context->nested_skills_for('sub/dir/file.txt');
+
+The skills that became available because a tool touched C<$path>, as a
+note for a tool result (L<Langertha::Raider::Context::Skills/announce_text>),
+or C<undef> for none: the F<.claude/skills> of the directories below
+L</root> on the way to C<$path> (Claude layout only, each looked at once;
+their skills come after all others and lose a name that is taken), and the
+skills whose C<paths:> glob matches C<$path>
+(L<Langertha::Raider::Context::Skills/activate_for>). A skill is announced
+once per session, a reload included. Nothing for a path outside
+L</root>, and nothing with L</bare>.
+
+=method nested_reminders_for
+
+    my @texts = $context->nested_reminders_for($path);
+
+What a tool result gets for touching C<$path>: L</nested_memory_for>, then
+L</nested_skills_for> -- each its own text, none for what is empty.
+
+=cut
+
+sub nested_skills_for {
+  my ( $self, $path ) = @_;
+  return if $self->bare;
+  return unless defined $path && length $path;
+  my $root   = path($self->_real($self->root));
+  my $target = path($self->_real(path($path)->absolute($root)));
+  return unless $root->subsumes($target);
+  my $catalog = $self->skill_catalog;
+  my @new;
+  if ($self->claude_layout) {
+    my $dir = -d $target ? $target : $target->parent;
+    my @dirs;
+    while ($dir->stringify ne $root->stringify && $root->subsumes($dir)) {
+      unshift @dirs, $dir;
+      $dir = $dir->parent;
+    }
+    my @roots;
+    for my $d (@dirs) {
+      my $skills = $d->child('.claude', 'skills');
+      next unless -d $skills;
+      next if $self->_nested_skill_dirs_seen->{ $skills->stringify }++;
+      my $found = {
+        dir    => $skills->stringify,
+        source => $self->_root_label($skills),
+        layout => 'skills',
+        base   => $d->stringify,
+      };
+      push @{ $self->_nested_skill_roots }, $found;
+      push @roots, $found;
+    }
+    push @new, $catalog->add_roots(@roots) if @roots;
+  }
+  push @new, $catalog->activate_for($target->stringify);
+  my %seen;
+  return $catalog->announce_text(grep { $catalog->is_listed($_) && !$seen{ $_->{name} }++ } @new);
+}
+
+sub nested_reminders_for {
+  my ( $self, $path ) = @_;
+  return grep { defined } $self->nested_memory_for($path), $self->nested_skills_for($path);
 }
 
 =method report
@@ -568,7 +726,7 @@ sub report {
       imports => [ @{ $_->{imports} } ],
     } } $self->instruction_items ],
     ( $self->settings ? ( settings => $self->_settings_report ) : () ),
-    skills          => [ map { { name => $_->{name}, source => $_->{source}, listed => $_->{model_invocable} } } $catalog->skills ],
+    skills          => [ map { my $s = $_; my @paths = $catalog->paths_of($s); +{ name => $s->{name}, source => $s->{source}, listed => $catalog->is_listed($s) ? 1 : 0, ( @paths ? ( paths => [ @paths ] ) : () ) } } $catalog->skills ],
     shadowed_skills => [ map { { name => $_->{name}, source => $_->{source}, by => $_->{by} } } $catalog->shadowed ],
     skill_problems  => [ map { { file => $_->{file}, reason => $_->{reason} } } $catalog->problems ],
     plugins         => $plugins ? [ map { { name => $_->{name}, key => $_->{key}, scope => $_->{scope} } } @{ $plugins->plugins } ] : [],

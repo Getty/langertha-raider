@@ -6,6 +6,7 @@ use namespace::autoclean;
 use Carp qw( croak );
 use JSON::MaybeXS ();
 use Path::Tiny;
+use Scalar::Util ();
 use YAML::PP ();
 use Langertha::Raider::Detect;
 use Langertha::Raider::Home;
@@ -543,7 +544,61 @@ Every effective key except C<skills>, layered for C<$engine_name>.
 
 sub options {
   my ( $self, $engine ) = @_;
-  return { %{ $self->_resolve($engine)->{value} } };
+  return $self->normalize_bools({ %{ $self->_resolve($engine)->{value} } });
+}
+
+=method parse_bool
+
+    my $bool = $config->parse_bool($value, 'claude');   # 1, 0 or undef
+
+The one boolean parser of raider's own keys, for a C<-o KEY=VALUE>, a
+config file and an API caller alike: C<undef> stays C<undef>; a boolean
+object is read by truth; the words C<true>, C<yes>, C<on>, C<y> (any
+case) are C<1>; C<false>, C<no>, C<off>, C<n>, C<0> and the empty string
+are C<0>; other numbers are read by truth. Anything else croaks naming
+C<$label>, so C<-o claude=false> can never be read as the true string
+C<"false">.
+
+=cut
+
+sub parse_bool {
+  my ( $self, $value, $label ) = @_;
+  return unless defined $value;
+  if (ref $value) {
+    return $value ? 1 : 0 if Scalar::Util::blessed($value);
+    croak 'Invalid '.( $label // 'boolean' ).': a list or map is not a boolean';
+  }
+  my $word = lc $value;
+  $word =~ s/\A\s+|\s+\z//g;
+  return 1 if $word =~ /\A(?:true|yes|on|y)\z/;
+  return 0 if $word =~ /\A(?:false|no|off|n|)\z/;
+  return $word + 0 ? 1 : 0 if $word =~ /\A-?\d+(?:\.\d+)?\z/;
+  croak 'Invalid '.( $label // 'boolean' ).": '".$value."' is not a boolean (true/false, yes/no, on/off, 1/0)";
+}
+
+=method bool_keys
+
+The raider keys that hold a plain boolean: C<claude> and C<perl>.
+(C<detect> also takes a map of rules; its scalar form is read with
+L</parse_bool> too.)
+
+=method normalize_bools
+
+    $config->normalize_bools(\%options);
+
+Replaces the L</bool_keys> of a hash by L</parse_bool>, in place, and
+returns it.
+
+=cut
+
+sub bool_keys { qw( claude perl ) }
+
+sub normalize_bools {
+  my ( $self, $options ) = @_;
+  for my $key ($self->bool_keys) {
+    $options->{$key} = $self->parse_bool($options->{$key}, $key.':') if defined $options->{$key};
+  }
+  return $options;
 }
 
 =method engine_options
@@ -635,7 +690,7 @@ sub normalize_detect {
       croak 'Invalid detect setting detect: must be a map of pack name to rule, or false';
     }
     else {
-      $settings{enabled} = $detect ? 1 : 0;
+      $settings{enabled} = $self->parse_bool($detect, 'detect:');
     }
   }
   if (defined $no_detect) {
@@ -871,8 +926,10 @@ C<< { type => 'dir', path => $item } >>, a hash with C<type> C<claude> or
 C<dir> (or none) passes through. The profile keywords name no directory
 and give nothing: C<claude> is the legacy spelling of C<claude: true>,
 C<openai> / C<codex> / C<agents> load F<AGENTS.md> as an instructions item
-(see L</profiles>). A C<< type => 'file' >> hash is no skill any more and
-gives nothing either.
+(see L</profiles>). A hash with C<type> C<file> names one skill file (a
+flat F<*.md> skill, named by its file name). A hash with another C<type>,
+without a C<path>, or an item that is neither a string nor a hash croaks:
+a skill source is never dropped silently.
 
 =cut
 
@@ -882,7 +939,13 @@ sub normalize_skill_spec {
     return if !defined $spec || $PROFILE_KEYWORD{$spec};
     return { type => 'dir', path => $spec };
   }
-  return if ref $spec ne 'HASH' || ( $spec->{type} // 'dir' ) eq 'file';
+  croak 'Invalid skills: an item is a path, a profile keyword or a map with type and path'
+    if ref $spec ne 'HASH';
+  my $type = $spec->{type} // 'dir';
+  croak "Invalid skills: type '".( ref $type ? 'a '.ref $type : $type )."' is none of dir, claude, file"
+    unless !ref $type && grep { $_ eq $type } qw( dir claude file );
+  croak 'Invalid skills: an item of type '.$type.' needs a path'
+    unless defined $spec->{path} && !ref $spec->{path} && length $spec->{path};
   return $spec;
 }
 

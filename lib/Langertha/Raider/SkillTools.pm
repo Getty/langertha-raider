@@ -71,7 +71,7 @@ sub build_skill_tools_server {
       $name = '' unless defined $name && !ref $name;
       $name =~ s/\A\s+|\s+\z//g;
       my $skill = length $name ? $skills->find($name) : undef;
-      unless ($skill && $skill->{model_invocable}) {
+      unless ($skill && $skills->is_listed($skill)) {
         my @listed = map { $_->{name} } $skills->listed;
         return $tool->text_result('Error: unknown skill: '.( length $name ? $name : '(none given)' )
           .'. '.( @listed ? 'Available skills: '.join(', ', @listed) : 'No skills are available.' ), 1);

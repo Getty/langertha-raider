@@ -120,12 +120,78 @@ the system prompt. Packs (ADR 0012) stay as they are.
   the user's `~/.claude/CLAUDE.md`, settings env and plugin skills without a flag. Tests must
   isolate `$HOME` / `$CLAUDE_CONFIG_DIR`.
 - `skills:` with `claude` and `--claude` change shape (layout switch instead of a file list);
-  `Changes` says so. `type => 'file'` skill specs are gone as skills: `CLAUDE.md` and
-  `AGENTS.md` are instructions items now.
-- Nested `.claude/skills` below `root` and Claude Code's `paths:` frontmatter are not
-  supported yet.
+  `Changes` says so. `CLAUDE.md` and `AGENTS.md` are instructions items now, not skills.
+  (Addendum 1: `type: file` is a skill again, see below.)
+- Nested `.claude/skills` below `root` and the `paths:` frontmatter: see Addendum 1.
 
 ## Source
 
 Plan `perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md`
 (stream K, decision 1 by the maintainer); karr #151. Complements ADR 0004, 0011, 0014.
+
+## Addendum 1 — follow-ups of the Claude mode (karr #157, 2026-10-19)
+
+Decided while working the follow-ups; the numbers continue the sections above.
+
+### 5. Claude mode has no persona
+
+Layout mode `claude` (no raider files, only Claude Code ones) means raider acts as Claude Code
+would. So there, raider's own default persona (Langertha, the terse style) is not used: the
+instructions item is a neutral base text in the manner of Claude Code (no name, the working
+rules, `CLAUDE.md` overrides it) followed by the memory items. Packs that are on only because
+of `enabled_by_default` (caveman) stay off; `--pack`, `packs:` / `-o packs=`, `/pack` and
+detection still switch packs on — an explicit choice always holds. `-M` still replaces the
+instructions item. A raider project that merely reads the Claude layout (`claude: true`,
+`--claude`) keeps the persona: the project made a deliberate raider choice (§1) and its
+`.raider/instructions.md` customises exactly that persona. `config explain` shows
+`instructions: claude base` and the default packs as switched off by `layout`.
+
+### 6. `/reload` reads the context again
+
+`/reload` re-reads layout mode, memory, settings (the `env` is applied again; a key the
+settings dropped gets back the value it had before), enabled plugins and the skill catalogue,
+and swaps the system prompt and the skill tool. Nested `CLAUDE.md` files and skills already
+announced in the session are not announced again. Not re-decided: what came from flags and the
+config file at start (`--claude`, `claude:`, `--bare`, explicit skill directories) and the pack
+selection (so the default packs of Claude mode are decided at start).
+
+### 7. One boolean parser for raider's own keys
+
+`claude`, `perl` and the scalar form of `detect` go through `Langertha::Raider::Config->parse_bool`
+wherever they come from (`-o`, config file, API): `true/yes/on/y/1` and `false/no/off/n/0/""` in
+any case; a boolean object by truth; anything else croaks. `-o claude=false` is false, never the
+true string `"false"`.
+
+### 8. `skills:` entries are never dropped silently
+
+A `type: file` entry is one skill file: a flat `*.md` skill named by its file name (so is a
+`type: dir` entry that names a file, i.e. `--skills FILE`). A file that is not there is a
+skill problem shown by `config explain`. An entry with an unknown `type`, without a `path`, or
+that is neither a string nor a map croaks. (`CLAUDE.md` / `AGENTS.md` stay instructions items;
+a hand-written file skill of either is just a skill.)
+
+### 9. Nested skills and conditional skills (`paths:`)
+
+As in Claude Code, skills can appear while working:
+
+- **Nested `.claude/skills`.** The first time a tool touches a path below `root`, the
+  `.claude/skills` of every directory on the way (below `root`, Claude layout only) is read
+  once. Its skills come after all others: a name that is taken keeps the earlier skill, the
+  shadowing is reported.
+- **`paths:` frontmatter** (a YAML list, or a comma separated string; `*`, `**`, `?`, `{a,b}`;
+  a glob without `/` matches the file name in any directory). A skill with `paths:` is not
+  listed at the start and not loadable by the `skill` tool. When a tool touches a matching
+  file it becomes listed for the rest of the session. The globs are relative to the directory
+  that holds the skill's `.claude` (`.raider`); skills from user directories, explicit
+  directories and plugins are relative to `root`.
+- **Announcement.** Both ways add a second `<system-reminder>` block to the tool result, as
+  Claude Code words it: `The following skills are available for use with the Skill tool:`
+  and the `name: description` lines. The system prompt is not rebuilt.
+- **The `skill` tool is mounted** in the Claude layout always (skills can arrive later), and
+  elsewhere whenever the catalogue holds a skill the model can invoke now or after a match.
+  This replaces "mounted only when at least one skill is loadable" of §4 for the Claude
+  layout.
+
+Not supported: `paths:` as a gate for rules/memory files, and a `paths:` glob over a file that
+only a `bash` command touched (only tools with a `path` / `file_path` argument count, as for
+nested memory).

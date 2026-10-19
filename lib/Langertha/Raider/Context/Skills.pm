@@ -79,6 +79,9 @@ C<skills>: a directory of skill directories, each with a F<SKILL.md>.
 C<flat>: a directory of F<*.md> files, each one skill (the old
 C<--skills DIR> behaviour); without top-level F<*.md> files it holds no
 skills.
+C<file>: one skill file (the hash has C<file>; C<dir> is its
+parent): named by its file name without F<.md>; a file that is not there
+is a L<problem|/problems>.
 
 =cut
 
@@ -102,6 +105,32 @@ has plugins => (
   default => sub { [] },
 );
 
+=attr base
+
+The directory the C<paths:> globs of a skill are relative to, unless its
+root names its own C<base> (the directory with the F<.claude/> or
+F<.raider/> the skill lives in). Optional; without it a skill with
+C<paths:> can never be activated.
+
+=attr activated
+
+HashRef of the names of skills with C<paths:> that a touched file has
+activated (L</activate_for>). Shared with the caller, who keeps it across
+catalogues -- a C</reload> builds a new one.
+
+=cut
+
+has base => (
+  is  => 'ro',
+  isa => 'Maybe[Str]',
+);
+
+has activated => (
+  is      => 'ro',
+  isa     => 'HashRef',
+  default => sub { {} },
+);
+
 # The longest fallback description taken from a body line.
 sub description_limit { 250 }
 
@@ -114,38 +143,53 @@ has _catalog => (
 
 sub _build__catalog {
   my ( $self ) = @_;
-  my %cat = ( skills => [], shadowed => [], problems => [], by_name => {}, body => {} );
+  my %cat = ( skills => [], shadowed => [], problems => [], by_name => {}, body => {}, base => {} );
 
-  for my $root (@{ $self->roots }) {
-    my $dir = $root->{dir};
-    next unless defined $dir && -d $dir;
-    my $base = path($dir)->absolute;
-    my $layout = $root->{layout} // 'skills';
-    my @found;
-    if ($layout eq 'flat') {
-      @found = map { [ $_->basename(qr/\.md\z/), $_, $base ] }
-        grep { -f $_ } $base->children(qr/\.md\z/);
-    }
-    else {
-      @found = map { [ $_->basename, $_->child('SKILL.md'), $_ ] }
-        grep { -d $_ && -f $_->child('SKILL.md') } $base->children;
-    }
-    $self->_add(\%cat, @$_, $root->{source}) for sort { $a->[0] cmp $b->[0] } @found;
-  }
+  $self->_scan_root(\%cat, $_) for @{ $self->roots };
 
   for my $plugin (@{ $self->plugins }) {
     for my $d (@{ $plugin->{dirs} // [] }) {
       my $sd = path($d)->absolute;
       next unless -f $sd->child('SKILL.md');
       $self->_add(\%cat, $plugin->{name}.':'.$sd->basename, $sd->child('SKILL.md'), $sd,
-        'plugin '.$plugin->{name});
+        'plugin '.$plugin->{name}, $self->base);
     }
   }
   return \%cat;
 }
 
+sub _scan_root {
+  my ( $self, $cat, $root ) = @_;
+  my $pbase = $root->{base} // $self->base;
+  if (($root->{layout} // '') eq 'file') {
+    my $file = path($root->{file})->absolute;
+    if (-f $file) {
+      $self->_add($cat, $file->basename(qr/\.md\z/), $file, $file->parent, $root->{source}, $pbase);
+    }
+    else {
+      push @{ $cat->{problems} }, { file => $file->stringify, reason => 'skill file not found' };
+    }
+    return;
+  }
+  my $dir = $root->{dir};
+  return unless defined $dir && -d $dir;
+  my $base = path($dir)->absolute;
+  my $layout = $root->{layout} // 'skills';
+  my @found;
+  if ($layout eq 'flat') {
+    @found = map { [ $_->basename(qr/\.md\z/), $_, $base ] }
+      grep { -f $_ } $base->children(qr/\.md\z/);
+  }
+  else {
+    @found = map { [ $_->basename, $_->child('SKILL.md'), $_ ] }
+      grep { -d $_ && -f $_->child('SKILL.md') } $base->children;
+  }
+  $self->_add($cat, @$_, $root->{source}, $pbase) for sort { $a->[0] cmp $b->[0] } @found;
+  return;
+}
+
 sub _add {
-  my ( $self, $cat, $name, $file, $dir, $source ) = @_;
+  my ( $self, $cat, $name, $file, $dir, $source, $base ) = @_;
   if (my $winner = $cat->{by_name}{$name}) {
     push @{ $cat->{shadowed} }, {
       name   => $name,
@@ -173,6 +217,7 @@ sub _add {
   push @{ $cat->{skills} }, $skill;
   $cat->{by_name}{$name} = $skill;
   $cat->{body}{$name} = $body;
+  $cat->{base}{$name} = $base if defined $base;
   return;
 }
 
@@ -326,11 +371,120 @@ sub find {
 
     my @offered = $skills->listed;
 
-The L</skills> the model may see and load: those with C<model_invocable>.
+The L</skills> the model may see and load (L</is_listed>).
+
+=method is_listed
+
+    if ($skills->is_listed($skill)) { ... }
+
+True for a skill with C<model_invocable> that has no C<paths:> in its
+frontmatter, or whose C<paths:> a touched file matched (L</activate_for>).
+
+=method invocable
+
+The L</skills> with C<model_invocable>, listed or not yet: the skills the
+model can have now or later.
+
+=method paths_of
+
+    my @globs = $skills->paths_of($skill);
+
+The globs of the C<paths:> frontmatter of a skill (Claude Code's
+conditional skills): a YAML list, or a string with the globs separated by
+commas (not inside C<{a,b}>). None for a skill without. A glob is matched
+against the path relative to the skill's base: C<*> within a path segment,
+C<**> over any number of segments, C<?> one character, C<{a,b}>
+alternatives; a glob without C</> matches the file name in any directory.
 
 =cut
 
-sub listed { grep { $_->{model_invocable} } $_[0]->skills }
+sub is_listed {
+  my ( $self, $skill ) = @_;
+  return 0 unless $skill->{model_invocable};
+  return 1 unless $self->paths_of($skill);
+  return $self->activated->{ $skill->{name} } ? 1 : 0;
+}
+
+sub listed    { my ( $self ) = @_; grep { $self->is_listed($_) } $self->skills }
+sub invocable { grep { $_->{model_invocable} } $_[0]->skills }
+
+sub paths_of {
+  my ( $self, $skill ) = @_;
+  my $p = $skill->{frontmatter}{paths};
+  return unless defined $p;
+  my @globs = ref $p eq 'ARRAY' ? @$p : ref $p ? () : split /\s*,\s*(?![^{]*\})/, $p;
+  return grep { defined && !ref && length } map { my $g = $_; $g =~ s/\A\s*["']?|["']?\s*\z//g if defined $g && !ref $g; $g } @globs;
+}
+
+=method add_roots
+
+    my @new = $skills->add_roots({ dir => ..., source => ..., layout => 'skills', base => ... });
+
+Reads more roots into the catalogue, after everything it holds: a name
+that is known keeps its skill (the new one is L</shadowed>). Returns the
+skills that are new. Nested F<.claude/skills> found while working in a
+subtree come in this way.
+
+=method activate_for
+
+    my @new = $skills->activate_for('/abs/path/to/file');
+
+Marks every skill whose C<paths:> glob matches the path (relative to its
+base) as L</activated>, and returns those that were not activated before.
+
+=cut
+
+sub add_roots {
+  my ( $self, @roots ) = @_;
+  my $cat = $self->_catalog;
+  my %had = map { $_->{name} => 1 } @{ $cat->{skills} };
+  push @{ $self->roots }, @roots;
+  $self->_scan_root($cat, $_) for @roots;
+  return grep { !$had{ $_->{name} } } @{ $cat->{skills} };
+}
+
+sub activate_for {
+  my ( $self, $target ) = @_;
+  return unless defined $target && length $target;
+  my $cat = $self->_catalog;
+  my @new;
+  for my $skill ($self->invocable) {
+    next if $self->activated->{ $skill->{name} };
+    my @globs = $self->paths_of($skill) or next;
+    my $base = $cat->{base}{ $skill->{name} } // next;
+    my ( $b, $t ) = ( path($base), path($target) );
+    next unless $b->subsumes($t);
+    my $rel = $t->relative($b)->stringify;
+    next unless grep { $rel =~ $self->_glob_re($_) } @globs;
+    $self->activated->{ $skill->{name} } = 1;
+    push @new, $skill;
+  }
+  return @new;
+}
+
+# A glob as an anchored regex (see paths_of).
+sub _glob_re {
+  my ( $self, $glob ) = @_;
+  $glob =~ s{\A\./}{};
+  $glob =~ s{\A/}{};
+  my $re = $self->_glob_part($glob);
+  return $glob =~ m{/} ? qr{\A$re\z} : qr{\A(?:.*/)?$re\z};
+}
+
+sub _glob_part {
+  my ( $self, $glob ) = @_;
+  my $re = '';
+  while ($glob =~ m{\G(\*\*/|\*\*|\*|\?|\{[^{}]*\}|.)}gcs) {
+    my $t = $1;
+    $re .= $t eq '**/' ? '(?:.*/)?'
+      : $t eq '**'     ? '.*'
+      : $t eq '*'      ? '[^/]*'
+      : $t eq '?'      ? '[^/]'
+      : $t =~ /\A\{(.*)\}\z/s ? '(?:'.join('|', map { $self->_glob_part($_) } split /,/, $1, -1).')'
+      :                  quotemeta $t;
+  }
+  return $re;
+}
 
 =method body
 
@@ -406,7 +560,34 @@ sub prompt_text {
     'Skills: specialised instructions loaded on demand. When a task matches a skill\'s'
       .' description, call the `skill` tool with its name BEFORE acting, then follow what it'
       .' returns. Available skills:',
-    map { '- '.$_->{name}.( length $_->{description} ? ': '.$_->{description} : '' ) } @listed;
+    map { $self->_entry($_) } @listed;
+}
+
+=method announce_text
+
+    my $text = $skills->announce_text(@new);
+
+The note for skills that became available during the session (a nested
+F<.claude/skills> or a C<paths:> match), worded as Claude Code does:
+
+    The following skills are available for use with the Skill tool:
+
+    - name: description
+
+C<undef> for none.
+
+=cut
+
+sub announce_text {
+  my ( $self, @skills ) = @_;
+  return unless @skills;
+  return join "\n\n", 'The following skills are available for use with the Skill tool:',
+    join "\n", map { $self->_entry($_) } @skills;
+}
+
+sub _entry {
+  my ( $self, $skill ) = @_;
+  return '- '.$skill->{name}.( length $skill->{description} ? ': '.$skill->{description} : '' );
 }
 
 __PACKAGE__->meta->make_immutable;

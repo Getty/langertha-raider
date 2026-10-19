@@ -246,10 +246,10 @@ subtest 'application: mission items, -M keeps the memory, persona names CLAUDE.m
   put($p, '.claude/skills/greet/SKILL.md', skill('greets'));
   my %a = ( root => "$p", engine => 'openai', api_key => 'x', trace => 0 );
   my $m = Langertha::Raider::CLI->new(%a)->mission;
-  my @at = map { index($m, $_) } 'You are Langertha', 'Project memory text.', '- greet: greets', 'Tools (MCP):';
+  my @at = map { index($m, $_) } 'You are an interactive agent', 'Project memory text.', '- greet: greets', 'Tools (MCP):';
   ok(( !grep { $_ < 0 } @at ) && $at[0] < $at[1] && $at[1] < $at[2] && $at[2] < $at[3],
-    'persona, memory, skill listing, tools -- in this order');
-  like($m, qr/via C<CLAUDE\.md> in working dir/, 'persona names CLAUDE.md');
+    'neutral base, memory, skill listing, tools -- in this order');
+  unlike($m, qr/Langertha|shield-maiden|caveman/i, 'Claude mode: no raider persona');
   like($m, qr/^  - skill\(skill, \[args\]\)$/m, 'the skill tool is mounted');
   unlike($m, qr/body of greets/, 'no skill body');
 

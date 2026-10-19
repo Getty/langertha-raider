@@ -224,6 +224,7 @@ sub banner {
   my $source = $app->mission_source;
   my $file   = $app->instructions->label;
   my $persona = $source eq '-M'   ? 'from -M ('.$file.' not used)'
+              : $source eq q(claude base) ? q(Claude Code base text (CLAUDE.md memory, no persona))
               : $source eq $file  ? 'custom ('.$file.' loaded)'
               :                     'Langertha (default)';
   $persona .= ', bare (no '.$file.' or skills, only explicit packs)' if $app->bare;

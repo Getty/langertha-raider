@@ -186,7 +186,7 @@ REPL slash commands:
 | `/clear`               | Reset conversation history and token counters       |
 | `/metrics`             | Cumulative raid metrics                             |
 | `/stats`               | Tokens in / out / total (when trace is on)          |
-| `/reload`              | Re-read the instructions file, re-detect packs      |
+| `/reload`              | Re-read instructions, memory, settings, skills; re-detect packs |
 | `/prompt`              | Launch the prompt-builder (edits the instructions)  |
 | `/skill [PATH]`        | Export the plain-markdown how-to-use doc            |
 | `/skill-claude [PATH]` | Export a Claude Code `SKILL.md` with frontmatter    |
@@ -563,7 +563,11 @@ eval, and reports what it installed. It never loops. (Note that `perl -c` runs
   `.raider/skills/` and `~/.raider/skills/`, and in the Claude layout (below) also
   from `~/.claude/skills/`, `.claude/skills/`, `.agents/skills/` and the enabled
   Claude Code plugins (as `plugin:skill`). A skill with
-  `disable-model-invocation: true` is not offered. `--openai`/`--codex` loads
+  `disable-model-invocation: true` is not offered. A `type: file` entry in
+  `skills:` is one skill file. A skill with `paths:` frontmatter is listed only once
+  a matching file is touched, and a `.claude/skills` below the working directory
+  is read the first time a file tool touches that subtree (both announced in the
+  tool result). `--openai`/`--codex` loads
   `AGENTS.md`. `--claude`, `--openai` and `--skills` persist to `.raider.yml` on
   first use (the banner shows `(saved)`) — `--claude` as `claude: true`.
 
@@ -583,6 +587,8 @@ raider reads a project the way it was set up (ADR 0019):
   `.claude/settings.local.json` are merged: `env` is applied to the tools,
   `enabledPlugins` selects plugin skills, `permissions` and `hooks` are read (not
   enforced yet).
+  There is no raider persona in this mode: the instructions are a neutral base
+  text plus the memory, and no pack is on by default (`--pack` still works).
 - **neither** — raider-native, as before.
 
 `raider config explain` shows the mode and why, the memory files, the settings

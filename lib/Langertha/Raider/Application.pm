@@ -188,7 +188,8 @@ has api_key => (
 
 System prompt of the Raider, compiled from separate items (ADR 0004,
 ADR 0014, ADR 0019), in this order: the instructions (a generic assistant
-persona plus the project instructions file, L</instructions>); the context
+persona plus the project instructions file, L</instructions>; in Claude mode the
+neutral L</claude_base_text> instead of the persona, L</claude_persona_off>); the context
 items of L</context> (the Claude memory files, F<AGENTS.md> of
 C<--openai>, the listing of the skills as C<name: description> --
 L<Langertha::Raider::Context/prompt_items>); the tool description; the
@@ -314,7 +315,7 @@ sub _build_mission {
 sub _instructions_text {
   my ($self) = @_;
   return $self->_explicit_mission if $self->_has_explicit_mission;
-  my $base = $self->_persona_text;
+  my $base = $self->claude_persona_off ? $self->claude_base_text : $self->_persona_text;
   return $base if $self->bare;
   my $instructions = $self->instructions;
   my $custom = $instructions->text;
@@ -380,6 +381,43 @@ You have no yield / ask / abort tool. Task done: plain text reply. User
 answers in the next turn.
 EOM
 
+=method claude_persona_off
+
+True in layout mode C<claude> (ADR 0019 E<sect>1, no raider files, only
+Claude Code ones): raider acts as Claude Code would, so its own default
+persona (Langertha, the terse style) is not used -- the instructions item
+is L</claude_base_text> and the F<CLAUDE.md> memory -- and the packs
+switched on only by C<enabled_by_default> stay off (see L</packs>). A
+C<-M> mission, C<--pack> / C<packs:> and a raider project that merely
+reads the Claude layout (C<claude: true>, C<--claude>) are not affected.
+
+=method claude_base_text
+
+The neutral instructions item of Claude mode, in the manner of Claude
+Code's own base prompt: no name, no persona, the working rules.
+
+=cut
+
+sub claude_persona_off { $_[0]->context->mode eq 'claude' ? 1 : 0 }
+
+sub claude_base_text { <<'EOM' }
+You are an interactive agent that helps users with software engineering
+tasks. Use the instructions below and the tools available to you to assist
+the user. Project and user instructions (CLAUDE.md) override these defaults
+where they conflict.
+
+How you work:
+  - The user's turn is the task. Pursue it with tools until it is done.
+  - Read a file before you change it. Do not guess file contents.
+  - After you write or edit a file, verify: re-read it, or run a check
+    (syntax check, tests).
+  - Prefer small targeted edits to full rewrites.
+  - bash is a full shell, not a sandbox. Do not run irreversible operations
+    (rm -rf, git reset --hard, force pushes) unless the user asks for them.
+  - When the task is done, reply in plain text. The user answers in the next
+    turn.
+EOM
+
 # Points at the instructions file in use (.raider.md in a legacy project,
 # CLAUDE.md in a Claude project, both when a raider project reads the
 # Claude layout).
@@ -409,7 +447,7 @@ sub _instructions_label {
   my ($self) = @_;
   my $label = $self->instructions->label;
   return $label if $self->bare || !$self->context->claude_layout;
-  return $self->context->mode eq 'claude' ? 'CLAUDE.md' : $label.' or CLAUDE.md';
+  return $label.' or CLAUDE.md';
 }
 
 =attr root
@@ -663,7 +701,9 @@ C<no_detect: [NAME]> switch detection off entirely or per pack.
 =back
 
 Without explicit packs the bundled defaults (C<enabled_by_default>) are
-on.
+on -- except in Claude mode (L</claude_persona_off>), where no pack is on
+merely by default; C<config explain> shows them as switched off by the
+layout.
 
 Detection rules come from a pack's F<pack.yml> (C<detect:>, the pack
 default) and from C<detect:> in F<~/.raider/config.yml> and
@@ -709,6 +749,14 @@ sub _build_packs {
     }
     for my $name (@$list) {
       $collection->enable($name, $source, $reason);
+    }
+  }
+  elsif ($self->claude_persona_off) {
+    # Claude mode: no persona, so no pack that is on only by default
+    # (caveman); explicit and detected packs stay.
+    for my $name (@{ [ @{$collection->enabled_pack_names} ] }) {
+      next unless ($collection->sources->{$name}{source} // '') eq 'default';
+      $collection->disable($name, layout => 'Claude mode: no packs by default');
     }
   }
   $collection->disable($_, flag => $self->source_label('no_pack_names')) for @{$self->no_pack_names};
@@ -982,6 +1030,7 @@ sub _cli_app_options {
     $value = [ split /,/, $value ] if ($key eq 'packs' || $key eq 'skills') && !ref $value;
     $app{$key} = $value;
   }
+  $self->config->normalize_bools(\%app);
   return \%app;
 }
 
@@ -1018,7 +1067,7 @@ has _tool_servers => (is => 'ro', lazy => 1, builder => '_build_tool_servers', p
 has _stock_tool_servers => (is => 'ro', lazy => 1, builder => '_build_stock_tool_servers');
 has _perl_tool_server   => (is => 'ro', lazy => 1, builder => '_build_perl_tool_server');
 has _hall_tool_server   => (is => 'ro', lazy => 1, builder => '_build_hall_tool_server');
-has _skill_tool_server  => (is => 'ro', lazy => 1, builder => '_build_skill_tool_server');
+has _skill_tool_server  => (is => 'ro', lazy => 1, builder => '_build_skill_tool_server', clearer => '_clear_skill_tool_server');
 
 sub _build_api_key { $_[0]->engine_resolver->api_key }
 
@@ -1049,7 +1098,7 @@ sub _build_tool_servers {
 # The skill tool (ADR 0019 §4), when the context lists a skill.
 sub _build_skill_tool_server {
   my ($self) = @_;
-  return unless $self->context->has_listed_skills;
+  return unless $self->context->skill_tool_wanted;
   return build_skill_tools_server(skills => $self->context->skill_catalog);
 }
 
@@ -1173,7 +1222,7 @@ sub _raider_plugins {
   # Events last, so it reports the tool calls that actually run -- and the
   # results as the model gets them, nested CLAUDE.md files included.
   return ( ( $virtual ? () : '+Langertha::Raider::Plugin::Situation' ),
-    ( $self->context->claude_layout ? ( '+Langertha::Raider::Plugin::NestedMemory', { context => $self->context } ) : () ),
+    '+Langertha::Raider::Plugin::NestedMemory', { context => $self->context },
     '+Langertha::Raider::Plugin::Events', { on_event => sub { $app->event(@_) if $app } } );
 }
 
@@ -1554,6 +1603,26 @@ sub remove_session {
   return $path;
 }
 
+=method reload_context
+
+    $app->reload_context;
+    $app->reload_mission;
+
+Reads the Claude memory, the settings (with their C<env>) and the skills
+again (L<Langertha::Raider::Context/reload>) and drops the skill tool, so
+the next L</reload_mission> mounts it again over the new catalogue -- or
+not at all when no skill is left. C</reload> does both. A pack decided at
+the start (the default packs of Claude mode) is not decided again.
+
+=cut
+
+sub reload_context {
+  my ($self) = @_;
+  $self->context->reload;
+  $self->_clear_skill_tool_server;
+  return $self->context;
+}
+
 =method reload_mission
 
 Rebuilds the mission (e.g. after the instructions file has been edited) and swaps it
@@ -1583,14 +1652,15 @@ Where the instructions item of L</mission> comes from: the
 L</source_label> of C<mission> (C<-M> on the command line) for a mission
 passed to the constructor; the L<Langertha::Raider::Instructions/label> of
 the instructions file (C<.raider/instructions.md> or C<.raider.md>) when
-it customizes the default persona (never with L</bare>); C<default>
-otherwise.
+it customizes the default persona (never with L</bare>); C<claude base>
+in Claude mode (L</claude_persona_off>); C<default> otherwise.
 
 =cut
 
 sub mission_source {
   my ($self) = @_;
   return $self->source_label('mission') if $self->_has_explicit_mission;
+  return 'claude base' if $self->claude_persona_off;
   my $instructions = $self->instructions;
   return !$self->bare && $instructions->file_exists ? $instructions->label : 'default';
 }

@@ -165,11 +165,12 @@ subtest 'skill_specs merges layers and CLI, deduplicated' => sub {
     default => { skills => ['openai'] },
     openai  => { skills => [ { type => 'dir', path => 'oa' } ] },
   }));
-  # ADR 0019: the profile keywords and type: file name no skill directory.
-  is([ $config->skill_specs('openai', 'openai', { type => 'file', path => 'AGENTS.md' },
+  # ADR 0019: the profile keywords name no skill directory; a type: file names one skill file.
+  is([ $config->skill_specs('openai', 'openai', { type => 'file', path => 'one.md' },
       { type => 'claude', path => 'cl' }, { type => 'dir', path => 'cli' }) ],
     [
       { type => 'dir',    path => 'oa' },
+      { type => 'file',   path => 'one.md' },
       { type => 'claude', path => 'cl' },
       { type => 'dir',    path => 'cli' },
     ], 'top, default, engine section, then CLI');

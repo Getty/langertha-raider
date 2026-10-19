@@ -32,12 +32,16 @@ session (L<Langertha::Raider::Context/nested_memory_for> keeps track).
 Any tool counts whose arguments carry a C<path> or C<file_path> string:
 C<read_file>, C<write_file>, C<edit_file>, C<list_files> and every later
 tool of that shape. A result that is an error (C<isError>) or was cut off
-by a cancel is left alone and uses up nothing. The application mounts the
-plugin only in the Claude layout.
+by a cancel is left alone and uses up nothing. The same touch brings in
+skills (k157): the F<.claude/skills> of a subtree and the skills whose
+C<paths:> match the file, announced in a second block of the same kind
+(L<Langertha::Raider::Context/nested_skills_for>). The application mounts
+the plugin always; outside the Claude layout only the C<paths:> skills of
+the other skill roots can fire.
 
 =attr context
 
-The L<Langertha::Raider::Context> (anything with C<nested_memory_for>).
+The L<Langertha::Raider::Context> (anything with C<nested_reminders_for>).
 Required.
 
 =cut
@@ -62,13 +66,13 @@ async sub plugin_after_tool_call {
   return $result if $result->{isError} || $result->{cancelled};
   my ( $path ) = grep { defined && !ref && length } map { $input->{$_} } $self->path_keys;
   return $result unless defined $path;
-  my $text = $self->context->nested_memory_for($path);
-  return $result unless defined $text;
+  my @texts = $self->context->nested_reminders_for($path);
+  return $result unless @texts;
   return {
     %$result,
     content => [
       ( ref $result->{content} eq 'ARRAY' ? @{ $result->{content} } : () ),
-      { type => 'text', text => "<system-reminder>\n".$text."\n</system-reminder>" },
+      map { { type => 'text', text => "<system-reminder>\n".$_."\n</system-reminder>" } } @texts,
     ],
   };
 }
