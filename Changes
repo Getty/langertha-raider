@@ -23,6 +23,12 @@ Revision history for Langertha-Raider
       arguments, a failing bash command and a conversation across two prompts
       (`prompts:`, `requests:` in the scenario format). The approval scenario
       is skipped until policy/executor exist.
+    - Scenarios for glob, grep, todo_write, ask_user and the loadguard gate
+      (t/scenarios/12 to 22); the format gained `age:`, `proc:` (a fake /proc,
+      Test::Raider::FakeProc -- the tests never create load), `env:`, `ask:`
+      and the expectations `events:`, `questions:` and `todos:`. Unit tests
+      t/110 (tool names), t/111 (search tools, Perl and ripgrep alike), t/112
+      (todo, ask, REPL) and t/114 (loadguard).
     - t/201_remote_session.t: a session on another agent -- an ACP client opens a
       session on a hall in its own process, the hall spawns a real raider on
       `-e mock`, and the answer and the tool's file come back from the remote side.
@@ -272,6 +278,41 @@ Revision history for Langertha-Raider
       git-guru pack drops a pack.yml key the loader never read.
 
   [Tools]
+    - New tools, named and shaped after Claude Code's Glob, Grep, TodoWrite
+      and AskUserQuestion (ADR 0018). glob(pattern, [path]) lists files by
+      pattern ("**/*.pm", "*.{json,yml}"), newest first, as paths relative to
+      the root. grep(pattern, [path], [glob], [type], [output_mode], [-i],
+      [-n], [-A], [-B], [-C], [context], [multiline], [head_limit], [offset])
+      searches contents: files_with_matches (default), content with context,
+      or count. grep runs ripgrep when it is installed and plain Perl
+      otherwise, with the same output; both skip .git, symbolic links, binary
+      files and files over 10 MB, and neither reads .gitignore. todo_write
+      keeps the model's task list in the state of the run
+      (Application->todos) and reports every change as the event
+      todo.updated (session journal and --stream-json). ask_user puts a
+      question, optionally with choices, to the person at the REPL; in a run
+      nobody can answer (one-shot, Hall, cron, ACP) it is refused with an
+      error result that tells the model to decide itself. glob and grep are
+      confined to the root like the file tools. Effect classes: glob and
+      grep read, todo_write none, ask_user message.
+    - Loadguard: bash is gated by a port of the loadguard plugin. A heavy
+      command (prove, make test, dzil test|build|release, cpanm, perlbench,
+      docker|podman build|run, cargo build|test, npm test, claude -p|--bg,
+      codex exec|review), found in command position, is refused with the
+      measured figures and the advice that fits while the host is under
+      memory pressure (PSI memory full avg10 >= LOADGUARD_PSI_FULL, default
+      10 %; swap used >= LOADGUARD_SWAP_USED, default 90 %) or all heavy
+      slots (LOADGUARD_HEAVY_SLOTS, default max(1, nproc/2)) are held by
+      running commands of raider processes. Light commands are never
+      refused; without /proc/pressure or swap the signal is "no pressure";
+      LOADGUARD_THROTTLE=0 turns the gate off. LOADGUARD_CONFINE=1 (off by
+      default) makes raider start itself again in a transient systemd user
+      scope with memory limits (LOADGUARD_MEMORY_HIGH/MAX/SWAP_MAX in percent
+      of RAM, LOADGUARD_CPU_WEIGHT). New Langertha::Raider::Loadguard.
+    - New Langertha::Raider::ToolNames: the table of Claude Code tool names
+      and the raider tools they stand for (Read -> read_file, Edit and
+      MultiEdit -> edit_file, Glob -> glob, Task and Agent -> agent, ...;
+      mcp__* pass through) for the Claude-mode surfaces.
     - The tool description in the system prompt and the exported how-to-use
       document (/skill, /skill-claude) are generated from the tool servers
       mounted for the run (name and parameters from each tool's input

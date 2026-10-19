@@ -163,9 +163,23 @@ generated from exactly the tools the engine is offered:
 (L<Langertha::Raider::FileTools>), confined to C<-r>.
 
 =item * C<bash> (L<MCP::Run::Bash>), a real shell started in C<-r>,
-120 seconds per command by default. It is not confined to C<-r>.
+120 seconds per command by default. It is not confined to C<-r>. A heavy
+command (C<prove>, C<make test>, C<dzil test>, C<cpanm>, C<podman run>, ...)
+is refused with the reason while the host is under memory pressure or its
+heavy slots are taken (L<Langertha::Raider::Loadguard>, the C<LOADGUARD_*>
+variables of the loadguard plugin: C<LOADGUARD_PSI_FULL>,
+C<LOADGUARD_SWAP_USED>, C<LOADGUARD_HEAVY_SLOTS>, C<LOADGUARD_THROTTLE=0> for
+off). C<LOADGUARD_CONFINE=1> starts raider in a memory-limited systemd user
+scope; off by default.
 
 =item * C<web_search>, C<web_fetch> (L<Langertha::Raider::WebTools>).
+
+=item * C<glob>, C<grep> (L<Langertha::Raider::SearchTools>), confined to
+C<-r>; C<grep> uses ripgrep when it is installed.
+
+=item * C<todo_write> (L<Langertha::Raider::TodoTools>), the task list of
+the run, and C<ask_user> (L<Langertha::Raider::AskTools>), a question to
+the person at the REPL -- refused in a run nobody can answer.
 
 =item * C<perl_eval>, C<perl_check>, C<perl_cpanm>
 (L<Langertha::Raider::PerlTools>) when granted: by C<--perl>, by C<perl:>

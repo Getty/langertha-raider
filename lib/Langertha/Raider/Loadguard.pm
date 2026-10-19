@@ -470,7 +470,8 @@ sub slot_holders {
   my ( $self ) = @_;
   my $root = path( $self->proc_dir );
   my %proc;
-  for my $dir ( $root->children(qr/\A\d+\z/) ) {
+  my @dirs = eval { $root->children(qr/\A\d+\z/) };
+  for my $dir (@dirs) {
     my $pid  = $dir->basename;
     my $stat = eval { $dir->child('stat')->slurp_raw } // next;
     my ( $comm, $ppid ) = $stat =~ /\A\d+ \((.*)\) \S (\d+)/s or next;
@@ -604,7 +605,8 @@ C<1>, the process already is confined (C<LOADGUARD_CONFINED> set), there is
 no C<systemd-run> or no user manager (F<$XDG_RUNTIME_DIR/bus>), or the memory
 controller is not delegated to the user manager. The caller sets
 C<LOADGUARD_CONFINED=1> and execs it; if the exec fails it goes on
-unconfined.
+unconfined. Options given to perl itself on the command line (C<-I>) are not
+carried over; C<PERL5LIB> is.
 
 =cut
 

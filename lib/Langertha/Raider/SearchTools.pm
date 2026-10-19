@@ -192,7 +192,7 @@ sub _resolve {
   return $root unless defined $path && length $path;
   my $abs  = path($path)->is_absolute ? path($path) : path($root)->child($path);
   my $real = realpath("$abs");
-  croak 'no such path: '.$path unless defined $real;
+  croak 'no such path: '.$path unless defined $real && -e $real;
   croak 'path escapes root: '.$path unless $real eq $root || index( $real, $root.'/' ) == 0;
   return $real;
 }
@@ -369,6 +369,8 @@ sub _grep_options {
     limit     => $in->{head_limit} // $self->default_limit,
     glob      => $in->{glob},
   );
+  croak 'the literal "\n" is not allowed in a regex; set multiline to match across lines'
+    if !$o{multiline} && $o{pattern} =~ /(?<!\\)(?:\\\\)*\\n/;
   croak 'unknown output_mode: '.$o{mode}.' (content, files_with_matches or count)' unless $MODES{ $o{mode} };
   my $c = $in->{'-C'} // $in->{context};
   $o{before} = $in->{'-B'} // $c // 0;
@@ -577,7 +579,7 @@ sub _grep_rg {
   my ( $self, $o, $dir ) = @_;
   my @cmd = (
     $self->rg, qw( --no-config --color never --hidden --no-ignore --sort path --no-messages ),
-    '--max-filesize', int( $self->max_file_size / 1024 ).'K',
+    '--max-filesize', $self->max_file_size,
   );
   push @cmd, '--ignore-case' if $o->{icase};
   push @cmd, '--multiline', '--multiline-dotall' if $o->{multiline};

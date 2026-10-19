@@ -8,6 +8,7 @@ use Exporter 'import';
 use Path::Tiny;
 use Langertha::Engine::Virtual;
 use Langertha::Virtual::Rules ();
+use Langertha::Raider::Loadguard;
 
 our @EXPORT_OK = qw( mock_app );
 
@@ -80,6 +81,8 @@ sub mock_app {
   return Test::Raider::MockAI::App->new(
     engine_name => 'openai',
     api_key     => 'mock',
+    # The gate never measures the real host: off, unless a scenario gives its own.
+    loadguard   => Langertha::Raider::Loadguard->new( env => { LOADGUARD_THROTTLE => 0 } ),
     %args,
   );
 }

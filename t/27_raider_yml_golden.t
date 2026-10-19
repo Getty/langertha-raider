@@ -48,7 +48,7 @@ sub app {
   );
 }
 
-sub perl_tools_on { scalar(@{ $_[0]->_mcps }) == 4 }   # files, bash, web + perl
+sub perl_tools_on { scalar(@{ $_[0]->_mcps }) == 7 }   # files, bash, web, search, todo, ask + perl
 
 sub run_raider {
   my ( @args ) = @_;

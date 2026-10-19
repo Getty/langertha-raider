@@ -13,6 +13,8 @@ BEGIN {
     or plan skip_all => 'needs Langertha::Engine::Virtual (Langertha 0.504 or later)';
 }
 use Test::Raider::MockAI qw( mock_app );
+use Test::Raider::FakeProc qw( fake_proc );
+use Langertha::Raider::Loadguard;
 
 # Each F<t/scenarios/NN-name.yml> is one step of what raider has to do end to
 # end. The model is scripted (Test::Raider::MockAI); the application, the raid
@@ -20,6 +22,12 @@ use Test::Raider::MockAI qw( mock_app );
 #
 #   title:   what the scenario shows
 #   files:   { path => content }        written to the root before the run
+#   age:     { path => seconds }        how long ago the file was last modified (default: now)
+#   proc:    { memory_full, swap, cpus, processes }  a fake /proc the loadguard gate measures
+#            (Test::Raider::FakeProc); with it the gate is on, without it off
+#   env:     { LOADGUARD_* => value }   the environment of that gate
+#   ask:     [ answer, ... ]            the person at the keyboard; ask_user gets these in order
+#            (without the key nobody can answer)
 #   prompt:  the user prompt (or `prompts:`, a list run one after the other on
 #            the same raider, so the conversation carries over)
 #   script:  the model's answers, one per request:
@@ -31,6 +39,10 @@ use Test::Raider::MockAI qw( mock_app );
 #     absent:      [ path, ... ]        must not exist afterwards
 #     requests:    [ { index: N, contains: text, absent: text } ] -- the text of the
 #                  conversation the model saw in request N (0-based)
+#     events:      [ { type => ..., fields } ] events of the application, in order; each
+#                  is matched (as a subset) by the next event of its type
+#     questions:   [ { question => ..., options => [...] } ] what ask_user put to the person
+#     todos:       [ { content, status } ] the task list at the end
 #     tools:       one entry per tool call, in order:
 #                    name:   the tool
 #                    error:  true if the call must have failed (default false)
@@ -52,7 +64,21 @@ for my $file (@files) {
     my $root = Path::Tiny->tempdir;
     $root->child($_)->touchpath->spew_utf8( $s->{files}{$_} ) for keys %{ $s->{files} // {} };
 
-    my $app    = mock_app( root => "$root", script => $s->{script} // [] );
+    for my $path ( keys %{ $s->{age} // {} } ) {
+      my $t = time - $s->{age}{$path};
+      utime $t, $t, "$root/$path";
+    }
+    my ( @events, @questions, @gate, $proc_dir );
+    if ( my $proc = $s->{proc} ) {
+      $proc_dir = fake_proc(%$proc);    # kept for the whole scenario
+      push @gate, loadguard => Langertha::Raider::Loadguard->new( proc_dir => "$proc_dir", env => $s->{env} // {} );
+    }
+    my @answers = @{ $s->{ask} // [] };
+    my $app = mock_app(
+      root => "$root", script => $s->{script} // [], @gate,
+      on_event => sub { my ( $type, %p ) = @_; push @events, { type => $type, %p } },
+      $s->{ask} ? ( on_ask_user => sub { push @questions, { question => $_[0], options => $_[1] }; shift @answers } ) : (),
+    );
     my @prompts = $s->{prompts} ? @{ $s->{prompts} } : ( $s->{prompt} // 'go' );
     my $answer;
     $answer = eval { '' . $app->run($_) } for @prompts;
@@ -77,6 +103,18 @@ for my $file (@files) {
       like( $seen, qr/\Q$r->{contains}\E/, "request $r->{index} contains '$r->{contains}'" ) if defined $r->{contains};
       unlike( $seen, qr/\Q$r->{absent}\E/, "request $r->{index} lacks '$r->{absent}'" ) if defined $r->{absent};
     }
+
+    if ( my $want = $expect->{events} ) {
+      my @pool = @events;
+      for my $w (@$want) {
+        shift @pool while @pool && $pool[0]{type} ne $w->{type};
+        my $e = shift @pool;
+        ok( $e, "event $w->{type}" ) && like( $e, $w, "event $w->{type}: fields" );
+      }
+    }
+    is( \@questions, $expect->{questions}, 'questions put to the person' ) if $expect->{questions};
+    is( [ map { +{ content => $_->{content}, status => $_->{status} } } @{ $app->todos } ], $expect->{todos}, 'the task list' )
+      if $expect->{todos};
 
     if ( my $want = $expect->{tools} ) {
       my @got = @{ $app->mock_engine->results };

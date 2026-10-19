@@ -480,6 +480,29 @@ is not described. The built-ins:
 | `bash(command, [compress], [timeout], [working_directory])` | Real shell; stdout/stderr/exit code       |
 | `web_search(query, [limit])`                                | Multi-provider, rank-fused                |
 | `web_fetch(url, [as_html])`                                 | HTML flattened to text by default         |
+| `glob(pattern, [path])`                                     | Files by pattern, newest first            |
+| `grep(pattern, [path], [glob], [type], [output_mode], …)`   | Contents by regex; ripgrep if installed   |
+| `todo_write(todos)`                                         | The model's task list for the run         |
+| `ask_user(question, [options])`                             | Asks you in the REPL; refused elsewhere   |
+
+`glob` and `grep` follow Claude Code's `Glob` and `Grep` (`output_mode`
+`files_with_matches`/`content`/`count`, `-i`, `-A`/`-B`/`-C`, `glob`, `type`, `multiline`,
+`head_limit`, `offset`); they skip `.git`, symbolic links, binary files and files over
+10 MB, and do not read `.gitignore`. `todo_write` keeps the list in the run and reports
+each change as a `todo.updated` event (journal and `--stream-json`). `ask_user` works
+where a person can answer — the REPL on a terminal. In a one-shot run, the Hall, cron
+or ACP the call is refused and the model decides itself.
+
+**Loadguard.** `bash` refuses heavy commands (`prove`, `make test`, `dzil test|build|release`,
+`cpanm`, `docker|podman build|run`, `cargo build|test`, `npm test`, `claude -p|--bg`,
+`codex exec`) while the host is out of room: memory pressure
+(`/proc/pressure/memory` `full avg10` ≥ `LOADGUARD_PSI_FULL`, default 10 %; swap used ≥
+`LOADGUARD_SWAP_USED`, default 90 %) or all heavy slots
+(`LOADGUARD_HEAVY_SLOTS`, default half the CPUs) taken by commands of running raiders.
+The refusal carries the figures and what to do instead; light commands always run, and
+without `/proc/pressure` nothing is refused. `LOADGUARD_THROTTLE=0` turns the gate off;
+`LOADGUARD_CONFINE=1` additionally starts raider inside a memory-limited systemd user
+scope (off by default). The same variables serve the loadguard plugin for Claude Code.
 
 Filesystem tools are confined to the `-r`/`--root` directory. `bash` starts there
 (120 s per command unless the call sets `timeout`; `compress` shortens the output
