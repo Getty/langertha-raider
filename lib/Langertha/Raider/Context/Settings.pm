@@ -42,7 +42,8 @@ is not a JSON object is recorded in L</files> and contributes nothing; it is
 never fatal. Every entry keeps the label of the file it came from as
 C<source>.
 
-Raider uses C<permissions>, C<hooks>, C<env> and C<enabledPlugins>. Every
+Raider uses C<permissions>, C<hooks>, C<disableAllHooks>, C<env> and
+C<enabledPlugins>. Every
 other top-level key is listed by L</ignored>. Here they are only read;
 evaluating permissions (stream P), running hooks (stream H) and applying the
 environment are the caller's business.
@@ -84,7 +85,7 @@ sub _build_claude_home {
 }
 
 # The settings keys raider uses; everything else is listed by ignored().
-my %USED = map { $_ => 1 } qw( permissions hooks env enabledPlugins );
+my %USED = map { $_ => 1 } qw( permissions hooks disableAllHooks env enabledPlugins );
 
 # The three files with their data, in read order. Each entry is
 # { file, label, scope, exists, error, data }; data is the decoded object,
@@ -317,6 +318,33 @@ sub _build_hooks {
     }
   }
   return \%out;
+}
+
+=method disable_all_hooks
+
+    return if $settings->disable_all_hooks;
+
+C<1> when the C<disableAllHooks> of the last file that sets it as a JSON
+boolean is true, else C<0>. As in Claude Code, a later file wins, so a
+project's C<false> overrides the user's C<true>.
+
+=cut
+
+has disable_all_hooks => (
+  is         => 'ro',
+  isa        => 'Bool',
+  init_arg   => undef,
+  lazy_build => 1,
+);
+
+sub _build_disable_all_hooks {
+  my ( $self ) = @_;
+  my $off = 0;
+  for my $src ($self->_sources) {
+    my $value = $src->[0]{disableAllHooks};
+    $off = $value ? 1 : 0 if is_bool($value);
+  }
+  return $off;
 }
 
 =method env

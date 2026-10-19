@@ -756,6 +756,24 @@ has _tool_gate => (
   predicate => '_has_tool_gate',
 );
 
+# The tool hook (ADR 0022, Claude Code's PreToolUse): a CodeRef the code that
+# builds the raider hands in. Every tool call -- after plugin_before_tool_call,
+# before the inputSchema check and the gate -- is put to it as its canonical
+# call { name, source, arguments }; it answers a Future of a hash:
+#   decision  => 'deny' | 'ask' | 'allow' | undef
+#   reason    => why (for deny and ask)
+#   arguments => a hash that replaces the call's arguments, or undef
+# deny: the call does not run, its error result takes the
+# plugin_after_tool_call path (one tool.call, one tool.result). New arguments
+# are checked against the inputSchema like the model's. allow and ask go to
+# the gate in the call's 'hook' ({ decision, reason }); the gate decides what
+# they are worth. Constructor-only and internal, like _tool_gate.
+has _tool_hook => (
+  is => 'ro',
+  isa => 'CodeRef',
+  predicate => '_has_tool_hook',
+);
+
 has _inline_mcp => (
   is => 'rw',
   predicate => 'has_inline_mcp',
@@ -2598,6 +2616,34 @@ async sub _dispatch_tool_call_f {
 
   my $tool_t0 = $state->{langfuse} ? $engine->langfuse_timestamp : undef;
 
+  # Virtual self-tools. A raider_-prefixed name routes here only when no tool
+  # source announced it: an MCP source may offer a raider_-prefixed name and
+  # win the first-wins dedup (karr k90), in which case it sits in
+  # tool_server_map and was sent to the model as that MCP tool. Dispatch has
+  # to follow the actual registration, not the prefix, or such a call dies as
+  # "Unknown self-tool" instead of reaching its MCP source (karr k93).
+  my $self_tool = $name =~ /^raider_/ && $self->has_raider_mcp
+    && !$state->{tool_server_map}{$name};
+  my $source = $self_tool ? 'raider' : $state->{tool_sources}{$name};
+
+  # The tool hook (ADR 0022, PreToolUse): before the inputSchema check and
+  # the gate, so arguments it replaces are checked and gated like the
+  # model's. A deny does not run the call; its error result takes the
+  # plugin_after_tool_call path like any other.
+  my $hook;
+  if ($self->_has_tool_hook) {
+    $hook = await $self->_tool_hook->($self, { name => $name, source => $source, arguments => $input });
+    $hook = {} unless ref $hook eq 'HASH';
+    if ( ( $hook->{decision} // '' ) eq 'deny' ) {
+      my $result = await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0,
+        $self->_gate_refused_tool_result($name, { verdict => 'deny', reason => $hook->{reason} }), 1);
+      push @$results, { tool_call => $tc, result => $result };
+      ${$state->{raid_tool_calls}}++;
+      return;
+    }
+    $input = $hook->{arguments} if ref $hook->{arguments} eq 'HASH';
+  }
+
   # Arguments that clearly break the tool's inputSchema do not run the tool:
   # the model gets an error result it can correct (ADR 0005 "validate", k122).
   # Checked after plugin_before_tool_call, so it is the call that would run --
@@ -2611,23 +2657,17 @@ async sub _dispatch_tool_call_f {
     return;
   }
 
-  # Virtual self-tools. A raider_-prefixed name routes here only when no tool
-  # source announced it: an MCP source may offer a raider_-prefixed name and
-  # win the first-wins dedup (karr k90), in which case it sits in
-  # tool_server_map and was sent to the model as that MCP tool. Dispatch has
-  # to follow the actual registration, not the prefix, or such a call dies as
-  # "Unknown self-tool" instead of reaching its MCP source (karr k93).
-  my $self_tool = $name =~ /^raider_/ && $self->has_raider_mcp
-    && !$state->{tool_server_map}{$name};
-
   # The gate (ADR 0005 "check policy", k121): after the inputSchema check, on
   # the call exactly as it would run. A call it does not allow does not run;
   # its error result takes the plugin_after_tool_call path like any other, so
-  # the call keeps one tool.call and one tool.result.
+  # the call keeps one tool.call and one tool.result. A tool hook's allow or
+  # ask goes along in 'hook' (ADR 0022).
   my $verdict = $self->_gate_tool_call({
     name      => $name,
-    source    => $self_tool ? 'raider' : $state->{tool_sources}{$name},
+    source    => $source,
     arguments => $input,
+    ( $hook && defined $hook->{decision} && $hook->{decision} =~ /\A(?:allow|ask)\z/
+      ? ( hook => { decision => $hook->{decision}, reason => $hook->{reason} } ) : () ),
   });
   unless ( $verdict->{verdict} eq 'allow' ) {
     my $result = await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0,

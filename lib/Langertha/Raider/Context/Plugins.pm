@@ -214,6 +214,100 @@ sub skill_dirs {
   return @dirs;
 }
 
+=method data_dir
+
+    my $dir = $plugins->data_dir($plugin);   # .../plugins/data/briefing-getty
+
+The plugin's persistent data directory, C<${CLAUDE_PLUGIN_DATA}> of its
+hooks: F<plugins/data/E<lt>idE<gt>> in L</claude_home>, where the id is the
+plugin's key (C<name@market>) with every character other than a letter,
+digit, C<_> or C<-> replaced by C<-> -- Claude Code's rule. A string; the
+directory is not created here. C<undef> without a L</claude_home>.
+
+=cut
+
+sub data_dir {
+  my ( $self, $plugin ) = @_;
+  my $home = $self->claude_home;
+  return unless defined $home;
+  ( my $id = $plugin->{key} ) =~ s/[^A-Za-z0-9_-]/-/g;
+  return path($home)->child('plugins', 'data', $id)->stringify;
+}
+
+=method hooks
+
+    my ( $groups, $errors ) = $plugins->hooks($plugin);
+    for my $g (@{ $groups->{PreToolUse} // [] }) { ... $g->{matcher}, $g->{hooks}, $g->{source} ... }
+
+The hooks one entry of L</plugins> declares, in the shape of
+L<Langertha::Raider::Context::Settings/hooks>, with C<source> set to
+C<plugin:E<lt>nameE<gt>>. Claude Code merges two places, in this order:
+
+=over
+
+=item * F<hooks/hooks.json> in the plugin root, the event map under a
+top-level C<hooks> key
+
+=item * the manifest's C<hooks>: a path to such a file (relative to the
+root), an inline event map, or a list of both
+
+=back
+
+A missing default file is no error. A file that is not valid JSON, has no
+C<hooks> object, or a path that leaves the plugin root contributes nothing
+(a file named twice counts once)
+and is reported in C<$errors> (strings naming the plugin and the file);
+never fatal.
+
+=cut
+
+sub hooks {
+  my ( $self, $plugin ) = @_;
+  my $root = $self->_normpath($plugin->{root});
+  my $label = 'plugin:'.$plugin->{name};
+  my ( %groups, @errors, %seen );
+
+  my $add = sub {
+    my ( $map ) = @_;
+    for my $event (sort keys %$map) {
+      my $list = $map->{$event};
+      next unless ref $list eq 'ARRAY';
+      for my $g (grep { ref $_ eq 'HASH' } @$list) {
+        push @{ $groups{$event} }, {
+          matcher => defined $g->{matcher} && !ref $g->{matcher} ? $g->{matcher} : undef,
+          hooks   => ref $g->{hooks} eq 'ARRAY' ? $g->{hooks} : [],
+          source  => $label,
+        };
+      }
+    }
+  };
+  my $file = sub {
+    my ( $rel, $optional ) = @_;
+    my $abs = $self->_normpath( $rel =~ m{\A/} ? $rel : $root.'/'.$rel );
+    unless ($self->_within($abs, $root)) {
+      push @errors, $label.': '.$rel.' is outside the plugin';
+      return;
+    }
+    return if $optional && !-e $abs;
+    return if $seen{$abs}++;
+    my $data = eval { JSON::MaybeXS->new( utf8 => 1 )->decode(path($abs)->slurp_raw) };
+    if (ref $data eq 'HASH' && ref $data->{hooks} eq 'HASH') {
+      $add->($data->{hooks});
+    }
+    else {
+      push @errors, $label.': '.$rel.' has no "hooks" object'.( $@ ? ' (invalid JSON)' : '' );
+    }
+  };
+
+  $file->('hooks/hooks.json', 1);
+  my $declared = $plugin->{manifest}{hooks};
+  for my $item (ref $declared eq 'ARRAY' ? @$declared : defined $declared ? ($declared) : ()) {
+    if (ref $item eq 'HASH')  { $add->($item) }
+    elsif (!ref $item)        { $file->($item, 0) }
+  }
+  return ( \%groups, \@errors );
+}
+
 # A JSON object from a file, {} when it is missing, broken or not an object.
 sub _load_json {
   my ( $self, $file ) = @_;

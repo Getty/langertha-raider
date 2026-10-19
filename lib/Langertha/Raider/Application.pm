@@ -4,7 +4,9 @@ our $VERSION = '0.504';
 use Moose;
 use namespace::autoclean;
 use IO::Async::Loop;
+use Future;
 use Future::AsyncAwait;
+use JSON::MaybeXS ();
 use Net::Async::MCP;
 use MCP::Run::Bash;
 use Carp qw( croak );
@@ -32,6 +34,8 @@ use Langertha::Raider::EngineResolver;
 use Langertha::Raider::Provider::Binding;
 use Langertha::Raider::ToolEffects;
 use Langertha::Raider::Permissions;
+use Langertha::Raider::Hooks;
+use Langertha::Raider::ToolNames;
 use Langertha::Raider::SessionStore;
 use Langertha::Raider;
 
@@ -731,7 +735,7 @@ sub tool_gate {
 # allow it. Emits permission.denied for every call that does not run.
 sub _permission_gate {
   my ($self, $call) = @_;
-  my $verdict = $self->permissions->decide($call);
+  my $verdict = $self->_with_hook_decision($call, $self->permissions->decide($call));
   return $verdict if $verdict->{verdict} eq 'allow';
   if ($verdict->{verdict} eq 'deny') {
     $self->_permission_event('permission.denied', $call, $verdict, by => $verdict->{by});
@@ -740,8 +744,10 @@ sub _permission_gate {
   if (my $ask = $self->on_permission_request) {
     return $self->_ask_permission($ask, $call, $verdict);
   }
-  my $reason = $verdict->{reason}.'; nobody can approve it in this run. '.$self->_how_to_allow($call)
-    .' Do not retry the same call; go on without it or say what you need.';
+  # A hook that asks is not lifted by a rule; there is nothing to configure.
+  my $reason = $verdict->{reason}.'; nobody can approve it in this run. '
+    .( ( $verdict->{by} // '' ) eq 'hook' ? '' : $self->_how_to_allow($call).' ' )
+    .'Do not retry the same call; go on without it or say what you need.';
   $self->_permission_event('permission.denied', $call, $verdict, by => 'noninteractive', reason => $reason);
   return { %$verdict, verdict => 'deny', by => 'noninteractive', reason => $reason };
 }
@@ -828,6 +834,296 @@ sub _permission_event {
     reason => $verdict->{reason},
     %more,
   );
+  return;
+}
+
+# A PreToolUse hook's allow or ask (the call's 'hook', ADR 0022) weighed
+# against the policy's verdict as Claude Code weighs them: hook decisions
+# never bypass permission rules. A deny -- by a rule, by plan mode -- stays.
+# allow lifts only an ask of the mode (the prompt), never an ask rule. ask
+# turns an allow (by a rule or the mode) into an ask.
+sub _with_hook_decision {
+  my ($self, $call, $verdict) = @_;
+  my $hook = $call->{hook};
+  return $verdict unless ref $hook eq 'HASH' && defined $hook->{decision};
+  return $verdict if $verdict->{verdict} eq 'deny';
+  my $why = $hook->{reason};
+  if ($hook->{decision} eq 'allow') {
+    return $verdict unless $verdict->{verdict} eq 'ask' && ( $verdict->{by} // '' ) eq 'mode';
+    return { %$verdict, verdict => 'allow', by => 'hook', reason => $why // 'allowed by a PreToolUse hook' };
+  }
+  if ($hook->{decision} eq 'ask' && $verdict->{verdict} eq 'allow') {
+    return { %$verdict, verdict => 'ask', by => 'hook', reason => $why // 'a PreToolUse hook asks before this call' };
+  }
+  return $verdict;
+}
+
+=attr hooks
+
+The L<Langertha::Raider::Hooks> runner of the Claude layout (ADR 0022):
+the hooks of the Claude settings and of the enabled plugins, on L</loop>,
+with L<Langertha::Raider::Permissions/rule_matches> for their C<if> rules.
+C<undef> outside the Claude layout -- a native or bare run runs no hooks.
+C</reload> builds it again.
+
+=method tool_hook
+
+    my $raider = Langertha::Raider->new( ..., _tool_hook => $app->tool_hook );
+
+The tool hook the main raider gets in the Claude layout (the C<_tool_hook>
+of L<Langertha::Raider>): the C<PreToolUse> hooks, before the inputSchema
+check and L</tool_gate>. A deny (or exit 2) refuses the call with the
+hook's reason; C<updatedInput> replaces the arguments (translated back to
+raider's names); an allow or ask goes on to the gate, which weighs it
+against the rules and the mode (deny and ask rules always hold; allow only
+spares the mode's question; ask asks even where a rule allows). The
+C<additionalContext> is appended to the tool's result.
+
+=cut
+
+has hooks => (
+  is         => 'ro',
+  isa        => 'Maybe[Langertha::Raider::Hooks]',
+  init_arg   => undef,
+  lazy_build => 1,
+);
+
+sub hooks_class { 'Langertha::Raider::Hooks' }
+
+sub _build_hooks {
+  my ($self) = @_;
+  return unless $self->context->claude_layout;
+  weaken(my $app = $self);
+  return $self->hooks_class->from_context($self->context,
+    loop       => $self->loop,
+    if_matcher => sub { $app ? $app->permissions->rule_matches(@_) : undef },
+  );
+}
+
+sub tool_hook {
+  my ($self) = @_;
+  weaken(my $app = $self);
+  return sub { $app ? $app->_pre_tool_use_f($_[1]) : Future->done({}) };
+}
+
+# The common fields of every hook input: the session (its journal is the
+# transcript -- raider's JSONL, not Claude Code's format) and the mode.
+sub _hook_input {
+  my ($self, %more) = @_;
+  my $run = $self->_run;
+  my $session = $run ? $run->{session} : undef;
+  return {
+    session_id      => $session ? $session->id : $self->_local_session_id,
+    ( $session ? ( transcript_path => ''.$session->path ) : () ),
+    permission_mode => $self->permissions->mode,
+    %more,
+  };
+}
+
+# Waits on the loop for a hook future, as run() waits for a raid.
+sub _await_hooks {
+  my ($self, $f) = @_;
+  $self->loop->await($f);
+  return $f->get;
+}
+
+# PreToolUse for the canonical call of the raider (see tool_hook).
+sub _pre_tool_use_f {
+  my ($self, $call) = @_;
+  my $hooks = $self->hooks;
+  return Future->done({}) unless $hooks && $hooks->has_hooks('PreToolUse');
+  weaken(my $app = $self);
+  return $hooks->run_f( PreToolUse => $self->_hook_input(
+    tool_name  => $call->{name},
+    tool_input => $call->{arguments},
+  ), tool_source => $call->{source} )->then(sub {
+    my ( $r ) = @_;
+    return Future->done({}) unless $app;
+    $app->_report_hooks($r);
+    $app->cancel_run if $r->stopped;
+    my $arguments = $r->updated_input;
+    if (defined( my $context = $r->context )) {
+      my $key = refaddr( $arguments // $call->{arguments} );
+      $app->_tool_hook_context->{$key} = $app->_hook_tag($r->event, $call->{name}).' hook additional context: '.$context;
+    }
+    my $decision = $r->decision;
+    return Future->done({
+      decision  => $decision,
+      reason    => defined $decision ? 'PreToolUse hook: '.( $r->reason // $decision ) : undef,
+      arguments => $arguments,
+    });
+  });
+}
+
+# PreToolUse context waiting for its call's result, by the arguments hash
+# the raider runs the call with (taken by the ClaudeHooks plugin).
+has _tool_hook_context => (is => 'ro', isa => 'HashRef', init_arg => undef, default => sub { {} });
+
+sub _take_tool_hook_context {
+  my ($self, $arguments) = @_;
+  return unless ref $arguments;
+  return delete $self->_tool_hook_context->{ refaddr($arguments) };
+}
+
+# 'PostToolUse:Bash' -- the event with the tool's Claude name, as Claude Code
+# labels hook output.
+sub _hook_tag {
+  my ($self, $event, $tool) = @_;
+  return $event unless defined $tool;
+  return $event.':'.( Langertha::Raider::ToolNames->claude_name($tool) // $tool );
+}
+
+# Every hook of a result as hook.ran, its errors, systemMessages and a stop
+# as hook.message (ADR 0022). stdout and stderr go into the journal cut at
+# 2000 characters.
+sub _report_hooks {
+  my ($self, $r) = @_;
+  my $cut = sub { my ( $s ) = @_; length $s > 2000 ? substr($s, 0, 2000).'... (cut)' : $s };
+  for my $run (@{ $r->runs }) {
+    $self->event('hook.ran',
+      hook_event => $run->{event},
+      source     => $run->{source},
+      command    => $run->{command},
+      outcome    => $run->{outcome},
+      ( map { defined $run->{$_} ? ( $_ => $run->{$_} ) : () } qw( plugin matcher args exit duration_ms message ) ),
+      ( map { defined $run->{$_} && length $run->{$_} ? ( $_ => $cut->($run->{$_}) ) : () } qw( stdout stderr ) ),
+    );
+  }
+  $self->event('hook.message', hook_event => $r->event, kind => 'error', text => $_) for @{ $r->errors };
+  $self->event('hook.message', hook_event => $r->event, kind => 'system', text => $_) for @{ $r->system_messages };
+  $self->event('hook.message', hook_event => $r->event, kind => 'stopped',
+    text => $r->stop_reason // 'a '.$r->event.' hook stopped the run') if $r->stopped;
+  return;
+}
+
+# The SessionStart bookkeeping: the session the hooks last started for, and
+# how the next one starts (startup, resume, clear).
+has _hook_session        => (is => 'rw', isa => 'Maybe[Str]', init_arg => undef);
+has _hook_session_source => (is => 'rw', isa => 'Maybe[Str]', init_arg => undef);
+has _hook_config_reported => (is => 'rw', isa => 'Bool', default => 0, init_arg => undef);
+
+=method note_history_cleared
+
+    $app->note_history_cleared;   # /clear
+
+The conversation starts over: the next run fires C<SessionStart> again
+with source C<clear>.
+
+=cut
+
+sub note_history_cleared {
+  my ($self) = @_;
+  $self->_hook_session(undef);
+  $self->_hook_session_source('clear');
+  return;
+}
+
+# Before a prompt goes to the model, in the Claude layout (ADR 0022):
+# SessionStart once per session (startup, resume, clear), the results of
+# async hooks of earlier turns, then UserPromptSubmit. Returns { prompt }
+# -- the text with the hooks' context in front, as system-reminders -- or
+# { error } when a hook blocked or stopped the prompt.
+sub _hooks_before_prompt {
+  my ($self, $hooks, $text) = @_;
+  my @context;
+  unless ($self->_hook_config_reported) {
+    $self->_hook_config_reported(1);
+    $self->event('hook.message', hook_event => 'config', kind => 'error', text => $_) for @{ $hooks->config_errors };
+  }
+
+  my $sid = $self->_hook_input->{session_id};
+  unless (defined $self->_hook_session && $self->_hook_session eq $sid) {
+    my $source = $self->_hook_session_source // 'startup';
+    $self->_hook_session($sid);
+    $self->_hook_session_source(undef);
+    if ($hooks->has_hooks('SessionStart')) {
+      my $r = $self->_await_hooks($hooks->run_f( SessionStart => $self->_hook_input(
+        source => $source, ( $self->has_model ? ( model => $self->model ) : () ),
+      ) ));
+      $self->_report_hooks($r);
+      return { error => 'A SessionStart hook stopped the session'.( defined $r->stop_reason ? ': '.$r->stop_reason : '' ) }
+        if $r->stopped;
+      push @context, [ 'SessionStart', $r->context ] if defined $r->context;
+    }
+  }
+
+  for my $r ($hooks->take_async_results) {
+    $self->_report_hooks($r);
+    push @context, map { [ $r->event, $_ ] } grep { defined } $r->context, @{ $r->system_messages };
+  }
+
+  if ($hooks->has_hooks('UserPromptSubmit')) {
+    my $r = $self->_await_hooks($hooks->run_f( UserPromptSubmit => $self->_hook_input( prompt => $text ) ));
+    $self->_report_hooks($r);
+    return { error => 'The prompt was blocked by a UserPromptSubmit hook'.( defined $r->reason ? ': '.$r->reason : '' ) }
+      if $r->blocked;
+    return { error => 'A UserPromptSubmit hook stopped the run'.( defined $r->stop_reason ? ': '.$r->stop_reason : '' ) }
+      if $r->stopped;
+    push @context, [ 'UserPromptSubmit', $r->context ] if defined $r->context;
+  }
+
+  return { prompt => join "\n\n",
+    ( map { "<system-reminder>\n".$_->[0].' hook additional context: '.$_->[1]."\n</system-reminder>" } @context ), $text };
+}
+
+=method stop_hook_limit
+
+How many times in a row C<Stop> hooks may keep one run going: 8, Claude
+Code's cap. The next block is overridden and the run ends.
+
+=cut
+
+sub stop_hook_limit { 8 }
+
+# After the model answered, in the Claude layout (ADR 0022): the Stop
+# hooks. A block (decision block, exit 2) or additionalContext sends their
+# feedback back as the next user message, with stop_hook_active true, at
+# most stop_hook_limit times; the turns in between go into the journal as
+# messages. Returns the last result.
+sub _hooks_after_answer {
+  my ($self, $result) = @_;
+  my $hooks = $self->hooks or return $result;
+  my $active = 0;
+  for (my $round = 0; ; $round++) {
+    return $result unless blessed $result && $result->can('is_final') && $result->is_final;
+    return $result if $self->_run && $self->_run->{cancelled};
+    return $result unless $hooks->has_hooks('Stop');
+    my $r = $self->_await_hooks($hooks->run_f( Stop => $self->_hook_input(
+      stop_hook_active       => $active ? JSON::MaybeXS->true : JSON::MaybeXS->false,
+      last_assistant_message => "$result",
+    ) ));
+    $self->_report_hooks($r);
+    return $result if $r->stopped;
+    my @feedback = ( $r->blocked ? ( @{ $r->reasons } ? @{ $r->reasons } : '(no reason given)' ) : () ),
+      ( defined $r->context ? $r->context : () );
+    return $result unless @feedback;
+    if ($round >= $self->stop_hook_limit) {
+      $self->event('hook.message', hook_event => 'Stop', kind => 'error',
+        text => 'Stop hooks kept the run going '.$self->stop_hook_limit.' times in a row; it ends here');
+      return $result;
+    }
+    my $feedback = "Stop hook feedback:\n".join("\n", @feedback);
+    $self->event('message', role => 'assistant', content => "$result");
+    $self->event('message', role => 'user', content => $feedback, hook => 'Stop');
+    $active = 1;
+    $result = $self->run($feedback);
+  }
+}
+
+=method shutdown_hooks
+
+    $app->shutdown_hooks;
+
+Stops the async hooks still running and waits until they are gone
+(L<Langertha::Raider::Hooks/shutdown>), as Claude Code does when a
+C<-p> run ends. The command line calls it when it is done.
+
+=cut
+
+sub shutdown_hooks {
+  my ($self) = @_;
+  return unless $self->has_hooks && $self->hooks;
+  $self->_await_hooks($self->hooks->shutdown);
   return;
 }
 
@@ -1568,9 +1864,11 @@ sub _raider_plugins {
   # it gets the prompt as typed, without the [situation] line and its clock.
   my $virtual = $self->engine_resolver->engine_class eq 'Langertha::Engine::Virtual';
   # Events last, so it reports the tool calls that actually run -- and the
-  # results as the model gets them, nested CLAUDE.md files included.
+  # results as the model gets them, nested CLAUDE.md files and the hooks'
+  # context (ClaudeHooks, PostToolUse) included.
   return ( ( $virtual ? () : '+Langertha::Raider::Plugin::Situation' ),
     '+Langertha::Raider::Plugin::NestedMemory', { context => $self->context },
+    ( $self->context->claude_layout ? ( '+Langertha::Raider::Plugin::ClaudeHooks', { app => $self } ) : () ),
     '+Langertha::Raider::Plugin::Events', { on_event => sub { $app->event(@_) if $app } } );
 }
 
@@ -1579,6 +1877,7 @@ sub _build_raider {
   my @plugins = $self->_raider_plugins;
   return Langertha::Raider->new(
     _tool_gate                 => $self->tool_gate,
+    ( $self->context->claude_layout ? ( _tool_hook => $self->tool_hook ) : () ),
     engine                     => $self->_engine,
     mission                    => $self->mission,
     max_iterations             => $self->max_iterations,
@@ -1643,6 +1942,16 @@ Every event of the run goes to C<on_event> (and L</on_event>) through
 L</event>: the journal types and C<run.state> (C<running>, then the end
 state), as ADR 0013 names them.
 
+In the Claude layout the run fires the Claude Code hooks (L</hooks>, ADR
+0022): C<SessionStart> before the first prompt of a session, the results
+of async hooks and C<UserPromptSubmit> before every prompt -- their
+context goes in front of the prompt as C<< <system-reminder> >> blocks; a
+block ends the run C<failed> with the reason, and the model never sees the
+prompt -- and C<Stop> after the answer: a block sends its reason back as
+the next user message, at most L</stop_hook_limit> times. Every hook is a
+C<hook.ran> event, a C<systemMessage>, a hook error or a stop a
+C<hook.message>.
+
 Returns the outcome as a hash reference: C<status> (C<completed>,
 C<failed>, or C<cancelled> after L</cancel_run>), C<elapsed> (seconds, to
 the millisecond), C<result> (the L<Langertha::Raider::Result>, also of a
@@ -1655,7 +1964,7 @@ one. An empty C<$text> runs nothing and returns nothing.
 # The ADR 0015 event types the journal records from the events of a run;
 # run.finished is written by end_run.
 my %JOURNAL_TYPE = map { $_ => 1 } qw( run.started message tool.call tool.result todo.updated
-  permission.asked permission.granted permission.denied permission.mode );
+  permission.asked permission.granted permission.denied permission.mode hook.ran hook.message );
 
 # The run in progress: { session, run, on_event, t0 }.
 has _run => (
@@ -1671,8 +1980,22 @@ sub run_prompt {
   $self->begin_run(%o);
   $self->event('message', role => 'user', content => $text);
 
+  # The Claude layout's hooks (ADR 0022): SessionStart, UserPromptSubmit
+  # before the model sees the prompt, Stop after it answered.
+  my $prompt = $text;
+  if (my $hooks = $self->hooks) {
+    my $before = eval { $self->_hooks_before_prompt($hooks, $text) };
+    unless ($before) {
+      my $error = $@;
+      chomp $error;
+      return $self->end_run(failed => error => $error);
+    }
+    return $self->end_run(failed => error => $before->{error}) if defined $before->{error};
+    $prompt = $before->{prompt};
+  }
+
   my $result;
-  unless (eval { $result = $self->run($text); 1 }) {
+  unless (eval { $result = $self->run($prompt); $result = $self->_hooks_after_answer($result); 1 }) {
     my $error = $@;
     chomp $error;
     return $self->end_run(failed => error => $error);
@@ -1907,6 +2230,9 @@ sub replay_session {
   my $raider  = $self->raider;
   $raider->add_history($_->{role}, $_->{content}) for @{ $journal->history_messages };
   $raider->add_session_history(@{ $journal->session_history_messages });
+  # The hooks see the next run as a resumed session (SessionStart resume).
+  $self->_hook_session(undef);
+  $self->_hook_session_source('resume');
   return $journal;
 }
 
@@ -1971,6 +2297,12 @@ sub reload_context {
   $self->context->reload;
   $self->reload_permissions;
   $self->_clear_skill_tool_server;
+  # The hooks come from the settings and plugins just read again.
+  if ($self->has_hooks && $self->hooks) {
+    $self->hooks->shutdown;
+    $self->clear_hooks;
+    $self->_hook_config_reported(0);
+  }
   return $self->context;
 }
 

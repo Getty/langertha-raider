@@ -192,6 +192,19 @@ subtest 'CLAUDE_CONFIG_DIR outside the home: absolute label' => sub {
   is($s->env, { FROM_CFG => { value => '1', source => $cfg->child('settings.json')->stringify } }, 'read from there');
 };
 
+subtest 'disableAllHooks: the last file that sets a boolean wins' => sub {
+  my $q = project();
+  is(settings($q)->disable_all_hooks, 0, 'unset: hooks on');
+  spew_json($home->child('.claude/settings.json'), { disableAllHooks => $T });
+  is(settings($q)->disable_all_hooks, 1, 'user turns them off');
+  spew_json($q->child('.claude/settings.json'), { disableAllHooks => $F });
+  is(settings($q)->disable_all_hooks, 0, 'project false overrides user true');
+  spew_json($q->child('.claude/settings.local.json'), { disableAllHooks => 'yes' });
+  is(settings($q)->disable_all_hooks, 0, 'a string is no boolean');
+  is([ grep { $_->{key} eq 'disableAllHooks' } @{ settings($q)->ignored } ], [], 'not listed as ignored');
+  $home->child('.claude/settings.json')->remove;
+};
+
 subtest 'claude_home undef: no user file' => sub {
   my $s = settings(project(), claude_home => undef);
   is([ map { $_->{scope} } @{ $s->files } ], [qw( project local )], 'only project and local');

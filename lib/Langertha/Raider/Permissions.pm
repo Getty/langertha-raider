@@ -539,7 +539,26 @@ the mode C<source> is L</mode_source>. A command of several parts that
 several allow rules cover together names all of them. The shape is the one
 the tool gate of L<Langertha::Raider> takes.
 
+=method rule_matches
+
+    my $yes = $policy->rule_matches( 'Bash(git *)', $call );
+
+Whether one rule in Claude Code syntax applies to the canonical call --
+the C<if> field of a Claude Code hook (ADR 0022). It matches the way a
+deny or ask rule does (any part of a bash command, the written or the real
+path), and is not added to the policy. C<undef> for a rule that cannot be
+parsed: the caller decides what that means (a hook then runs, as in Claude
+Code when it cannot tell).
+
 =cut
+
+sub rule_matches {
+  my ( $self, $text, $call ) = @_;
+  my $rule = Langertha::Raider::Permissions::Rule->new( text => $text, source => 'hook if', kind => 'ask' );
+  return undef unless $rule->is_valid;
+  my ( $builtin, $server ) = $self->_call_origin($call);
+  return $rule->matches( $call, { %{ $self->_ctx_base }, builtin => $builtin, server => $server } ) ? 1 : 0;
+}
 
 sub _by_rule {
   my ( $self, $verdict, $rule, $reason ) = @_;

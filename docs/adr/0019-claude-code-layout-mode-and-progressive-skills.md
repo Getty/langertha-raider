@@ -115,7 +115,7 @@ the system prompt. Packs (ADR 0012) stay as they are.
 - The workspace trust decision of ADR 0004 still does not exist. Until it does, the
   Claude layout loads its instruction files without asking, exactly like the native
   instructions file already does; executable parts (hooks) are only read, never run, until
-  stream H.
+  stream H. (Addendum 2: stream H runs them, see below and ADR 0022.)
 - Running raider inside a Claude Code project (this repo included) now loads `CLAUDE.md`,
   the user's `~/.claude/CLAUDE.md`, settings env and plugin skills without a flag. Tests must
   isolate `$HOME` / `$CLAUDE_CONFIG_DIR`.
@@ -206,3 +206,11 @@ settings were no longer read. `.raider/` now decides the mode only when it
 holds project files: `config.yml`, `instructions.md`, or one of the
 directories `skills/`, `agents/`, `raiders/`, `packs/`. The reason names the
 file (`.raider/config.yml in root`). Found by stream A (karr #153).
+
+## Addendum 3 — hooks run (karr #155, 2026-10-19)
+
+Stream H runs the `hooks` of §3, and those of the enabled plugins, in the Claude layout and
+only there; ADR 0022 records how. In the same step `disableAllHooks` became a key raider
+uses (the last settings file that sets it wins), so `config explain` no longer lists it as
+unused. The workspace trust of ADR 0004 still does not exist: hooks run without asking,
+like the instruction files, until it does (ADR 0022, "Workspace trust").

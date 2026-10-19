@@ -366,6 +366,7 @@ sub run {
   }
 
   $call->('save');
+  $self->app->shutdown_hooks;
   return;
 }
 

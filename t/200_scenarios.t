@@ -34,6 +34,11 @@ use Langertha::Raider::Loadguard;
 #            %ENV is restored after each scenario. In the content of both,
 #            and in the strings of `script:`, {{HOME}} and {{ROOT}} stand for
 #            the two directories.
+#   executable: [ path, ... ]           files of `files:` (or of `home:`, as ~/path)
+#            made executable -- hook scripts
+#   run_prompt: true                    run each prompt as Application->run_prompt
+#            (the whole run: hooks before the prompt and after the answer,
+#            ADR 0022) instead of Application->run; the answer is its response
 #   app:     { argument => value }      more arguments for the application
 #            (e.g. bare: 1, claude: 1)
 #   permission_mode: the mode as --permission-mode would give it (ADR 0021).
@@ -55,6 +60,7 @@ use Langertha::Raider::Loadguard;
 #              - text: the final answer
 #   expect:
 #     answer:      the final answer, exactly
+#     outcome:     { status, error } of the last run_prompt (error: a regex)
 #     files:       { path => content }  must exist afterwards with this content
 #     absent:      [ path, ... ]        must not exist afterwards
 #     requests:    [ { index: N, contains: text, absent: text } ] -- the text of the
@@ -92,6 +98,7 @@ for my $file (@files) {
     my $fill = sub { ( my $t = $_[0] ) =~ s/\{\{HOME\}\}/$home/g; $t =~ s/\{\{ROOT\}\}/$root/g; $t };
     $root->child($_)->touchpath->spew_utf8( $fill->( $s->{files}{$_} ) ) for keys %{ $s->{files} // {} };
     $home->child($_)->touchpath->spew_utf8( $fill->( $s->{home}{$_} ) ) for keys %{ $s->{home} // {} };
+    ( m{\A~/(.+)\z}s ? $home->child($1) : $root->child($_) )->chmod(0755) for @{ $s->{executable} // [] };
 
     for my $path ( keys %{ $s->{age} // {} } ) {
       my $t = time - $s->{age}{$path};
@@ -133,12 +140,22 @@ for my $file (@files) {
       } ) : (),
     );
     my @prompts = $s->{prompts} ? @{ $s->{prompts} } : ( $s->{prompt} // 'go' );
-    my $answer;
-    $answer = eval { '' . $app->run($_) } for @prompts;
+    my ( $answer, $outcome );
+    for my $p (@prompts) {
+      $answer = eval {
+        return '' . $app->run($p) unless $s->{run_prompt};
+        $outcome = $app->run_prompt($p);
+        return $outcome->{response};
+      };
+    }
     is( $@, '', 'the raid finishes' );
     my $expect = $s->{expect} // {};
 
     is( $answer, $expect->{answer}, 'final answer' ) if exists $expect->{answer};
+    if ( my $want = $expect->{outcome} ) {
+      is( $outcome->{status}, $want->{status}, 'run status' ) if exists $want->{status};
+      like( $outcome->{error} // '', qr/$want->{error}/s, 'run error' ) if defined $want->{error};
+    }
 
     for my $p ( sort keys %{ $expect->{files} // {} } ) {
       ok( $root->child($p)->is_file, "$p exists" )

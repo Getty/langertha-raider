@@ -103,5 +103,8 @@ conversion) all need to say which raider tool a Claude Code tool name means.
 - The streams A (agents), P (permissions) and H (hooks) use `ToolNames`. Claude Code's
   *argument* names (`file_path`, `old_string`, ...) differ from raider's (`path`, ...); mapping
   them, where a permission rule such as `Read(~/.ssh/**)` needs the path, is left to stream P.
+  (Note, 2026-10-19: the mapping went into `ToolNames` itself -- `claude_input` /
+  `raider_input`, both directions -- with stream H, which needs it for hook input and
+  `updatedInput`; see ADR 0022. Stream P's rules read raider's own argument names.)
 - `raider_ask_user` and `ask_user` are two ways to ask. If a surface that resumes
   `question` results appears, either can go.

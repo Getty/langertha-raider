@@ -787,8 +787,9 @@ sub run {
   elsif ($store) {
     $session = $self->new_session($app, $machine);
   }
-  return $runner->run_prompt($text, machine => $machine, session => $session, catch_signals => 1)
-    ? EXIT_OK : EXIT_RUN_ERROR;
+  my $ok = $runner->run_prompt($text, machine => $machine, session => $session, catch_signals => 1);
+  $app->shutdown_hooks;   # async hooks end with the run, as with claude -p
+  return $ok ? EXIT_OK : EXIT_RUN_ERROR;
 }
 
 =method resume_session

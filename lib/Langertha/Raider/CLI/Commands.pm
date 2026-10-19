@@ -114,6 +114,7 @@ sub cmd_clear {
   my ($self) = @_;
   my $app = $self->app;
   $app->raider->clear_history;
+  $app->note_history_cleared;
   my $t = $app->trace_plugin;
   $t->token_stats({ prompt => 0, completion => 0, total => 0, calls => 0 }) if $t;
   $self->output->say_meta('history cleared.');

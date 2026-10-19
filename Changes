@@ -36,6 +36,14 @@ Revision history for Langertha-Raider
       `permission_mode:` (default bypassPermissions: the tool scenarios test
       tools, not approvals), `approve:`, `review:` and the expectations
       `permissions:` and `plans:`. Unit tests t/150 to t/154.
+    - Hook scenarios (t/scenarios/90 to 99): PreToolUse deny by exit 2 and
+      by JSON, updatedInput in Claude Code's form, a hook ask nobody can
+      answer, a hook allow against a deny rule, a plugin's PostToolUse with
+      ${CLAUDE_PLUGIN_ROOT}, UserPromptSubmit block and context, SessionStart,
+      Stop keeping the run going, no hooks in a raider project. The format
+      gained `executable:` and `run_prompt:` (with `expect: outcome:`). Unit
+      tests t/140 to t/143; t/141 runs the real briefing, loadguard and
+      skilletor hooks when their checkouts are there.
     - Scenarios for glob, grep, todo_write, ask_user and the loadguard gate
       (t/scenarios/12 to 22); the format gained `age:`, `proc:` (a fake /proc,
       Test::Raider::FakeProc -- the tests never create load), `env:`, `ask:`
@@ -147,8 +155,8 @@ Revision history for Langertha-Raider
       .claude/settings.json, .claude/settings.local.json): their env is set
       for the tools and their subprocesses, enabledPlugins picks the
       installed Claude Code plugins whose skills are offered; their
-      permissions apply (see [Permissions]); hooks are only read and shown,
-      not run yet. A broken settings file
+      permissions apply (see [Permissions]) and their hooks run (see
+      below). A broken settings file
       is reported, never fatal; config explain lists the files, rule counts,
       env names (never values), hook events and unused keys.
     - Changed: --claude is now the switch for the Claude layout (also in a
@@ -194,6 +202,42 @@ Revision history for Langertha-Raider
       only once a matching file is touched. Both are announced in a
       second system-reminder block of that tool result. In the Claude layout
       the skill tool is always mounted.
+    - In the Claude layout raider runs Claude Code's hooks (ADR 0022):
+      PreToolUse before the schema check and the permission gate (exit 2 or
+      deny refuses the call with the hook's reason, updatedInput replaces the
+      arguments, an allow spares only the mode's question -- deny and ask
+      rules always hold, plan mode is unchanged -- and an ask asks even
+      where a rule allows), PostToolUse (context and feedback appended to the
+      tool result), UserPromptSubmit (a block keeps the prompt from the model
+      and the run fails with the reason; context goes with the prompt),
+      SessionStart (startup, resume after --continue/--resume, clear after
+      /clear) and Stop (a block sends its reason back and the run goes on,
+      at most 8 times). systemMessages and hook errors are shown; every hook
+      run is a hook.ran event in the session journal and the stream,
+      messages a hook.message. A native or raider project and --bare run no
+      hooks. transcript_path is the session journal (raider's JSONL).
+    - New Langertha::Raider::Hooks (internal): runs
+      the Claude Code hooks of the settings files and of the enabled plugins
+      (hooks/hooks.json and the manifest's hooks, with ${CLAUDE_PLUGIN_ROOT},
+      ${CLAUDE_PLUGIN_DATA} and ${CLAUDE_PROJECT_DIR}) as Claude Code does:
+      matchers on the Claude tool name, the session source or the agent
+      type; exec form with args, else sh -c; each hook in its own session,
+      all of an event in parallel on the run's loop; the same stdin JSON;
+      timeouts (600 s, 30 s on UserPromptSubmit), async hooks, onFailure;
+      stdout JSON, plain-text context, exit code 2. The answers of all hooks
+      of an event are merged into one Langertha::Raider::Hooks::Result
+      (deny > ask > allow, updatedInput back in raider form, context,
+      systemMessage, continue: false) with a report per hook. When raider
+      loads briefing.skills itself, the briefing plugin's briefing-preload
+      hook is skipped for Agent calls so skills are not loaded twice.
+      disableAllHooks in the settings turns them all off.
+    - Langertha::Raider gained an internal, constructor-only _tool_hook
+      beside _tool_gate (asked before the schema check; deny, replaced
+      arguments, an allow/ask for the gate); Langertha::Raider::Permissions
+      gained rule_matches (a hook's "if" rule).
+    - Langertha::Raider::ToolNames translates tool arguments too, both ways:
+      path <-> file_path for read_file, write_file and edit_file, the bash
+      timeout in seconds <-> milliseconds; every other key passes unchanged.
 
   [Permissions]
     - INCOMPATIBLE: every tool call of raider now passes a permission policy

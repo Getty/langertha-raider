@@ -249,13 +249,20 @@ sub abandon {
 One event of the run in progress, as the application hands it on: into
 the machine stream (L<Langertha::Raider::CLI::Machine/event>), except the
 user's own input -- a stream C<message> is the agent's (ADR 0013).
-Outside a run it does nothing.
+Without a machine stream, a C<hook.message> (a hook's C<systemMessage>,
+error or stop, ADR 0022) is printed as a meta line. Outside a run it does
+nothing.
 
 =cut
 
 sub event {
   my ( $self, $type, %payload ) = @_;
   my $current = $self->_current or return;
+  # A hook's systemMessage, error or stop is for the person (ADR 0022).
+  if ($type eq 'hook.message' && !$current->{machine}) {
+    $self->output->say_meta(( ( $payload{kind} // '' ) eq 'error' ? 'hook error: ' : 'hook: ' ).( $payload{text} // '' ));
+    return;
+  }
   my $machine = $current->{machine} or return;
   return if $type eq 'message' && ($payload{role} // '') eq 'user';
   $machine->event($type, %payload);
