@@ -122,8 +122,25 @@ Revision history for Langertha-Raider
       EnterWorktree, ...) stay unknown.
     - maint/claude-log-to-scenario: a MultiEdit becomes one multi_edit call;
       a section with TodoWrite gets `app: { task_tools: false }`.
+    - TaskCreated and TaskCompleted hooks (Claude layout, ADR 0022
+      addendum): task_create and task_update run them before the change, with
+      task_id, task_subject and task_description; exit 2 undoes the change
+      and the model reads "TaskCreated hook error: STDERR". todo_write fires
+      none.
+    - A resumed (--continue, --resume) or forked session gets its task list
+      back from the journal's last todo.updated (not after /clear; ids
+      continue). Only for the task tools.
 
   [Refusals, web tools and skills like Claude Code]
+    - INCOMPATIBLE: a PreToolUse hook's denial reads as in Claude Code: exit
+      2 gives "PreToolUse:Bash hook error: STDERR" (tool in Claude's name), a
+      JSON permissionDecisionReason is handed through as it stands, no reason
+      "PreToolUse:Bash hook blocked the tool call". A call to a tool that is
+      not offered (never, or since /reload or a mode change) is answered
+      "<tool_use_error>Error: No such tool available: X</tool_use_error>",
+      with " Tool names are case-sensitive: call Y instead." when only the
+      case differs. The old "denied: PreToolUse hook: ..." and "unknown tool
+      X" are gone.
     - INCOMPATIBLE: refusals read as in Claude Code (ADR 0026). The person's
       no: "The user doesn't want to proceed with this tool use. The tool use
       was rejected ... STOP what you are doing ..." or, with a reason, "... To

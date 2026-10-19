@@ -172,6 +172,21 @@ L<Langertha::Raider::Hooks::Result/blocked> with its C<reason>.
 
 =back
 
+=head2 Task events and the words of a denial
+
+C<TaskCreated> and C<TaskCompleted> are fired by the application when the
+task tools (C<task_create>, C<task_update>) create a task or complete one,
+with C<task_id>, C<task_subject> and C<task_description> in the input and no
+matcher. Exit 2 (or C<decision: "block">) vetoes the change; the model gets
+C<TaskCreated hook error: STDERR> as the tool's error result. They are
+blocking events here, so L<Langertha::Raider::Hooks::Result/blocked> tells
+(ADR 0022, addendum).
+
+What the model is told when a C<PreToolUse> hook denies is
+L<Langertha::Raider::Hooks::Result/deny_messages>: C<PreToolUse:Bash hook
+error: STDERR> for exit 2, the C<permissionDecisionReason> as it stands for a
+JSON denial.
+
 =head2 Briefing loaded natively
 
 The briefing plugin's C<briefing-preload> rewrites an C<Agent> call's
@@ -903,7 +918,7 @@ sub _check_json {
 
 sub _merge {
   my ( $self, $event, $call, $runs, $errors ) = @_;
-  my ( @errors, @context, @messages, %reasons, @block_reasons );
+  my ( @errors, @context, @messages, %reasons, @block_reasons, @deny_messages );
   my ( $decision, $blocked, $stopped, $stop_reason, @updates ) = ( undef, 0, 0, undef );
   push @errors, @$errors;
   my $tag = $event.( defined $call->{claude_tool} ? ':'.$call->{claude_tool} : '' );
@@ -941,6 +956,15 @@ sub _merge {
         ( $d, $why ) = ( $old{ $json->{decision} }, $json->{reason} );
       }
       if (defined $d && $DECISION_RANK{$d}) {
+        if ($d eq 'deny') {
+          # What Claude Code tells the model: the stderr of an exit 2 (or a
+          # failed onFailure "block" hook) as a hook error, the reason a
+          # hook's JSON gives as it stands.
+          my $from_json = $outcome ne 'block'
+            || ( !$run->{_block_reason} && ( $self->_text($hso->{permissionDecisionReason}) || $self->_text($json->{reason}) ) );
+          push @deny_messages, $from_json && $self->_text($why) ? $why
+            : $tag.' hook '.( $self->_text($why) ? 'error: '.$why : 'blocked the tool call' );
+        }
         $decision = $d if !defined $decision || $DECISION_RANK{$d} > $DECISION_RANK{$decision};
         push @{ $reasons{$d} }, $why if $self->_text($why);
       }
@@ -976,6 +1000,7 @@ sub _merge {
     runs               => [ map { $self->_public_run($_) } @$runs ],
     errors             => \@errors,
     decision           => $decision,
+    deny_messages      => ( $decision // '' ) eq 'deny' ? \@deny_messages : [],
     reasons            => $event eq 'PreToolUse' ? [ @{ $reasons{ $decision // '' } // [] } ] : \@block_reasons,
     blocked            => $blocked,
     additional_context => \@context,

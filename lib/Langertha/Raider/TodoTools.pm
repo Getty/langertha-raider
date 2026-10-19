@@ -69,6 +69,24 @@ L</DESCRIPTION>) when a call changed it.
 
 =cut
 
+has before_task => (
+  is        => 'ro',
+  isa       => 'CodeRef',
+  predicate => 'has_before_task',
+);
+
+=attr before_task
+
+Optional. Called as C<< $code->($event, $item) >> before C<task_create>
+creates a task (C<TaskCreated>) and before C<task_update> completes one
+(C<TaskCompleted>); C<$item> is the task in the shape of L</on_update>
+(C<id>, C<content>, C<description>, ...). It returns undef to go on, or the
+text to hand the model as an error result: the call then changes nothing.
+The application hangs the Claude Code hooks of the same names here (ADR
+0022). Only the task tools call it, not C<todo_write>.
+
+=cut
+
 has server => (
   is       => 'ro',
   lazy     => 1,
@@ -197,6 +215,42 @@ sub clear_tasks {
   return;
 }
 
+=method restore_tasks
+
+    $todos->restore_tasks( $list );
+
+Takes over a task list in the shape L</on_update> hands out (what a resumed
+session's journal holds) in place of the current one, without calling
+L</on_update> or L</before_task>. The next id follows the highest id of the
+list.
+
+=cut
+
+sub restore_tasks {
+  my ( $self, $list ) = @_;
+  my @tasks;
+  my $last = $self->_last_id;
+  for my $item ( ref $list eq 'ARRAY' ? @$list : () ) {
+    next unless ref $item eq 'HASH' && defined $item->{id} && !ref $item->{id};
+    my $status = $item->{status} // 'pending';
+    push @tasks, {
+      id          => "$item->{id}",
+      subject     => $item->{content} // '',
+      description => $item->{description} // '',
+      status      => ( grep { $_ eq $status } @STATUS ) ? $status : 'pending',
+      blocks      => [ ref $item->{blocks} eq 'ARRAY' ? @{ $item->{blocks} } : () ],
+      blockedBy   => [ ref $item->{blockedBy} eq 'ARRAY' ? @{ $item->{blockedBy} } : () ],
+      ( defined $item->{activeForm} && $item->{activeForm} ne ( $item->{content} // '' ) ? ( activeForm => $item->{activeForm} ) : () ),
+      ( defined $item->{owner} ? ( owner => $item->{owner} ) : () ),
+      ( ref $item->{metadata} eq 'HASH' ? ( metadata => { %{ $item->{metadata} } } ) : () ),
+    };
+    $last = $item->{id} if $item->{id} =~ /\A\d+\z/ && $item->{id} > $last;
+  }
+  @{ $self->_tasks } = @tasks;
+  $self->_last_id($last);
+  return;
+}
+
 =method create_task
 
     my ( $text, $is_error ) = $todos->create_task( { subject => 'Run the tests', description => '...' } );
@@ -215,8 +269,7 @@ sub create_task {
   return ( 'Error: activeForm must be a string', 1 ) if defined $in->{activeForm} && !$self->_is_string( $in->{activeForm} );
   return ( 'Error: metadata must be an object', 1 ) if defined $in->{metadata} && ref $in->{metadata} ne 'HASH';
   my $id = $self->_last_id + 1;
-  $self->_last_id($id);
-  push @{ $self->_tasks }, {
+  my $task = {
     id          => "$id",
     subject     => $in->{subject},
     description => $in->{description},
@@ -226,6 +279,12 @@ sub create_task {
     blockedBy   => [],
     ( defined $in->{metadata} ? ( metadata => { %{ $in->{metadata} } } ) : () ),
   };
+  if ( $self->has_before_task ) {
+    my $blocked = $self->before_task->( TaskCreated => $self->_task_item($task) );
+    return ( $blocked, 1 ) if defined $blocked;
+  }
+  $self->_last_id($id);
+  push @{ $self->_tasks }, $task;
   $self->_tasks_changed;
   return ( 'Task #'.$id.' created successfully: '.$in->{subject}, 0 );
 }
@@ -263,6 +322,14 @@ sub update_task {
 
   my $task = $self->_task($id) or return ( 'Task not found', 0 );
   return $self->_delete_task($task) if defined $status && $status eq 'deleted';
+
+  if ( defined $status && $status eq 'completed' && $task->{status} ne 'completed' && $self->has_before_task ) {
+    my $item = { %{ $self->_task_item($task) }, status => 'completed' };
+    $item->{content}     = $in->{subject}     if defined $in->{subject};
+    $item->{description} = $in->{description} if defined $in->{description};
+    my $blocked = $self->before_task->( TaskCompleted => $item );
+    return ( $blocked, 1 ) if defined $blocked;
+  }
 
   my @fields;
   for my $key (qw( subject description activeForm owner )) {

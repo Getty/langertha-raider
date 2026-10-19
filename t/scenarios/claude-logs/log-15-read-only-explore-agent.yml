@@ -11,7 +11,7 @@
 # Abweichung: NotebookEdit has no raider counterpart; it is ignored (reported by
 # `config explain`), the rest of the list still applies.
 # Abweichung: where Claude Code's agent is never offered a removed tool, raider
-# answers a call to it with an error result "unknown tool write_file"; the agent goes on.
+# answers a call to it with an error result "No such tool available: write_file"; the agent goes on.
 title: a read-only explore agent searches with glob, grep and read_file, its write attempt finds no tool, and the caller edits
 files:
   CLAUDE.md: "Project.\n"
@@ -48,14 +48,14 @@ expect:
     - { index: 1, contains: "grep(" }
     - { index: 1, contains: "read_file(" }
     - { index: 3, contains: "retries = 3" }
-    - { index: 4, contains: "unknown tool write_file" }
+    - { index: 4, contains: "No such tool available: write_file" }
     - { index: 5, contains: "line 2 (retries = 3)" }
     - { index: 5, absent: "SCOUT-BODY" }
   tools:
     - { name: glob, text: 'src/limits\.txt\nsrc/other\.txt' }
     - { name: grep, text: 'src/limits\.txt:2:retries = 3' }
     - { name: read_file, text: 'max_items = 10' }
-    - { name: write_file, error: true, text: 'unknown tool write_file' }
+    - { name: write_file, error: true, text: 'No such tool available: write_file</tool_use_error>' }
     - { name: agent, text: 'src/limits\.txt line 2' }
     - { name: read_file, text: '2\tretries = 3' }
     - { name: edit_file, text: '\AThe file \S+/src/limits\.txt has been updated successfully\.' }

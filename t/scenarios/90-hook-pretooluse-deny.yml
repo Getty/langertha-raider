@@ -28,8 +28,8 @@ expect:
   files: { keep.txt: keep }
   absent: [ .env ]
   tools:
-    - { name: bash, error: true, text: "denied: PreToolUse hook: Blocked: rm commands are not allowed" }
-    - { name: write_file, error: true, text: "denied: PreToolUse hook: never write \\.env" }
+    - { name: bash, error: true, text: "\\APreToolUse:Bash hook error: Blocked: rm commands are not allowed\\z" }
+    - { name: write_file, error: true, text: "\\Anever write \\.env\\z" }
     - { name: bash, text: fine }
   events:
     - { type: hook.ran, hook_event: PreToolUse, outcome: block, exit: 2, source: .claude/settings.json }

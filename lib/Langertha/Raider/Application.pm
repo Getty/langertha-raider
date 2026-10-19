@@ -1093,6 +1093,8 @@ sub _pre_tool_use_f {
     return Future->done({
       decision  => $decision,
       reason    => defined $decision ? 'PreToolUse hook: '.( $r->reason // $decision ) : undef,
+      # A deny is worded as Claude Code words it (Hooks::Result->deny_message).
+      ( $decision // '' ) eq 'deny' ? ( message => $r->deny_message // $app->_hook_tag($r->event, $call->{name}).' hook blocked the tool call' ) : (),
       arguments => $arguments,
     });
   });
@@ -2163,7 +2165,31 @@ has _todo_tools => (is => 'ro', lazy => 1, builder => '_build_todo_tools', init_
 sub _build_todo_tools {
   my ($self) = @_;
   weaken(my $app = $self);
-  return Langertha::Raider::TodoTools->new(on_update => sub { $app->_todos_updated(@_) if $app });
+  return Langertha::Raider::TodoTools->new(
+    on_update   => sub { $app->_todos_updated(@_) if $app },
+    before_task => sub { $app ? $app->_task_hook(@_) : undef },
+  );
+}
+
+# TaskCreated / TaskCompleted (ADR 0022): the hooks of the Claude layout run
+# before the task tools change the list. Exit 2 (or decision "block") undoes
+# the change and hands the hook's stderr to the model as the tool's error
+# result, as Claude Code does; continue: false stops the run. Returns that
+# text, or undef when the call may go on.
+sub _task_hook {
+  my ($self, $event, $task) = @_;
+  my $hooks = $self->hooks;
+  return unless $hooks && $hooks->has_hooks($event);
+  my $r = $self->_await_hooks($hooks->run_f( $event => $self->_hook_input(
+    task_id          => $task->{id},
+    task_subject     => $task->{content},
+    task_description => $task->{description},
+  )));
+  $self->_report_hooks($r);
+  $self->_hook_stopped(undef) if $r->stopped;
+  return unless $r->blocked;
+  my $why = $r->reason;
+  return $event.' hook error: '.( defined $why && length $why ? $why : 'blocked' );
 }
 
 =method todos
@@ -2724,6 +2750,12 @@ sub replay_session {
   my $raider  = $self->raider;
   $raider->add_history($_->{role}, $_->{content}) for @{ $journal->history_messages };
   $raider->add_session_history(@{ $journal->session_history_messages });
+  # The task list the session left (task tools only; todo_write is the run's).
+  if ($self->task_tools) {
+    my $tasks = $journal->tasks;
+    $self->_todo_tools->restore_tasks($tasks);
+    $self->_todos($tasks);
+  }
   # The hooks see the next run as a resumed session (SessionStart resume).
   $self->_hook_session(undef);
   $self->_hook_session_source('resume');
@@ -2748,9 +2780,12 @@ C<forked_from> and how many C<messages> it took over.
 sub fork_session {
   my ($self, $id) = @_;
   my $store = $self->session_store;
-  my $history = $store->read($id)->history_messages;
+  my $journal = $store->read($id);
+  my $history = $journal->history_messages;
+  my $tasks   = $journal->tasks;
   my $session = $store->create(forked_from => $id);
   $session->append('message', role => $_->{role}, content => $_->{content}) for @$history;
+  $session->append('todo.updated', todos => $tasks) if @$tasks;
   $session->release;
   return { id => $session->id, path => ''.$session->path, forked_from => $id, messages => scalar @$history };
 }

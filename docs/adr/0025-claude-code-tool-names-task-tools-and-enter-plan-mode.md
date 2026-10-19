@@ -233,9 +233,8 @@ synthetic session).
 - **No team semantics.** Claude Code's task tools assign owners automatically, notify
   teammates and append "Call TaskList now ..." in agent teams; raider has no teams, so `owner` is
   only stored and shown.
-- **No `TaskCreated` / `TaskCompleted` hooks yet.** Claude Code runs them from the task tools
-  (and a blocking error vetoes the create or the completion); `Hooks` knows the event names, the
-  task tools do not fire them.
+- **`TaskCreated` / `TaskCompleted` hooks** run from the task tools of the application since
+  karr #163 (ADR 0022 addendum); a subagent's own task list fires none yet.
 - **Input coercion.** Claude Code repairs some misshaped task inputs (aliases such as a `task`
   wrapper); raider checks the schema as it is and answers `Error: ...`.
 - **`enter_plan_mode` in plan mode** answers without asking; Claude Code would show its
@@ -244,6 +243,17 @@ synthetic session).
   Claude Code's "Todos have been modified successfully. ...", and it keeps the one-item-in-
   progress check and does not empty the list when every item is completed; it is the
   non-default family now.
+
+### Addendum (karr #163): the task list on resume
+
+`replay_session` (resume, `--continue`) restores the task list of the task tools from the
+session journal: `Journal->tasks` is the `todos` of the last `todo.updated` since the last
+`history.cleared` (`/clear` empties the list), counting only entries with an `id`, so a
+`todo_write` list restores nothing — and with `task_tools` off nothing is restored either.
+The tools go on with it (`TodoTools->restore_tasks`: no `on_update`, no hook; the next id
+follows the highest id present). Ids of tasks deleted before the session ended are not kept,
+so a resumed session may reuse the id of a task that was deleted last. `fork_session` copies
+the list as a `todo.updated` event. No journal change (ADR 0015).
 
 ## Consequences
 

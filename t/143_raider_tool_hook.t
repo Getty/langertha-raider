@@ -115,6 +115,17 @@ subtest 'deny: the tool does not run, one tool.call and one failed tool.result' 
   is( $events->[1]{status}, 'failed', 'failed' );
 };
 
+subtest 'deny with a message: the model gets that text as it stands' => sub {
+  my ( $raider, $engine, $mcp ) = raider(
+    { _tool_hook => sub { Future->done({ decision => 'deny', reason => 'PreToolUse hook: no', message => 'PreToolUse:record hook error: no' }) } },
+    { tool_calls => [ [ record => { note => 'x' } ] ] },
+  );
+  $raider->raid('go');
+  is( $mcp->calls, [], 'not run' );
+  is( text_of( $engine->captured->[0] ), 'PreToolUse:record hook error: no', 'the message, nothing added' );
+  is( $engine->captured->[0]{result}{isError}, JSON->true, 'still an error result' );
+};
+
 subtest 'new arguments are schema-checked and gated, and run' => sub {
   my @gated;
   my ( $raider, $engine, $mcp ) = raider(

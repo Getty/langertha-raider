@@ -2679,7 +2679,7 @@ async sub _dispatch_tool_call_f {
     $hook = {} unless ref $hook eq 'HASH';
     if ( ( $hook->{decision} // '' ) eq 'deny' ) {
       my $result = await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0,
-        $self->_gate_refused_tool_result($name, { verdict => 'deny', reason => $hook->{reason} }), 1);
+        $self->_gate_refused_tool_result($name, { verdict => 'deny', reason => $hook->{reason}, message => $hook->{message} }), 1);
       push @$results, { tool_call => $tc, result => $result };
       ${$state->{raid_tool_calls}}++;
       return;
@@ -2817,8 +2817,12 @@ async sub _call_mcp_tool_f {
   my ( $self, $state, $iter, $name, $input, $tool_t0 ) = @_;
   my $mcp = $state->{tool_server_map}{$name};
   unless ($mcp) {
+    # Claude Code's words (ADR 0026); a name that differs from a tool only in
+    # case gets its hint too.
+    my ( $same ) = defined $name ? grep { lc $_ eq lc $name } sort keys %{ $state->{tool_server_map} } : ();
     return {
-      content => [{ type => 'text', text => "unknown tool ".($name // '') }],
+      content => [{ type => 'text', text => '<tool_use_error>Error: No such tool available: '.( $name // '' )
+        .( defined $same ? '. Tool names are case-sensitive: call '.$same.' instead.' : '' ).'</tool_use_error>' }],
       isError => JSON->true,
     };
   }

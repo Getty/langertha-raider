@@ -162,11 +162,23 @@ subtest 'unknown tool: error result, no hook, no gate' => sub {
   ok run_f($raider->raid_f('go'))->is_final, 'final';
   my $r = result_for($engine, 'tc1');
   ok $r->{isError}, 'error result';
-  like text_of($r), qr/unknown tool/, 'says unknown tool';
+  like text_of($r), qr/No such tool available: /, 'says no such tool';
   unlike text_of($r), qr/approval/, 'not an approval refusal';
   is [ map { $_->{name} } @gated ], [ 'record' ], 'the gate saw only the known tool';
   is [ map { $_->{name} } @hooked ], [ 'record' ], 'the hook saw only the known tool';
   is $mcp->calls, [], 'known tool refused by ask, nothing ran';
+};
+
+subtest 'unknown tool: Claude Code\'s text, with the case hint' => sub {
+  my ( $raider, $engine ) = raider({},
+    { tool_calls => [ [ nonesuch => {} ], [ Record => { note => 'x' } ] ] },
+    { text => 'done' },
+  );
+  ok run_f($raider->raid_f('go'))->is_final, 'final';
+  is text_of(result_for($engine, 'tc1')), '<tool_use_error>Error: No such tool available: nonesuch</tool_use_error>', 'as Claude words it';
+  is text_of(result_for($engine, 'tc2')),
+    '<tool_use_error>Error: No such tool available: Record. Tool names are case-sensitive: call record instead.</tool_use_error>',
+    'a name that differs in case names the tool';
 };
 
 done_testing;

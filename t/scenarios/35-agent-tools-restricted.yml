@@ -24,6 +24,6 @@ expect:
     - { index: 1, contains: "Project." }
     - { index: 1, absent: "bash(" }
   tools:
-    - { name: bash, error: true, text: 'unknown tool bash' }
+    - { name: bash, error: true, text: 'No such tool available: bash</tool_use_error>' }
     - { name: read_file, text: 'alpha' }
     - { name: agent, text: '\Aalpha and beta\z' }

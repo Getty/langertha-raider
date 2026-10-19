@@ -53,7 +53,7 @@ expect:
     - { index: 2, absent: BAD-INPUT }
   tools:
     - { name: read_file, text: NOTE }
-    - { name: read_file, error: true, text: "denied: PreToolUse hook: no reads in the scribe" }
+    - { name: read_file, error: true, text: "\\Ano reads in the scribe\\z" }
     - { name: agent, text: '\Areading is denied here\z' }
   events:
     - { type: hook.ran, hook_event: PreToolUse, outcome: success }

@@ -185,7 +185,7 @@ subtest 'langfuse observations and tool-result shapes of a two-turn raid' => sub
   is($engine->tool_results, [ [
     echo => { content => [ { type => 'text', text => 'echo:1' } ] },
     fail => { content => [ { type => 'text', text => "Error calling tool 'fail': boom" } ], isError => T() },
-    nope => { content => [ { type => 'text', text => 'unknown tool nope' } ], isError => T() },
+    nope => { content => [ { type => 'text', text => '<tool_use_error>Error: No such tool available: nope</tool_use_error>' } ], isError => T() },
     raider_ask_user => { type => 'result', content => [ { type => 'text', text => 'yes' } ] },
     raider_wait => { content => [ { type => 'text', text => 'Waited 0 seconds.' } ] },
   ] ], 'every call of the batch left its result, in order');

@@ -198,6 +198,30 @@ sub history_messages {
   return \@messages;
 }
 
+=method tasks
+
+    my $tasks = $journal->tasks;   # [ { id, content, status, ... }, ... ]
+
+The task list the session left (ADR 0025): the C<todos> of the last
+C<todo.updated> event, after the last C<history.cleared> (C</clear> empties
+the list). Only entries with an C<id> count -- the task tools' -- so a list
+of C<todo_write>, which has none, restores nothing. A copy; empty when the
+session kept no tasks.
+
+=cut
+
+sub tasks {
+  my ( $self ) = @_;
+  my @tasks;
+  for my $e (@{ $self->events }) {
+    if ($e->{type} eq 'history.cleared') { @tasks = () }
+    elsif ($e->{type} eq 'todo.updated') {
+      @tasks = ref $e->{todos} eq 'ARRAY' ? grep { ref $_ eq 'HASH' && defined $_->{id} } @{ $e->{todos} } : ();
+    }
+  }
+  return [ map { { %$_ } } @tasks ];
+}
+
 =method session_history_messages
 
 The full history to rebuild on resume, from all events, in the shapes

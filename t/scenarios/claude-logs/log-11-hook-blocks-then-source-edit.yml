@@ -38,7 +38,7 @@ expect:
     templates/page.tpl: "title: NEW\n"
   tools:
     - { name: read_file, text: 'title: OLD' }
-    - { name: edit_file, error: true, text: 'denied: PreToolUse hook: generated/ is built from templates/; edit the template instead' }
+    - { name: edit_file, error: true, text: '\APreToolUse:Edit hook error: generated/ is built from templates/; edit the template instead\z' }
     - { name: read_file, text: "\\A1\\ttitle: OLD" }
     - { name: edit_file, text: '^The file \S+ has been updated successfully\.' }
     - { name: bash, text: '\Atitle: NEW\z' }

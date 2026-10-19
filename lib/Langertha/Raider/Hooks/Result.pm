@@ -103,6 +103,14 @@ The reasons that go with L</decision> (C<permissionDecisionReason>, the
 stderr of an exit 2) or with L</blocked> (C<reason>, the stderr of an exit
 2), in configuration order.
 
+=attr deny_messages
+
+C<PreToolUse> only, with a L</decision> of C<deny>: what the model is told, one
+entry per denying hook, in Claude Code's words (ADR 0022). A hook that
+blocked by exit code 2 is C<PreToolUse:Tool hook error: STDERR>, a hook that
+gave a reason in JSON hands the reason through as it stands, a denial without
+a reason is C<PreToolUse:Tool hook blocked the tool call>.
+
 =attr blocked
 
 True when a hook blocked an event that can be blocked (C<decision:
@@ -141,6 +149,12 @@ has [qw( runs errors reasons additional_context system_messages )] => (
   default => sub { [] },
 );
 
+has deny_messages => (
+  is      => 'ro',
+  isa     => 'ArrayRef',
+  default => sub { [] },
+);
+
 has decision => (
   is  => 'ro',
   isa => 'Maybe[Str]',
@@ -166,6 +180,10 @@ has updated_input => (
 
     my $why = $r->reason;   # L</reasons> joined with newlines, or undef
 
+=method deny_message
+
+    my $text = $r->deny_message;   # L</deny_messages> joined with newlines, or undef
+
 =method context
 
     my $text = $r->context;   # L</additional_context> joined with blank lines, or undef
@@ -180,6 +198,12 @@ sub reason {
   my ( $self ) = @_;
   my @r = grep { defined && length } @{ $self->reasons };
   return @r ? join("\n", @r) : undef;
+}
+
+sub deny_message {
+  my ( $self ) = @_;
+  my @m = grep { defined && length } @{ $self->deny_messages };
+  return @m ? join( "\n", @m ) : undef;
 }
 
 sub context {

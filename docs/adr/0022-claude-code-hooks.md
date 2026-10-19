@@ -226,6 +226,39 @@ hooks (it is raider's own tool, not a Claude Code session).
   saved session, so the next start reads it as a raider project and runs no hooks (nor the
   rest of the Claude layout) — a stream K question, noted on the card.
 
+## Addendum (karr #163): task hooks and the words of a denial
+
+**`TaskCreated` / `TaskCompleted`** — fired by the task tools (ADR 0025) of the application,
+in the Claude layout only, as Claude Code fires them from `TaskCreate` / `TaskUpdate`:
+
+- `TaskCreated` runs before `task_create` adds the task, `TaskCompleted` before `task_update`
+  sets a task from another status to `completed` (not for a task that already is, not for
+  `deleted`). `todo_write` fires neither: Claude Code's `TodoWrite` does not.
+- Input: the common fields plus `task_id`, `task_subject`, `task_description` (as Claude Code
+  documents them; for `TaskCompleted` the subject and description as the call would set them).
+  No `teammate_name`/`team_name`: raider has no teams. No matcher (the events ignore it).
+- Exit 2 (or `decision: "block"`, or `onFailure: "block"` — except on `TaskCompleted`, ADR
+  §2) vetoes: the list stays as it was, nothing else of the same `task_update` applies, and the
+  tool answers an **error result `TaskCreated hook error: <stderr>`** (resp. `TaskCompleted
+  hook error: …`; `blocked` without a reason). The wording follows the `PreToolUse:Tool hook
+  error: <stderr>` Claude Code gives (below); the exact text of the task events is not attested in
+  the local logs and is raider's analogy. A vetoed creation does not use up its id.
+  `continue: false` stops the run (cancels it, like a tool hook's). Other exit codes are
+  non-blocking errors reported as `hook.message`.
+- The hook runs on the application's loop and the tool waits for it (the way `web_search`
+  waits for its provider). `TodoTools` has a plain callback (`before_task`) and knows nothing
+  of hooks. Subagents' own task lists fire no task hooks yet.
+
+**The words of a `PreToolUse` denial** replace raider's "Tool call 'X' was denied: PreToolUse
+hook: …" (ADR 0026 follow-up). From the local session logs: a hook that denies by exit 2
+gives the model `PreToolUse:Bash hook error: <stderr>` (an error result; tool name in Claude's
+form — `edit_file` is `Edit`, an MCP tool keeps its name). A hook that denies by JSON with a
+`permissionDecisionReason` hands the reason through **as it stands**; this is how Claude Code's
+documentation describes it, but the logs hold no such case. A denial with neither stderr nor
+reason gets `PreToolUse:Tool hook blocked the tool call` — raider's wording, not attested.
+`Hooks::Result->deny_messages` carries the text (one per denying hook, newline-joined by
+`deny_message`); `reasons` keep the bare reasons for the gate. An `ask` is unchanged (ADR 0021).
+
 ## Source
 
 Plan `perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md` (stream H);

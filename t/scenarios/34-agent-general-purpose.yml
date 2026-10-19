@@ -21,7 +21,7 @@ expect:
     - { index: 1, contains: You are an agent for raider }
     - { index: 1, absent: viking shield-maiden }
     - { index: 1, lacks: [ ask_user, agent, enter_plan_mode ] }
-    - { index: 1, contains: "read_file(path, [limit], [offset])" }
+    - { index: 1, contains: "read_file(path, [limit], [offset], [pages])" }
     - { index: 3, contains: notes.txt says SECRET-NOTE-42 }
   tools:
     - { name: read_file, text: SECRET-NOTE-42 }
