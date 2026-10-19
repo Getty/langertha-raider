@@ -75,7 +75,9 @@ C<domain:*.example.com> matches subdomains.
 
 =item C<mcp__server>, C<mcp__server__*>, C<mcp__server__tool> -- tools of
 an MCP server that is not raider's own (the server name comes with the
-call context).
+call context). The tool part is compared with the call's name, or, for a
+configured server whose tools are called C<mcp__server__tool> (ADR 0029),
+with the part after that prefix.
 
 =back
 
@@ -292,7 +294,11 @@ sub matches {
   if ( $p->{family} eq 'mcp' ) {
     return 0 if $ctx->{builtin};
     return 0 unless defined $ctx->{server} && $ctx->{server} eq $p->{mcp_server};
-    return !defined $p->{mcp_tool} || $p->{mcp_tool} eq $name ? 1 : 0;
+    # A configured server's tools carry the mcp__SERVER__ prefix (ADR 0029);
+    # the rule names the tool part of that name.
+    my $prefix = 'mcp__'.$p->{mcp_server}.'__';
+    my $tool = index($name, $prefix) == 0 ? substr($name, length $prefix) : $name;
+    return !defined $p->{mcp_tool} || $p->{mcp_tool} eq $tool ? 1 : 0;
   }
 
   return 0 unless grep { $_ eq $name } @{ $p->{tools} };

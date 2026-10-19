@@ -81,7 +81,10 @@ file grants tools to projects (L</project_tools>). Neither is C<providers>:
 only the top level of the home file holds provider bindings
 (L</providers>).
 C<permissions> is read on its own too (L</permissions>): the rules of both
-files are concatenated with their source, never replaced.
+files are concatenated with their source, never replaced. So is C<mcp>
+(L</mcp_servers>, ADR 0029): the MCP servers of both files, the project
+file's first, each with its source. C<mcp_approvals> (L</mcp_approvals>) is read
+from the top level of the home file only.
 
 The project writers never touch the home file (L</update_home> is the only
 one; C<raider provider add> calls it). When the home file is the file in
@@ -90,7 +93,7 @@ project file, and there is no home layer.
 
 A file, project or home, that does not parse, whose top level is not a mapping, or that holds
 a mapping under one of raider's own keys other than C<skills>, C<detect>, C<project_tools>,
-C<providers>, C<permissions> and C<agent_models>
+C<providers>, C<permissions>, C<agent_models>, C<mcp> and C<mcp_approvals>
 (see L</is_app_key>) -- at top level or in any section, active or not -- is
 an error: readers croak and the writer refuses to
 overwrite it.
@@ -99,6 +102,8 @@ overwrite it.
 
 # Keys that configure raider itself and never reach the engine constructor.
 my %APP_KEY = map { $_ => 1 } qw( agent_models claude detect engine max_agent_depth no_detect packs permissions perl preferred_lib_target project_tools providers skills web_fetch_model );
+# The MCP servers and their approvals (ADR 0029), read on their own.
+$APP_KEY{$_} = 1 for qw( mcp mcp_approvals );
 
 my %PROFILE_KEYWORD = (
   claude => 'claude',
@@ -339,7 +344,7 @@ sub file_exists { -f $_[0]->file ? 1 : 0 }
 sub _may_be_mapping {
   my ( $self, $key ) = @_;
   return $key eq 'skills' || $key eq 'detect' || $key eq 'project_tools' || $key eq 'providers'
-    || $key eq 'permissions' || $key eq 'agent_models';
+    || $key eq 'permissions' || $key eq 'agent_models' || $key eq 'mcp' || $key eq 'mcp_approvals';
 }
 
 sub _is_section {
@@ -452,10 +457,20 @@ sub _resolve_file {
           unless $top && ( length $prefix || $self->_is_home_file );
         next;
       }
-      if ($key eq 'permissions') {
-        # Read on its own (permissions), from the top level of both files.
-        push @ignored, { key => $name.'.permissions', reason => 'read only at the top level of a config file' }
+      if ($key eq 'permissions' || $key eq 'mcp') {
+        # Read on its own (permissions, mcp_servers), from the top level of both files.
+        push @ignored, { key => $name.'.'.$key, reason => 'read only at the top level of a config file' }
           unless $name eq $prefix.'top';
+        next;
+      }
+      if ($key eq 'mcp_approvals') {
+        # Read on its own (mcp_approvals); only the top level of the home
+        # file approves project servers.
+        my $top = $name eq $prefix.'top';
+        push @ignored, $top
+          ? { key => 'mcp_approvals', reason => 'only ~/.raider/config.yml approves MCP servers; a project file cannot' }
+          : { key => $name.'.mcp_approvals', reason => 'read only at the top level of ~/.raider/config.yml' }
+          unless $top && ( length $prefix || $self->_is_home_file );
         next;
       }
       if ($key eq 'engine' && $name ne $prefix.'top' && $name ne $prefix.'default') {
@@ -638,6 +653,8 @@ True for the keys that configure raider itself (C<agent_models>, C<claude>,
 C<detect>, C<engine>, C<max_agent_depth>,
 C<no_detect>, C<packs>, C<permissions>, C<perl>, C<preferred_lib_target>, C<project_tools>,
 C<providers>, C<skills>, C<web_fetch_model>) and never reach the engine constructor.
+C<mcp> and C<mcp_approvals> are raider keys too (L</mcp_servers>,
+L</mcp_approvals>).
 
 =cut
 
@@ -998,6 +1015,145 @@ sub permissions {
     }
   }
   return \%out;
+}
+
+=method mcp_servers
+
+    for my $s (@{ $config->mcp_servers }) {
+      # { name => 'github', entry => { type => 'http', url => ... },
+      #   scope => 'raider-project', source => '.raider/config.yml' }
+    }
+
+The C<mcp:> entries of the project file, then of the home file (ADR 0029
+E<sect>2), each with its C<scope> (C<raider-project>, or C<raider-home> for
+the home file -- also when raider runs in the home directory and the home
+file is the file in use) and C<source> (L</label>, or
+C<~/.raider/config.yml>). Sorted by name within a file. The entries are as
+written, in Claude Code's F<.mcp.json> format; checking their fields,
+precedence and expansion are L<Langertha::Raider::MCP::Config>'s business.
+
+    mcp:
+      db:
+        command: npx
+        args: [ -y, "@bytebase/dbhub" ]
+        env: { DB_URL: "${DB_URL}" }
+
+Only the top level is read; an C<mcp:> inside a section is reported by
+L</explain>. Croaks with C<Invalid mcp setting in FILE: ...> when C<mcp:>
+is not a mapping or an entry is not a mapping.
+
+=cut
+
+sub mcp_servers {
+  my ( $self ) = @_;
+  my $home_file = $self->_is_home_file;
+  my @files = (
+    [ $self->data, ( $home_file ? ( $self->_home_rule_label, 'raider-home' ) : ( $self->label, 'raider-project' ) ) ],
+    ( $self->uses_home ? [ $self->home_data, $self->_home_rule_label, 'raider-home' ] : () ),
+  );
+  my @out;
+  for my $file (@files) {
+    my ( $data, $label, $scope ) = @$file;
+    my $mcp = $data->{mcp};
+    next unless defined $mcp;
+    my $fail = sub { croak 'Invalid mcp setting in '.$label.': '.$_[0] };
+    $fail->('mcp: must be a mapping of server name to server entry') unless ref $mcp eq 'HASH';
+    for my $name (sort keys %$mcp) {
+      $fail->('mcp.'.$name.': must be a mapping (command/args/env or type/url/headers)')
+        unless ref $mcp->{$name} eq 'HASH';
+      push @out, { name => $name, entry => $mcp->{$name}, scope => $scope, source => $label };
+    }
+  }
+  return \@out;
+}
+
+=method mcp_approvals
+
+    for my $a (@{ $config->mcp_approvals }) {
+      # { path => '~/dev/app', dir => '/home/me/dev/app', enable_all => 1,
+      #   enabled => ['github'], disabled => ['db'], source => '~/.raider/config.yml' }
+    }
+
+The C<mcp_approvals:> of the home file (ADR 0029 E<sect>7): which project
+MCP servers (F<.mcp.json>, the C<mcp:> of a project config) may start in
+which project. Read from the top level of the home file only -- a project
+file cannot approve its own servers, its C<mcp_approvals:> is reported by
+L</explain>.
+
+    mcp_approvals:
+      ~/dev/app:
+        enable_all: false
+        enabled: [ github ]
+        disabled: [ db ]
+
+Each key is the absolute or C<~/> path of a project directory (no globs);
+C<dir> is it with C<~> expanded and, when it exists, by its real path.
+C<enable_all> is a boolean (L</parse_bool>), C<undef> when not set;
+C<enabled> and C<disabled> are lists of server names (a single string
+counts as a list of one). Croaks with C<Invalid mcp_approvals setting in
+FILE: ...> on any other shape, an unknown key (camelCase gets a hint) or a
+path that is neither absolute nor C<~/>.
+
+=cut
+
+sub mcp_approvals {
+  my ( $self ) = @_;
+  my $raw = $self->_project_tools_data->{mcp_approvals};
+  return [] unless defined $raw;
+  my $label = $self->_home_rule_label;
+  my $fail = sub { croak 'Invalid mcp_approvals setting in '.$label.': '.$_[0] };
+  $fail->('mcp_approvals: must be a mapping of project path to approvals') unless ref $raw eq 'HASH';
+  my %hint = (
+    enableAllProjectMcpServers => 'enable_all',
+    enabledMcpjsonServers      => 'enabled',
+    disabledMcpjsonServers     => 'disabled',
+  );
+  my @out;
+  for my $path (sort keys %$raw) {
+    my $key = 'mcp_approvals.'.$path;
+    my $dir;
+    if ($path =~ m{\A/}) {
+      $dir = $path;
+    }
+    elsif ($path =~ m{\A~(?:/|\z)}) {
+      my $home = $self->home_class->home_dir;
+      $fail->($key.': no home directory for ~') unless defined $home;
+      $dir = $home.substr($path, 1);
+    }
+    else {
+      $fail->($key.': must be an absolute path or start with ~/');
+    }
+    $fail->($key.': a path cannot hold * or ?') if $path =~ /[*?]/;
+    $dir = path($dir)->absolute;
+    $dir = $dir->realpath if -e $dir;
+    my $entry = $raw->{$path};
+    $fail->($key.': must be a mapping (enable_all, enabled, disabled)') unless ref $entry eq 'HASH';
+    for my $k (sort keys %$entry) {
+      next if $k eq 'enable_all' || $k eq 'enabled' || $k eq 'disabled';
+      $fail->($key.'.'.$k.': unknown key'.( $hint{$k} ? ' (use '.$hint{$k}.')' : '' ));
+    }
+    my %lists;
+    for my $kind (qw( enabled disabled )) {
+      my $list = $entry->{$kind} // [];
+      $list = [ $list ] unless ref $list;
+      $fail->($key.'.'.$kind.': must be a list of server names') unless ref $list eq 'ARRAY';
+      for my $name (@$list) {
+        $fail->($key.'.'.$kind.': must be a list of server names') if ref $name || !length($name // '');
+      }
+      $lists{$kind} = [ @$list ];
+    }
+    my $all = eval { $self->parse_bool($entry->{enable_all}) };
+    $fail->($key.'.enable_all: must be a boolean (true/false)') if $@;
+    push @out, {
+      path       => $path,
+      dir        => $dir->stringify,
+      enable_all => $all,
+      enabled    => $lists{enabled},
+      disabled   => $lists{disabled},
+      source     => $label,
+    };
+  }
+  return \@out;
 }
 
 =method normalize_skill_spec

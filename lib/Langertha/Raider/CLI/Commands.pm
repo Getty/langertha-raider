@@ -21,7 +21,7 @@ B<Internal module.> Its interface may change without notice.
 
 The slash commands of the F<raider> REPL (C</help>, C</clear>, C</metrics>,
 C</stats>, C</reload>, C</prompt>, C</skill>, C</skill-claude>, C</config>,
-C</permissions>, C</model>, C</packs>, C</pack>). C</permissions> prints the
+C</permissions>, C</mcp>, C</model>, C</packs>, C</pack>). C</permissions> prints the
 permission mode with its source and every rule with its source, session
 rules included (ADR 0021); C</permissions mode MODE> switches the mode. Each command C</name> is the method
 C<cmd_name> (dashes become underscores) and gets the rest of the line as
@@ -247,6 +247,8 @@ sub cmd_help {
     '  /config               show each setting and where it came from',
     '  /permissions          show the permission mode, rules and session rules',
     '  /permissions mode M   switch the mode: default, acceptEdits, auto, plan, bypassPermissions',
+    '  /mcp                  show the configured MCP servers, their status and tools',
+    '  /mcp reconnect [NAME] restart one MCP server (or all)',
     '  /model [NAME]         set+save model to the config file',
     '  /model list [FILTER]  list available models (optionally filtered)',
     '  /packs                list all available packs and their state',
@@ -367,6 +369,43 @@ sub cmd_permissions {
 sub cmd_prompt {
   my ($self) = @_;
   $self->prompt_builder_class->new(app => $self->app, output => $self->output, in => $self->in)->run;
+  return;
+}
+
+=method cmd_mcp
+
+    $commands->cmd_mcp('');               # /mcp
+    $commands->cmd_mcp('reconnect db');   # /mcp reconnect db (or all / no name)
+
+Without an argument the configured MCP servers (ADR 0029), started first
+when they are not yet (in parallel, each within C<MCP_TIMEOUT>): status,
+source, scope, transport, reason, approval, the last stderr lines of a
+failed one and every server's tools
+(L<Langertha::Raider::CLI::Output/mcp_report>). A one-shot C<raider /mcp>
+prints the same (L<Langertha::Raider::CLI::Main/oneshot_command>).
+C<reconnect> restarts a server (all of them without a name or with C<all>)
+and shows the list again.
+
+=cut
+
+sub cmd_mcp {
+  my ( $self, $arg ) = @_;
+  my $app = $self->app;
+  my $out = $self->output;
+  $arg //= '';
+  if ($arg =~ /\Areconnect(?:\s+(\S+))?\s*\z/) {
+    my $name = $1;
+    my @done = $app->reconnect_mcp($name);
+    return $out->say_error('no configured MCP server '.$name.' that can start (see /mcp)') unless @done || !defined $name || $name eq 'all';
+    $out->say_meta('reconnected: '.( @done ? join(', ', @done) : 'nothing to reconnect' ));
+  }
+  elsif (length $arg) {
+    return $out->say_error('usage: /mcp | /mcp reconnect [NAME|all]');
+  }
+  # Connected first (in parallel, each within MCP_TIMEOUT), so the report says
+  # how they are, as claude mcp list checks them.
+  $app->loop->await($app->configured_mcp->start_f);
+  $out->mcp_report($app->mcp_report, tools => 1);
   return;
 }
 

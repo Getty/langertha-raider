@@ -263,7 +263,7 @@ Options:
                            A prompt /NAME runs a skill or custom command;
                            /help, /context, /skills, /agents, /hooks,
                            /memory, /permissions, /config, /stats,
-                           /metrics, /packs print, /init and /compact run;
+                           /metrics, /packs, /mcp print, /init and /compact run;
                            other REPL commands are a usage error
       --json[=N]           Print one JSON document for the run and exit
                            (format version N; 1 is the only one)
@@ -730,7 +730,7 @@ sub run {
 
   # Unknown engine or an invalid detection rule: stop before anything runs.
   my $app = $self->app_class->new(%args);
-  unless (eval { $app->_engine_class; $app->packs; 1 }) {
+  unless (eval { $app->_engine_class; $app->packs; $app->configured_mcp->config->servers; 1 }) {
     $self->_warn($self->output->error_text($@)."\n");
     return EXIT_CONFIG;
   }
@@ -828,11 +828,17 @@ sub run {
   my %run;
   if ($text =~ m{\A\s*/}) {
     my ( $exit, $request ) = $self->oneshot_command($app, $text, session => $session_for);
-    return $exit if defined $exit;
+    if (defined $exit) {
+      $app->shutdown_mcp;   # /mcp started them (ADR 0029)
+      return $exit;
+    }
     ( $text, %run ) = ( $request->{prompt}, map { $_ => $request->{$_} } $runner->run_options );
   }
+  # Nobody can approve a project MCP server here: it stays off (ADR 0029).
+  $self->_warn($_."\n") for $app->mcp_notes;
   my $ok = $runner->run_prompt($text, %run, machine => $machine, session => scalar $session_for->(), catch_signals => 1);
   $app->shutdown_hooks;   # async hooks end with the run, as with claude -p
+  $app->shutdown_mcp;     # so do the configured MCP servers (ADR 0029)
   return $ok ? EXIT_OK : EXIT_RUN_ERROR;
 }
 
@@ -871,7 +877,9 @@ C<${CLAUDE_SESSION_ID}>, asked only when an entry is rendered.
 =method oneshot_report_commands
 
 C<help context skills agents hooks memory permissions config stats metrics
-packs>: the built-ins a one-shot run prints and leaves.
+packs mcp>: the built-ins a one-shot run prints and leaves (C</mcp> connects
+the configured MCP servers first and stops them after; C</mcp reconnect> is
+REPL-only, ADR 0029).
 
 =method oneshot_run_commands
 
@@ -881,7 +889,7 @@ C<init compact>: the built-ins a one-shot run runs.
 
 sub commands_class { 'Langertha::Raider::CLI::Commands' }
 
-sub oneshot_report_commands { qw( help context skills agents hooks memory permissions config stats metrics packs ) }
+sub oneshot_report_commands { qw( help context skills agents hooks memory permissions config stats metrics packs mcp ) }
 sub oneshot_run_commands    { qw( init compact ) }
 
 sub oneshot_command {
@@ -903,8 +911,10 @@ sub oneshot_command {
     return EXIT_USAGE;
   }
   my $name = $r->{name};
-  unless (grep { $_ eq $name } $self->oneshot_report_commands, $self->oneshot_run_commands) {
-    $self->_warn('/'.$name.": not in a one-shot run, only in the REPL\n");
+  # /mcp reports; /mcp reconnect would restart a server of a run that is ending.
+  my $words = $name eq 'mcp' && defined $r->{arguments} ? ' '.( split ' ', $r->{arguments} )[0] : '';
+  unless (!length $words && grep { $_ eq $name } $self->oneshot_report_commands, $self->oneshot_run_commands) {
+    $self->_warn('/'.$name.$words.": not in a one-shot run, only in the REPL\n");
     return EXIT_USAGE;
   }
   my $result = $commands->dispatch($line);

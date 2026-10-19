@@ -997,7 +997,10 @@ sub _build_mission {
 sub _build_mcps {
   my ( $self ) = @_;
   my $app = $self->app;
-  return [ map { $app->_mcp_client($_) } @{ $self->tool_servers } ];
+  # The caller's configured MCP servers lead, as views by the agent's tools
+  # (same connections, same engine:N for the policy; ADR 0029).
+  return [ $app->configured_mcp->views( tools => $self->agent->{tools}, disallowed => $self->agent->{disallowed} ),
+    map { $app->_mcp_client($_) } @{ $self->tool_servers } ];
 }
 
 sub _build_engine {

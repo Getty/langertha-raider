@@ -49,7 +49,9 @@ our @EXPORT_OK = qw( run_scenario_files );
 #            $CLAUDE_CONFIG_DIR, so none sees the real ~/.raider or ~/.claude;
 #            %ENV is restored after each scenario. In the content of both,
 #            and in the strings of `script:`, {{HOME}} and {{ROOT}} stand for
-#            the two directories.
+#            the two directories, {{PERL}} for the perl running the tests and
+#            {{MCP_TEST_SERVER}} for t/lib/mcp-test-server.pl (a stdio MCP
+#            server, ADR 0029).
 #   executable: [ path, ... ]           files of `files:` (or of `home:`, as ~/path)
 #            made executable -- hook scripts
 #   run_prompt: true                    run each prompt as Application->run_prompt
@@ -67,6 +69,10 @@ our @EXPORT_OK = qw( run_scenario_files );
 #   approve: [ once | session | no | 'no: reason', ... ]  the person approving
 #            tool calls, one answer per question in order (as the REPL's 1/2/3);
 #            when the list runs out the answer is no
+#   mcp_answers: { server => approve | all | reject }  the person answering, before the
+#            first prompt, about the project MCP servers that wait for an approval
+#            (Application->ask_mcp_approvals, as the REPL asks; ADR 0029); a server
+#            not named gets no answer and stays off
 #   review:  [ yes | no | 'no: feedback', ... ]  the person reviewing plans of
 #            exit_plan_mode, in order (without the key nobody reviews)
 #   prompt:  the user prompt (or `prompts:`, a list run one after the other on
@@ -120,6 +126,9 @@ our @EXPORT_OK = qw( run_scenario_files );
 
 my $yaml  = YAML::PP->new( boolean => 'JSON::PP' );
 
+# The stdio MCP server of the tests ({{MCP_TEST_SERVER}}, run with {{PERL}}).
+my $MCP_TEST_SERVER = path(__FILE__)->parent->parent->parent->child('mcp-test-server.pl')->realpath->stringify;
+
 sub run_scenario_files {
   my ( @files ) = @_;
   run_scenario_file($_) for @files;
@@ -141,6 +150,7 @@ sub run_scenario_file {
     my $http = $s->{http} ? Test::Raider::LocalHTTP->new( loop => IO::Async::Loop->new, routes => $s->{http} ) : undef;
     my $fill = sub {
       ( my $t = $_[0] ) =~ s/\{\{HOME\}\}/$home/g; $t =~ s/\{\{ROOT\}\}/$root/g;
+      $t =~ s/\{\{PERL\}\}/$^X/g; $t =~ s/\{\{MCP_TEST_SERVER\}\}/$MCP_TEST_SERVER/g;
       $http ? $http->fill($t) : $t;
     };
     $root->child($_)->touchpath->spew_utf8( $fill->( $s->{files}{$_} ) ) for keys %{ $s->{files} // {} };
@@ -186,6 +196,10 @@ sub run_scenario_file {
         return $r =~ /\A(?:yes|y)\z/ ? { approve => 1 } : { approve => 0, $r =~ /\Ano:\s*(.*)\z/s ? ( feedback => $1 ) : () };
       } ) : (),
     );
+    # The person answering about pending project MCP servers before the first prompt (ADR 0029).
+    if ( my $mcp_answers = $s->{mcp_answers} ) {
+      $app->ask_mcp_approvals( sub { $mcp_answers->{ $_[0]{name} } } );
+    }
     my @prompts = $s->{prompts} ? @{ $s->{prompts} } : ( $s->{prompt} // 'go' );
     my ( $answer, $outcome );
     for my $i ( 0 .. $#prompts ) {

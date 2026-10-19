@@ -251,6 +251,7 @@ sub config_report {
     }
   }
   $self->permissions_report($report->{permissions}) if $report->{permissions};
+  $self->mcp_report($report->{mcp}) if $report->{mcp};
   if (my $skills = $report->{skills}) {
     $self->emit($self->c(meta => 'skills: '), $self->c(meta => '(listed in the prompt, loaded by the skill tool)'), "\n")
       if @$skills || @{ $report->{shadowed_skills} // [] } || @{ $report->{skill_problems} // [] };
@@ -390,6 +391,63 @@ sub permissions_report {
   }
   for my $d (@{ $p->{additional_directories} }) {
     $self->emit('  ', $self->c(meta => 'additional directory '), $d->{path}, $self->c(meta => ' ('.$d->{source}.')'), "\n");
+  }
+  return;
+}
+
+=method mcp_report
+
+    $out->mcp_report( $app->mcp_report );
+    $out->mcp_report( $app->mcp_report, tools => 1 );   # /mcp
+
+Prints the configured MCP servers (ADR 0029,
+L<Langertha::Raider::Application/mcp_report>): per server its name and
+status in Claude Code's words (C<connected>, C<failed>, C<pending
+approval>, C<rejected>, C<disabled>, C<unsupported>, C<not configured>,
+C<invalid>, C<configured> before the start), scope, transport and source,
+the reason, the approval and where it came from, warnings, shadowed
+entries; for a failed server its last stderr lines. With C<tools> each
+server's tools too. Then the files that could not be read, the timeouts,
+whether the folder is trusted and where answers are written. Part of
+L</config_report>; the REPL's C</mcp> prints it with the tools.
+
+=cut
+
+my %MCP_STATUS = ( pending => 'pending approval', not_configured => 'not configured' );
+
+sub mcp_report {
+  my ( $self, $r, %o ) = @_;
+  my $servers = $r->{servers} // [];
+  $self->emit($self->c(meta => 'mcp servers: '), @$servers ? scalar(@$servers) : 'none',
+    $self->c(meta => sprintf(' (start %ds each%s)', $r->{startup_timeout_ms} / 1000,
+      defined $r->{tool_timeout_ms} ? sprintf(', calls %ds', $r->{tool_timeout_ms} / 1000) : '')), "\n");
+  for my $s (@$servers) {
+    my $status = $MCP_STATUS{ $s->{status} } // $s->{status};
+    my $color = $s->{status} eq 'connected' ? 'title' : $s->{status} =~ /\A(?:configured|starting|stopped)\z/ ? 'meta' : 'warn';
+    $self->emit('  ', $self->c(title => $s->{name}), ' ', $self->c($color => $status),
+      $self->c(meta => '  '.$s->{scope}.', '.( $s->{transport} // '?' ).', '.$s->{source}), "\n");
+    $self->emit('    ', $self->c(meta => $s->{reason}), "\n")
+      if defined $s->{reason} && $s->{status} ne 'pending';
+    my $ap = $s->{approval};
+    $self->emit('    ', $self->c(meta => 'approval: '.$ap->{state}
+      .( defined $ap->{source} ? ' ('.$ap->{by}.' in '.$ap->{source}.')' : '' )), "\n") if $ap && $ap->{required};
+    $self->emit('    ', $self->c(warn => 'warning: '.$_), "\n") for @{ $s->{warnings} // [] };
+    $self->emit('    ', $self->c(meta => 'shadows '.$_->{scope}.' entry in '.$_->{source}), "\n") for @{ $s->{shadowed} // [] };
+    if ($s->{status} eq 'failed') {
+      my @err = @{ $s->{stderr} // [] };
+      @err = @err[ -3 .. -1 ] if @err > 3;
+      $self->emit('    ', $self->c(meta => 'stderr: '.$_), "\n") for @err;
+    }
+    if ($o{tools} && @{ $s->{tools} // [] }) {
+      $self->emit('    ', $self->c(meta => 'tools: '), join(', ', @{ $s->{tools} }), "\n");
+    }
+  }
+  $self->emit('  ', $self->c(warn => 'cannot read '.$_->{source}.': '.$_->{error}), "\n") for @{ $r->{errors} // [] };
+  $self->emit('  ', $self->c(warn => 'warning: '.$_), "\n") for @{ $r->{warnings} // [] };
+  if (grep { $_->{approval} && $_->{approval}{required} } @$servers) {
+    my $t = $r->{trust} // {};
+    $self->emit('  ', $self->c(meta => 'folder '.( $t->{trusted} ? 'trusted ('.$t->{source}.')' : 'not trusted by Claude Code' )
+      .( defined $r->{approvals_go_to} ? '; answers are saved in '.$r->{approvals_go_to} : '' )), "\n");
   }
   return;
 }

@@ -339,6 +339,7 @@ sub run {
 
   $self->banner($rl->{impl});
   $out->say_meta($_) for @{ $self->notes };
+  $self->approve_mcp_servers;
   $self->commands->cmd_prompt if $self->customize_prompt;
   if (@first) { my $first = join ' ', @first; $first =~ m{^/} ? $self->run_slash($first) : $self->run_prompt($first) }
 
@@ -364,6 +365,7 @@ sub run {
 
   $call->('save');
   $self->app->shutdown_hooks;
+  $self->app->shutdown_mcp;
   return;
 }
 
@@ -438,6 +440,69 @@ sub permission_request {
       $why =~ s/^\s+|\s+\z//g;
       return { answer => 'no', ( length $why ? ( reason => $why ) : () ) };
     }
+  }
+}
+
+=method approve_mcp_servers
+
+    $repl->approve_mcp_servers;
+
+Before the first prompt: every project MCP server that waits for an
+approval (ADR 0029 E<sect>7) is put to the person once with
+L</mcp_approval>, through
+L<Langertha::Raider::Application/ask_mcp_approvals>, and each answer is
+reported with where it was saved. When the REPL cannot ask (input is not a
+terminal), the servers stay off and L<Langertha::Raider::Application/mcp_notes>
+says so.
+
+=method mcp_approval
+
+    my $answer = $repl->mcp_approval($server);   # 'approve', 'all', 'reject' or undef
+
+Claude Code's three choices for a pending project server: C<1> use this
+server, C<2> use this and all future MCP servers of this project, C<3>
+continue without it (C<y> / C<n> work too). A closed input is no answer:
+the server stays pending.
+
+=cut
+
+sub approve_mcp_servers {
+  my ( $self ) = @_;
+  my $app = $self->app;
+  my $out = $self->output;
+  unless ( $self->can_ask ) {
+    $out->say_meta($_) for $app->mcp_notes;
+    return;
+  }
+  weaken( my $repl = $self );
+  for my $ans ( $app->ask_mcp_approvals( sub { $repl ? $repl->mcp_approval(@_) : undef } ) ) {
+    my %word = ( approve => 'approved', all => 'approved, with every other project server', reject => 'rejected' );
+    $out->say_meta( 'mcp: '.$ans->{name}.' '.$word{ $ans->{answer} }
+      .( defined $ans->{written} ? ' (saved in '.$ans->{written}.')' : ' (for this session)' ) );
+  }
+  return;
+}
+
+sub mcp_approval {
+  my ( $self, $server ) = @_;
+  my $out = $self->output;
+  my $in  = $self->in;
+  my $what = $server->{transport} eq 'http' ? $server->{url}
+    : join ' ', grep { defined } $server->{command}, @{ $server->{args} // [] };
+  $what = substr( $what, 0, 200 ).'...' if length $what > 200;
+  $out->emit( $out->c( title => '? new MCP server in '.$server->{source}.': '.$server->{name} ), "\n" );
+  $out->emit( $out->c( meta => '  '.$server->{transport}.': '.$what ), "\n" );
+  $out->emit( $out->c( meta => '  1) use this MCP server' ), "\n" );
+  $out->emit( $out->c( meta => '  2) use this and all future MCP servers in this project' ), "\n" );
+  $out->emit( $out->c( meta => '  3) continue without using this MCP server' ), "\n" );
+  while (1) {
+    $out->emit( $out->c( meta => 'choice> ' ) );
+    my $line = <$in>;
+    return unless defined $line;
+    $line =~ s/^\s+|\s+\z//g;
+    return 'approve' if $line =~ /\A(?:1|y|yes)\z/i;
+    return 'all'     if $line eq '2';
+    return 'reject'  if $line =~ /\A(?:3|n|no)\z/i;
   }
 }
 

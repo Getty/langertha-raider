@@ -830,7 +830,8 @@ sub suggest_rule {
   my ( $builtin, $server ) = $self->_call_origin($call);
   unless ($builtin) {
     return unless defined $server;
-    return 'mcp__'.$server.'__'.$name;
+    # A configured server's tool already carries the prefix (ADR 0029).
+    return index($name, 'mcp__'.$server.'__') == 0 ? $name : 'mcp__'.$server.'__'.$name;
   }
   if ( $name eq 'bash' ) {
     my $command = $args->{command};
@@ -875,7 +876,8 @@ C<Edit(DIR/**)> for the directory of the file (C<Edit(/**)> in the root,
 C<Edit(//ABS/**)> outside it); a reading file or search tool whose path
 leaves the root and the additional directories (L</outside_paths>) ->
 C<Read(//DIR/**)> for the directory of the file, or the directory searched; C<web_fetch> -> C<WebFetch(domain:HOST)>; a foreign tool ->
-C<mcp__SERVER__TOOL>; any other tool -> its name. Returns nothing when no
+C<mcp__SERVER__TOOL> (a tool of a configured server, already named so,
+keeps its name); any other tool -> its name. Returns nothing when no
 rule can name the call safely: a command with substitutions, redirections
 into files or heredocs, or a foreign tool whose server has no
 name.

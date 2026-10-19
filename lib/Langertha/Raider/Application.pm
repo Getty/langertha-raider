@@ -37,6 +37,7 @@ use Langertha::Raider::Provider::Binding;
 use Langertha::Raider::ToolEffects;
 use Langertha::Raider::Permissions;
 use Langertha::Raider::Hooks;
+use Langertha::Raider::MCP;
 use Langertha::Raider::ToolNames;
 use Langertha::Raider::SessionStore;
 use Langertha::Raider::Subagent;
@@ -754,6 +755,7 @@ sub _build_permissions {
     cli_mode => $cli,
     ( $self->_permissions_session_rules ? ( session_rules => $self->_permissions_session_rules ) : () ),
     sources  => [ $self->config->permissions, ( $settings ? $settings->permissions : () ) ],
+    source_servers => $self->configured_mcp->source_servers,   # configured MCP servers are foreign (ADR 0029)
     # Claude layout: the file tools reach outside the root, the gate asks (ADR 0023).
     ask_outside_roots => ( $self->context->mode eq 'claude' ? 1 : 0 ),
   );
@@ -1309,6 +1311,194 @@ sub shutdown_hooks {
   return unless $self->has_hooks && $self->hooks;
   $self->_await_hooks($self->hooks->shutdown);
   return;
+}
+
+=attr configured_mcp
+
+The configured MCP servers of the application (ADR 0029), a
+L<Langertha::Raider::MCP> over
+L<Langertha::Raider::MCP::Config/from_context> of L</context> and
+L</config>. Its clients lead the engine's C<mcp_servers>; L</raid_f> starts
+them (in parallel, never failing) before the first raid; the permission
+gate knows them as foreign servers. Each start that ends emits
+C<mcp.server> (C<name>, C<scope>, C<transport>, C<status> C<connected> or
+C<failed>, C<reason>, C<tools>, the number of tools). Stopped by
+L</shutdown_mcp>.
+
+=method shutdown_mcp
+
+    $app->shutdown_mcp;
+
+Stops the configured MCP servers and waits until they are gone (a stdio
+process: stdin closed, then C<TERM>, then C<KILL>). The command line calls
+it when it is done.
+
+=cut
+
+has configured_mcp => (
+  is         => 'ro',
+  isa        => 'Langertha::Raider::MCP',
+  init_arg   => undef,
+  lazy_build => 1,
+  writer     => '_set_configured_mcp',
+);
+
+sub mcp_class        { 'Langertha::Raider::MCP' }
+sub mcp_config_class { 'Langertha::Raider::MCP::Config' }
+
+# The person's answers about project servers in this session (ADR 0029 §7),
+# shared by every model the application builds.
+has _mcp_session_approvals => (is => 'ro', isa => 'HashRef', init_arg => undef, default => sub { {} });
+
+sub _build_configured_mcp { $_[0]->_new_mcp }
+
+sub _new_mcp {
+  my ($self, %more) = @_;
+  weaken(my $app = $self);
+  return $self->mcp_class->new(
+    config    => $self->mcp_config_class->from_context($self->context, config => $self->config,
+      session_approvals => $self->_mcp_session_approvals),
+    loop      => $self->loop,
+    %more,
+    on_status => sub {
+      my ( $server ) = @_;
+      return unless $app && $server->status =~ /\A(?:connected|failed)\z/;
+      $app->event('mcp.server', name => $server->name, scope => $server->spec->{scope},
+        transport => $server->transport, status => $server->status, reason => $server->reason,
+        tools => scalar( () = $server->tool_names ));
+    },
+  );
+}
+
+sub shutdown_mcp {
+  my ($self) = @_;
+  return unless $self->has_configured_mcp;
+  $self->loop->await($self->configured_mcp->stop_f);
+  return;
+}
+
+=method reload_mcp
+
+    $app->reload_mcp;
+
+Reads the MCP configuration again (C</reload>, after L</reload_context>
+read the config files and settings): a server configured exactly as before
+keeps its running connection, the others are stopped and the new ones start
+with the next raid. The front of the engine's C<mcp_servers> and the
+policy's C<source_servers> change in place. Nothing to do before the
+servers were first needed.
+
+=method reconnect_mcp
+
+    my @names = $app->reconnect_mcp('github');   # or 'all' / undef
+
+Stops the named configured server (every one with C<all> or no name) and
+starts it again at once, in the same place; waits for the start. Returns
+the names restarted (none for an unknown name).
+
+=method mcp_pids
+
+The process ids of the running stdio servers; a cancelled run leaves them
+alone (L<Langertha::Raider::CLI::Runner/cancel_run>).
+
+=method mcp_notes
+
+The lines L<Langertha::Raider::MCP/notes> gives: the project servers that
+wait for an approval nobody can give in this run. The command line prints
+them on stderr.
+
+=method ask_mcp_approvals
+
+    $app->ask_mcp_approvals(sub {
+      my ( $server ) = @_;          # an entry of Langertha::Raider::MCP::Config/servers
+      return 'approve';             # or 'all', 'reject', undef (no answer: stays pending)
+    });
+
+Puts every pending project server to the person once (ADR 0029 E<sect>7),
+writes each answer where it counts next time
+(L<Langertha::Raider::MCP::Config/record_approval>), and makes it hold now
+(L</reload_mcp>). After C<all> nobody is asked again. Returns a list of
+C<< { name, answer, written } >> (C<written>: the file's label, or
+C<undef> when it holds for the session only).
+
+=cut
+
+sub reload_mcp {
+  my ($self) = @_;
+  return unless $self->has_configured_mcp;
+  my $old = $self->configured_mcp;
+  my $new = $self->_new_mcp( previous => $old );
+  my $count = @{ $old->clients };
+  $new->clients;   # takes over what it keeps from $old
+  $self->_set_configured_mcp($new);
+  splice @{ $self->_mcps }, 0, $count, @{ $new->clients } if $self->_has_mcps;
+  %{ $self->permissions->source_servers } = %{ $new->source_servers } if $self->has_permissions;
+  $self->loop->await($old->stop_f);
+  return $new;
+}
+
+sub reconnect_mcp {
+  my ($self, $which) = @_;
+  my $mcp = $self->configured_mcp;
+  my @names = !defined $which || $which eq 'all' ? map { $_->name } @{ $mcp->clients } : ($which);
+  my @done;
+  for my $name (@names) {
+    my ( $old, $new ) = $mcp->replace($name) or next;
+    if ($self->_has_mcps) {
+      $_ = $new for grep { refaddr $_ == refaddr $old } @{ $self->_mcps };
+    }
+    $self->loop->await($old->stop_f);
+    $self->loop->await($new->start_f);
+    push @done, $name;
+  }
+  return @done;
+}
+
+sub mcp_pids { $_[0]->has_configured_mcp ? $_[0]->configured_mcp->pids : () }
+
+=method mcp_report
+
+    my $r = $app->mcp_report;
+
+The configured MCP servers for C<config explain> and C</mcp>: C<servers>
+(L<Langertha::Raider::MCP/report>), C<errors> (files that could not be
+read), C<warnings> (C<MCP_TIMEOUT> / C<MCP_TOOL_TIMEOUT>), C<trust> (with
+its source), C<approvals_go_to> (where an answer is written) and the
+C<startup_timeout_ms> / C<tool_timeout_ms>.
+
+=cut
+
+sub mcp_report {
+  my ($self) = @_;
+  my $mcp = $self->configured_mcp;
+  my $config = $mcp->config;
+  my $target = $config->approval_target;
+  return {
+    servers            => $mcp->report,
+    errors             => $config->errors,
+    warnings           => $config->env_warnings,
+    trust              => $config->trust,
+    approvals_go_to    => $target ? $target->{label} : undef,
+    startup_timeout_ms => $config->startup_timeout_ms,
+    tool_timeout_ms    => $config->tool_timeout_ms,
+  };
+}
+
+sub mcp_notes { $_[0]->configured_mcp->notes }
+
+sub ask_mcp_approvals {
+  my ($self, $ask) = @_;
+  my $config = $self->configured_mcp->config;
+  my @answers;
+  for my $server ($config->pending) {
+    last if ( $self->_mcp_session_approvals->{'*'} // '' ) eq 'approved';
+    my $answer = $ask->($server);
+    next unless defined $answer && $answer =~ /\A(?:approve|all|reject)\z/;
+    my $written = $config->record_approval($server->{name}, $answer);
+    push @answers, { name => $server->{name}, answer => $answer, written => $written };
+  }
+  $self->reload_mcp if @answers;
+  return @answers;
 }
 
 # A permission.* event of the gated run: to the sub-run's on_event, else to
@@ -1883,9 +2073,11 @@ sub _build_api_key { $_[0]->engine_resolver->api_key }
 
 sub _engine_class { $_[0]->engine_resolver->engine_class }
 
+# The configured MCP servers (ADR 0029) lead the list, so their engine:N
+# stay the same whatever raider's own servers do (_remount_tool_servers).
 sub _build_mcps {
   my ($self) = @_;
-  return [ map { $self->_mcp_client($_) } @{ $self->_tool_servers } ];
+  return [ @{ $self->configured_mcp->clients }, map { $self->_mcp_client($_) } @{ $self->_tool_servers } ];
 }
 
 sub _mcp_client {
@@ -2440,10 +2632,11 @@ sub _remount_tool_servers {
   return 0 if join(',', map { refaddr $_ } @$servers) eq join(',', map { refaddr $_ } @$want);
   if ($self->_has_mcps) {
     my $mcps = $self->_mcps;
-    my %client = map { refaddr($servers->[$_]) => $mcps->[$_] } 0..$#$servers;
+    my @configured = @{ $self->configured_mcp->clients };
+    my %client = map { refaddr($servers->[$_]) => $mcps->[$_ + @configured] } 0..$#$servers;
     my @clients = map { delete $client{refaddr $_} // $self->_mcp_client($_) } @$want;
     $self->loop->remove($_) for values %client;
-    @$mcps = @clients;
+    @$mcps = ( @configured, @clients );
   }
   @$servers = @$want;
   return 1;
@@ -2614,6 +2807,7 @@ L<Langertha::Raider::Result>.
 
 async sub raid_f {
   my ($self, @messages) = @_;
+  await $self->configured_mcp->start_f;   # the configured servers in parallel, never fails
   for my $mcp (@{$self->_mcps}) {
     await $mcp->initialize;
   }
@@ -3133,6 +3327,7 @@ sub reload_context {
   my ($self) = @_;
   $self->context->reload;
   $self->reload_permissions;
+  $self->reload_mcp;   # after the config files were read again (ADR 0029)
   $self->_clear_skill_tool_server;
   # The hooks come from the settings and plugins just read again.
   if ($self->has_hooks && $self->hooks) {
@@ -3401,6 +3596,7 @@ sub explain_config {
     session_embeddings => $self->session_embeddings,
     tools         => $self->_tool_effects_report,
     permissions   => $self->permissions->report,
+    mcp           => $self->mcp_report,
     ignored_instructions_files => [ $self->instructions->ignored_files ],
     %{ $self->context->report(
       engine_class => scalar eval { $self->_engine_class },

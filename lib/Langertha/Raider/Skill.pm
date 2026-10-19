@@ -210,6 +210,8 @@ and raider warns about the other.
 | `/config`                | Show each setting and where it came from             |
 | `/permissions`           | Permission mode, rules and session rules             |
 | `/permissions mode MODE` | Switch the permission mode                           |
+| `/mcp`                   | Configured MCP servers: status, source, tools        |
+| `/mcp reconnect [NAME]`  | Restart one MCP server (all without a name)          |
 | `/model [NAME]`          | Save NAME as model to the config file (next start)   |
 | `/model list [FILTER]`   | List the engine's models                             |
 | `/packs`                 | List the packs and which are active                  |

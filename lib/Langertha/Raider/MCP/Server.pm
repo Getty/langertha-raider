@@ -1,0 +1,524 @@
+package Langertha::Raider::MCP::Server;
+# ABSTRACT: Internal client of one configured MCP server, mounted as an engine MCP server
+our $VERSION = '0.504';
+use Moose;
+use namespace::autoclean;
+use Carp qw( croak );
+use Future;
+use Future::AsyncAwait;
+use JSON::MaybeXS ();
+use Path::Tiny;
+use Langertha::Raider::MCP::HTTP;
+use Langertha::Raider::MCP::Stdio;
+
+=head1 SYNOPSIS
+
+    # Internal to Langertha-Raider -- no API promise.
+    my $server = Langertha::Raider::MCP::Server->new(
+      spec => $mcp_config->server('github'),   # an entry of Langertha::Raider::MCP::Config
+      loop => $loop,
+    );
+    await $server->initialize;                 # never fails: status connected or failed
+    say $server->status.': '.( $server->reason // '' );
+    my $tools  = await $server->list_tools;    # names mcp__github__*
+    my $result = await $server->call_tool( 'mcp__github__create_issue', \%args );
+    await $server->stop_f;
+
+=head1 DESCRIPTION
+
+B<Internal module.> Its interface may change without notice.
+
+One configured MCP server (ADR 0029 E<sect>10) as raider mounts it: an
+object that answers C<initialize>, C<list_tools> and C<call_tool> like
+L<Net::Async::MCP>, so it is one more entry of the engine's C<mcp_servers>
+and L<Langertha::Raider> calls it as it calls every other.
+
+=over
+
+=item * B<Start.> L</start_f> (and L</initialize>) connects once: the
+transport (L<Langertha::Raider::MCP::Stdio> or
+L<Langertha::Raider::MCP::HTTP>), the C<initialize> handshake, the
+C<notifications/initialized> notification and the tool list, all within
+L</startup_timeout_ms>. It never fails: L</status> becomes C<connected>, or
+C<failed> with L</reason>; a stdio process of a failed start is stopped.
+
+=item * B<Protocol.> Raider speaks the established handshake of the MCP
+revisions 2024-11-05 to 2025-11-25: it asks for L</client_protocol_version>
+and accepts any revision of L</known_protocol_versions> the server answers
+with. The stateless 2026-07-28 revision (C<server/discover>) is not spoken;
+a server that knows only that one fails with a reason that says so. The
+installed L<Net::Async::MCP> speaks only that revision, which is why raider
+has its own client here (ADR 0029).
+
+=item * B<Tools.> The server's tools are listed once, at the start, under
+the names the model sees: C<mcp__KEY__TOOL> with the tool part normalised
+(L<Langertha::Raider::MCP::Config/tool_name>). Two tools that normalise to
+the same name: the first is kept. L</call_tool> sends the original name.
+
+=item * B<Calls> are bounded by the server's C<timeout_ms> (its C<timeout>,
+else C<MCP_TOOL_TIMEOUT>); a call that runs out is cancelled
+(C<notifications/cancelled>) and fails. A result keeps what the server sent,
+except C<_meta> keys under C<raider/>: a foreign server cannot hand the
+raider instructions through them (L<Langertha::Raider> takes user messages
+from C<_meta.raider/messages> of its own sources).
+
+=back
+
+=attr spec
+
+The server's entry of L<Langertha::Raider::MCP::Config/servers>. Required.
+
+=attr loop
+
+The L<IO::Async::Loop>. Required.
+
+=attr startup_timeout_ms
+
+How long the start may take, in milliseconds. Default 30000.
+
+=attr base_env
+
+The environment a stdio server inherits (before its own C<env>). Default a
+copy of C<%ENV>.
+
+=attr kill_grace
+
+Seconds between closing a stdio server's stdin, C<TERM> and C<KILL>.
+Default 2.
+
+=attr on_status
+
+C<< sub { my ( $server ) = @_; ... } >>, called whenever L</status>
+changes. Optional.
+
+=cut
+
+has spec => ( is => 'ro', isa => 'HashRef', required => 1 );
+has loop => ( is => 'ro', required => 1 );
+
+has startup_timeout_ms => ( is => 'ro', isa => 'Num', default => 30000 );
+has base_env           => ( is => 'ro', isa => 'HashRef', lazy_build => 1 );
+has kill_grace         => ( is => 'ro', isa => 'Num', default => 2 );
+has on_status          => ( is => 'ro', isa => 'Maybe[CodeRef]' );
+
+sub _build_base_env { return { %ENV } }
+
+=method status
+
+C<configured> before the start, C<starting>, then C<connected> or
+C<failed>; C<stopped> after L</stop_f>.
+
+=method reason
+
+Why it failed (or stopped), with the last stderr line of a stdio server.
+
+=method protocol_version
+
+The revision the server answered with.
+
+=method server_info
+
+The server's C<serverInfo> (C<name>, C<version>), or C<{}>.
+
+=method instructions
+
+The server's C<instructions>, or C<undef>.
+
+=method warnings
+
+What went wrong without stopping the server: a tool dropped because its
+name collides, ...
+
+=cut
+
+has status           => ( is => 'ro', isa => 'Str', default => 'configured', writer => '_set_status_value' );
+has reason           => ( is => 'ro', isa => 'Maybe[Str]', writer => '_set_reason' );
+has protocol_version => ( is => 'ro', isa => 'Maybe[Str]', writer => '_set_protocol_version' );
+has server_info      => ( is => 'ro', isa => 'HashRef', default => sub { {} }, writer => '_set_server_info' );
+has instructions     => ( is => 'ro', isa => 'Maybe[Str]', writer => '_set_instructions' );
+has warnings         => ( is => 'ro', isa => 'ArrayRef', default => sub { [] } );
+
+has _transport => ( is => 'rw', init_arg => undef );
+has _start_f   => ( is => 'rw', init_arg => undef );
+has _tools     => ( is => 'ro', init_arg => undef, default => sub { [] } );
+has _original  => ( is => 'ro', init_arg => undef, default => sub { {} } );
+
+=method name
+
+=method key
+
+=method transport
+
+The server's C<name>, C<key> and C<transport> from L</spec>.
+
+=cut
+
+sub name      { $_[0]->spec->{name} }
+sub key       { $_[0]->spec->{key} }
+sub transport { $_[0]->spec->{transport} }
+
+=method client_protocol_version
+
+The revision raider asks for in C<initialize>: C<2025-11-25>.
+
+=method known_protocol_versions
+
+The revisions raider accepts in the answer: C<2025-11-25>, C<2025-06-18>,
+C<2025-03-26>, C<2024-11-05>. They differ in features raider does not use;
+the handshake, C<tools/list> and C<tools/call> are the same in all of them.
+
+=cut
+
+sub client_protocol_version { '2025-11-25' }
+sub known_protocol_versions { qw( 2025-11-25 2025-06-18 2025-03-26 2024-11-05 ) }
+
+sub _set_status {
+  my ( $self, $status, $reason ) = @_;
+  $self->_set_status_value($status);
+  $self->_set_reason($reason);
+  $self->on_status->($self) if $self->on_status;
+  return;
+}
+
+=method fingerprint
+
+What the server is started with, as one string: the transport, the
+command, arguments, working and project directory and the whole
+environment of a stdio server, the URL and headers of an HTTP one, the tool
+prefix and the call timeout. Two clients with the same fingerprint talk to
+the same thing (C</reload> keeps such a client).
+
+=method pid
+
+The process id of a running stdio server, else C<undef>.
+
+=cut
+
+sub fingerprint {
+  my ( $self ) = @_;
+  my $spec = $self->spec;
+  my %what = map { $_ => $spec->{$_} } qw( transport command args cwd project_dir url headers tool_prefix timeout_ms );
+  $what{env} = $self->child_env if ( $spec->{transport} // '' ) eq 'stdio';
+  return JSON::MaybeXS->new( canonical => 1 )->encode(\%what);
+}
+
+sub pid {
+  my ( $self ) = @_;
+  my $t = $self->_transport or return;
+  return unless $t->can('is_running') && $t->is_running;
+  return $t->pid;
+}
+
+=method stderr_tail
+
+The last lines a stdio server wrote to stderr.
+
+=cut
+
+sub stderr_tail {
+  my ( $self ) = @_;
+  my $t = $self->_transport or return;
+  return $t->stderr_tail;
+}
+
+=method child_env
+
+The environment a stdio server is started with: L</base_env> without
+inherited C<CLAUDE_PLUGIN_ROOT> / C<CLAUDE_PLUGIN_DATA>, then the entry's
+C<env>, then C<CLAUDE_PROJECT_DIR> (the project dir, as Claude Code sets
+it) and, for a plugin's server, its C<CLAUDE_PLUGIN_ROOT> and
+C<CLAUDE_PLUGIN_DATA>.
+
+=cut
+
+sub child_env {
+  my ( $self ) = @_;
+  my $spec = $self->spec;
+  my %env = %{ $self->base_env };
+  delete @env{qw( CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA )};
+  %env = ( %env, %{ $spec->{env} // {} } );
+  $env{CLAUDE_PROJECT_DIR} = $spec->{project_dir} if defined $spec->{project_dir};
+  if (my $plugin = $spec->{plugin}) {
+    $env{CLAUDE_PLUGIN_ROOT} = $plugin->{root};
+    $env{CLAUDE_PLUGIN_DATA} = $plugin->{data_dir} if defined $plugin->{data_dir};
+  }
+  return \%env;
+}
+
+sub _build_transport {
+  my ( $self ) = @_;
+  my $spec = $self->spec;
+  if ($spec->{transport} eq 'http') {
+    return Langertha::Raider::MCP::HTTP->new(
+      loop    => $self->loop,
+      url     => $spec->{url},
+      headers => $spec->{headers} // {},
+    );
+  }
+  croak __PACKAGE__.': cannot connect a '.( $spec->{transport} // 'missing' ).' transport'
+    unless ( $spec->{transport} // '' ) eq 'stdio';
+  # Claude Code creates the plugin's data directory when its config names it.
+  if (my $plugin = $spec->{plugin}) {
+    my $raw = JSON::MaybeXS->new( canonical => 1 )->encode($spec->{entry});
+    eval { path($plugin->{data_dir})->mkpath } if defined $plugin->{data_dir} && $raw =~ /\$\{CLAUDE_PLUGIN_DATA/;
+  }
+  return Langertha::Raider::MCP::Stdio->new(
+    loop       => $self->loop,
+    command    => $spec->{command},
+    args       => $spec->{args} // [],
+    env        => $self->child_env,
+    cwd        => $spec->{cwd},
+    kill_grace => $self->kill_grace,
+  );
+}
+
+=method start_f
+
+    await $server->start_f;
+
+Connects once (see L</DESCRIPTION>); every later call returns the same
+future. Never fails.
+
+=method initialize
+
+The same as L</start_f>, under the name L<Langertha::Raider::Application>
+calls on every engine MCP server before a raid.
+
+=cut
+
+sub initialize { $_[0]->start_f }
+
+sub start_f {
+  my ( $self ) = @_;
+  return $self->_start_f if $self->_start_f;
+  my $spec = $self->spec;
+  unless (( $spec->{status} // '' ) eq 'configured') {
+    $self->_set_status(failed => 'not startable: '.( $spec->{status} // '?' ));
+    return $self->_start_f(Future->done);
+  }
+  $self->_set_status('starting');
+  my $loop = $self->loop;
+  my $seconds = $self->startup_timeout_ms / 1000;
+  my $connect = $self->_connect_f;
+  my $timer = $loop->delay_future( after => $seconds )
+    ->then(sub { Future->fail('did not start within '.$self->_seconds_text($seconds).' (MCP_TIMEOUT)') });
+  my $f = Future->wait_any($connect, $timer)->then(
+    sub {
+      $self->_set_status('connected');
+      return Future->done;
+    },
+    sub {
+      my ( $error ) = @_;
+      $self->_set_status(failed => $self->_failure_text($error));
+      # Stopped in the background (the transport holds its timers): the
+      # start is over now, not after the kill grace.
+      my $t = $self->_transport;
+      $t->stop_f->retain if $t;
+      return Future->done;
+    },
+  );
+  return $self->_start_f($f);
+}
+
+sub _seconds_text {
+  my ( $self, $s ) = @_;
+  return ( $s == int $s ? $s : sprintf('%.1f', $s) ).' s';
+}
+
+# A failure as one line, with how a stdio process ended and its last
+# stderr line.
+sub _failure_text {
+  my ( $self, $error ) = @_;
+  my ( $text ) = split /\n/, ''.( $error // 'unknown error' );
+  $text =~ s/ at \S+ line \d+\.?\z//;
+  my $t = $self->_transport;
+  if ($t && $t->can('exited') && $t->exited && $text =~ /\AMCP server process /) {
+    $text = $t->exit_text;
+  }
+  my ( $last ) = reverse $self->stderr_tail;
+  $text .= ' (stderr: '.$last.')' if defined $last && index($text, $last) < 0;
+  return $text;
+}
+
+async sub _connect_f {
+  my ( $self ) = @_;
+  my $t = $self->_build_transport;
+  $self->_transport($t);
+  $t->start;
+  my $init = await $t->request_f( initialize => {
+    protocolVersion => $self->client_protocol_version,
+    capabilities    => {},
+    clientInfo      => { name => 'raider', version => $VERSION },
+  } )->else(sub {
+    my ( $error, $category, $detail ) = @_;
+    return Future->fail('the server does not answer initialize: it speaks only an MCP revision raider does not '
+      .'(2026-07-28 and later need server/discover)')
+      if ( $category // '' ) eq 'mcp' && ref $detail eq 'HASH' && ( $detail->{code} // 0 ) == -32601;
+    return Future->fail(@_);
+  });
+  await Future->fail('the initialize answer is not an object') unless ref $init eq 'HASH';
+  my $version = $init->{protocolVersion} // '';
+  await Future->fail('the server answered with MCP revision '.( length $version ? $version : '(none)' )
+    .'; raider speaks '.join(', ', $self->known_protocol_versions))
+    unless grep { $_ eq $version } $self->known_protocol_versions;
+  $self->_set_protocol_version($version);
+  $t->protocol_version($version) if $t->can('protocol_version');
+  $self->_set_server_info(ref $init->{serverInfo} eq 'HASH' ? $init->{serverInfo} : {});
+  $self->_set_instructions($init->{instructions}) if defined $init->{instructions} && !ref $init->{instructions};
+  if ($t->can('notify_f')) { await $t->notify_f('notifications/initialized') }
+  else                     { $t->notify('notifications/initialized') }
+
+  my $caps = ref $init->{capabilities} eq 'HASH' ? $init->{capabilities} : {};
+  return unless $caps->{tools};
+  my ( @tools, %seen_cursor, $cursor );
+  for my $page (1 .. 100) {
+    my $res = await $t->request_f('tools/list', defined $cursor ? { cursor => $cursor } : {});
+    push @tools, grep { ref $_ eq 'HASH' && defined $_->{name} && !ref $_->{name} } @{ ref $res eq 'HASH' && ref $res->{tools} eq 'ARRAY' ? $res->{tools} : [] };
+    $cursor = ref $res eq 'HASH' ? $res->{nextCursor} : undef;
+    last unless defined $cursor && !ref $cursor;
+    await Future->fail('tools/list repeats the cursor '.$cursor) if $seen_cursor{$cursor}++;
+  }
+  $self->_add_tools(@tools);
+  return;
+}
+
+sub _add_tools {
+  my ( $self, @tools ) = @_;
+  my $prefix = $self->spec->{tool_prefix};
+  for my $tool (@tools) {
+    ( my $part = $tool->{name} ) =~ s/[^A-Za-z0-9_-]/_/g;
+    my $name = $prefix.$part;
+    if (exists $self->_original->{$name}) {
+      push @{ $self->warnings }, 'tool '.$tool->{name}.' dropped: its name '.$name.' is taken by '.$self->_original->{$name};
+      next;
+    }
+    $self->_original->{$name} = $tool->{name};
+    push @{ $self->_tools }, {
+      %$tool,
+      name        => $name,
+      inputSchema => ref $tool->{inputSchema} eq 'HASH' ? $tool->{inputSchema} : { type => 'object', properties => {} },
+    };
+  }
+  return;
+}
+
+=method tool_names
+
+The names the model sees (C<mcp__KEY__TOOL>), in the server's order.
+
+=method original_name
+
+    my $name = $server->original_name('mcp__github__create_issue');   # create_issue
+
+The tool's name on the server, or C<undef> for a name it does not offer.
+
+=cut
+
+sub tool_names    { map { $_->{name} } @{ $_[0]->_tools } }
+sub original_name { $_[0]->_original->{ $_[1] } }
+
+=method list_tools
+
+    my $tools = await $server->list_tools;
+
+The tools under their prefixed names (after the start; empty unless
+C<connected>), each a copy of the server's definition.
+
+=cut
+
+async sub list_tools {
+  my ( $self ) = @_;
+  await $self->start_f;
+  return [] unless $self->status eq 'connected';
+  return [ map { { %$_ } } @{ $self->_tools } ];
+}
+
+=method call_tool
+
+    my $result = await $server->call_tool( 'mcp__github__create_issue', \%args );
+
+Calls the tool by its original name, bounded by C<timeout_ms> of the
+L</spec>. Fails when the server is not connected, the name is unknown, the
+server answers with a JSON-RPC error, the process is gone or the time is up
+(C<MCP tool call timed out after N s>).
+
+=cut
+
+sub call_tool {
+  my ( $self, $name, $args ) = @_;
+  return $self->start_f->then(sub {
+    return Future->fail('MCP server '.$self->name.' is not connected ('.$self->status
+      .( defined $self->reason ? ': '.$self->reason : '' ).')')
+      unless $self->status eq 'connected';
+    my $original = $self->original_name($name);
+    return Future->fail('MCP server '.$self->name.' has no tool '.$name) unless defined $original;
+    my $call = $self->_transport->request_f('tools/call', { name => $original, arguments => $args // {} });
+    if (defined( my $ms = $self->spec->{timeout_ms} )) {
+      my $seconds = $ms / 1000;
+      my $timer = $self->loop->delay_future( after => $seconds )
+        ->then(sub { Future->fail('MCP tool call timed out after '.$self->_seconds_text($seconds)) });
+      $call = Future->wait_any($call, $timer);
+    }
+    return $call->then(sub { Future->done($self->_clean_result($_[0])) });
+  });
+}
+
+# The result without _meta keys of raider's own namespace.
+sub _clean_result {
+  my ( $self, $result ) = @_;
+  return { content => [] } unless ref $result eq 'HASH';
+  my %r = %$result;
+  $r{content} = [] unless ref $r{content} eq 'ARRAY';
+  if (ref $r{_meta} eq 'HASH') {
+    my %meta = map { $_ => $r{_meta}{$_} } grep { !m{\Araider/} } keys %{ $r{_meta} };
+    if (%meta) { $r{_meta} = \%meta } else { delete $r{_meta} }
+  }
+  return \%r;
+}
+
+=method stop_f
+
+    await $server->stop_f;
+
+Stops the server: a stdio process as L<Langertha::Raider::MCP::Stdio/stop_f>,
+an HTTP session with C<DELETE>. Status C<stopped>.
+
+=cut
+
+sub stop_f {
+  my ( $self ) = @_;
+  my $t = $self->_transport;
+  my $was = $self->status;
+  $self->_start_f->cancel if $self->_start_f && !$self->_start_f->is_ready;
+  $self->_set_status(stopped => $was eq 'failed' ? $self->reason : undef) unless $was eq 'stopped';
+  return $t ? $t->stop_f->else_done : Future->done;
+}
+
+=method kill_now
+
+Kills a stdio process at once.
+
+=cut
+
+sub kill_now {
+  my ( $self ) = @_;
+  my $t = $self->_transport or return;
+  $t->kill_now if $t->can('kill_now');
+  return;
+}
+
+__PACKAGE__->meta->make_immutable;
+
+1;
+
+=seealso
+
+=over
+
+=item * L<Langertha::Raider::MCP>
+
+=item * L<Langertha::Raider::MCP::Config>
+
+=back
+
+=cut

@@ -364,6 +364,81 @@ sub _md_paths {
   return grep { !$seen{$_}++ && $self->_within($_, $root) && ( -d $_ || ( -f $_ && /\.md\z/ ) ) } @paths;
 }
 
+=method mcp_servers
+
+    my ( $servers, $errors ) = $plugins->mcp_servers($plugin);
+    for my $s (@$servers) { ... $s->{name}, $s->{entry}, $s->{source} ... }
+
+The MCP servers one entry of L</plugins> declares (ADR 0029 E<sect>2), as
+Claude Code reads them, in this order:
+
+=over
+
+=item * F<.mcp.json> in the plugin root: the map under C<mcpServers>, or
+the whole object when it has no such key
+
+=item * the manifest's C<mcpServers>: a path to such a file (relative to
+the root), an inline map, or a list of both
+
+=back
+
+A server named twice: the later declaration wins. C<$servers> is sorted by
+name, each C<< { name, entry, source } >> with the entry as written and
+C<source> C<plugin:E<lt>nameE<gt> (FILE)> (C<plugin.json> for an inline
+map). A missing default file is no error. A file the manifest names that
+does not exist or is not a JSON object, a path that leaves the plugin root,
+or a C<mcpServers> that is not a map
+contributes nothing (a file named twice counts once) and is reported in
+C<$errors>; never fatal. Entries are not checked here.
+
+=cut
+
+sub mcp_servers {
+  my ( $self, $plugin ) = @_;
+  my $root = $self->_normpath($plugin->{root});
+  my $label = 'plugin:'.$plugin->{name};
+  my ( %servers, @errors, %seen );
+
+  my $add = sub {
+    my ( $map, $where ) = @_;
+    $servers{$_} = { name => $_, entry => $map->{$_}, source => $label.' ('.$where.')' } for keys %$map;
+  };
+  my $file = sub {
+    my ( $rel, $optional ) = @_;
+    my $abs = $self->_normpath( $rel =~ m{\A/} ? $rel : $root.'/'.$rel );
+    unless ($self->_within($abs, $root)) {
+      push @errors, $label.': '.$rel.' is outside the plugin';
+      return;
+    }
+    unless (-e $abs) {
+      push @errors, $label.': '.$rel.' does not exist' unless $optional;
+      return;
+    }
+    return if $seen{$abs}++;
+    my $data = eval { JSON::MaybeXS->new( utf8 => 1 )->decode(path($abs)->slurp_raw) };
+    my $where = path($abs)->relative($root)->stringify;
+    if (ref $data ne 'HASH') {
+      push @errors, $label.': '.$rel.' is not a JSON object'.( $@ ? ' (invalid JSON)' : '' );
+    }
+    elsif (exists $data->{mcpServers}) {
+      if (ref $data->{mcpServers} eq 'HASH') { $add->($data->{mcpServers}, $where) }
+      else { push @errors, $label.': '.$rel.' has an "mcpServers" that is not an object' }
+    }
+    else {
+      $add->($data, $where);
+    }
+  };
+
+  $file->('.mcp.json', 1);
+  my $declared = $plugin->{manifest}{mcpServers};
+  for my $item (ref $declared eq 'ARRAY' ? @$declared : defined $declared ? ($declared) : ()) {
+    if (ref $item eq 'HASH') { $add->($item, 'plugin.json') }
+    elsif (!ref $item)       { $file->($item, 0) }
+    else                     { push @errors, $label.': plugin.json mcpServers holds neither a path nor an object' }
+  }
+  return ( [ map { $servers{$_} } sort keys %servers ], \@errors );
+}
+
 # A JSON object from a file, {} when it is missing, broken or not an object.
 sub _load_json {
   my ( $self, $file ) = @_;

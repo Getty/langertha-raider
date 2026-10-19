@@ -227,7 +227,8 @@ when no run is in progress.
 sub cancel_run {
   my ( $self ) = @_;
   return 0 unless $self->_current && $self->app->cancel_run;
-  $self->terminate_children( keep => [ $self->app->bash_tools->background_pids ] );
+  # The configured MCP servers belong to the session too (ADR 0029).
+  $self->terminate_children( keep => [ $self->app->bash_tools->background_pids, $self->app->mcp_pids ] );
   return 1;
 }
 

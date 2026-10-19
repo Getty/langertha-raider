@@ -42,8 +42,10 @@ is not a JSON object is recorded in L</files> and contributes nothing; it is
 never fatal. Every entry keeps the label of the file it came from as
 C<source>.
 
-Raider uses C<permissions>, C<hooks>, C<disableAllHooks>, C<disableSkillShellExecution>, C<env> and
-C<enabledPlugins>. Every
+Raider uses C<permissions>, C<hooks>, C<disableAllHooks>, C<disableSkillShellExecution>, C<env>,
+C<enabledPlugins> and the approvals of project MCP servers
+(C<enableAllProjectMcpServers>, C<enabledMcpjsonServers>,
+C<disabledMcpjsonServers>; ADR 0029). Every
 other top-level key is listed by L</ignored>. Here they are only read;
 evaluating permissions (stream P), running hooks (stream H) and applying the
 environment are the caller's business.
@@ -85,7 +87,8 @@ sub _build_claude_home {
 }
 
 # The settings keys raider uses; everything else is listed by ignored().
-my %USED = map { $_ => 1 } qw( permissions hooks disableAllHooks disableSkillShellExecution env enabledPlugins );
+my %USED = map { $_ => 1 } qw( permissions hooks disableAllHooks disableSkillShellExecution env enabledPlugins
+  enableAllProjectMcpServers enabledMcpjsonServers disabledMcpjsonServers );
 
 # The three files with their data, in read order. Each entry is
 # { file, label, scope, exists, error, data }; data is the decoded object,
@@ -461,6 +464,54 @@ sub enabled_plugin_map {
   my ( $self ) = @_;
   my $ep = $self->enabled_plugins;
   return { map { $_ => $ep->{$_}{value} } keys %$ep };
+}
+
+=method mcpjson_approvals
+
+    my $a = $settings->mcpjson_approvals;
+    for my $d (@{ $a->{disabled} }) { ... $d->{name}, $d->{source}, $d->{scope} ... }
+
+The approvals of project MCP servers (F<.mcp.json>, ADR 0029 E<sect>7) of
+every file, in read order, each entry with the label and the scope
+(C<user>, C<project>, C<local>) of its file. Which of them count depends on
+the workspace trust; L<Langertha::Raider::MCP::Config> decides that.
+
+    {
+      enable_all => [ { value => 1, source => '.claude/settings.local.json', scope => 'local' }, ... ],
+      enabled    => [ { name => 'github', source => ..., scope => ... }, ... ],
+      disabled   => [ { name => 'db',     source => ..., scope => ... }, ... ],
+    }
+
+C<enable_all> holds one entry per file whose C<enableAllProjectMcpServers>
+is a JSON boolean (C<value> C<1> or C<0>); C<enabled> and C<disabled> are
+the C<enabledMcpjsonServers> and C<disabledMcpjsonServers> lists
+concatenated. Entries that are not non-empty strings are skipped.
+
+=cut
+
+has mcpjson_approvals => (
+  is         => 'ro',
+  isa        => 'HashRef',
+  init_arg   => undef,
+  lazy_build => 1,
+);
+
+sub _build_mcpjson_approvals {
+  my ( $self ) = @_;
+  my %out = ( enable_all => [], enabled => [], disabled => [] );
+  for my $file (grep { $_->{data} } @{ $self->_loaded }) {
+    my ( $data, $label, $scope ) = @{$file}{qw( data label scope )};
+    my $all = $data->{enableAllProjectMcpServers};
+    push @{ $out{enable_all} }, { value => $all ? 1 : 0, source => $label, scope => $scope }
+      if is_bool($all);
+    for my $kind (qw( enabled disabled )) {
+      my $list = $data->{$kind.'McpjsonServers'};
+      next unless ref $list eq 'ARRAY';
+      push @{ $out{$kind} }, map { { name => $_, source => $label, scope => $scope } }
+        grep { $self->_is_string($_) && length } @$list;
+    }
+  }
+  return \%out;
 }
 
 =method ignored

@@ -62,6 +62,13 @@ _Avoid_: mission (for the assembled whole).
 **Tool source / active tool set**: tools come from many sources; per run exactly one
 active set is assembled and used for prompt, catalogue and permission checks (ADR 0005).
 
+**MCP server** (configured): an external tool server a person configured — `mcp:` of a
+raider config, or Claude Code's `~/.claude.json`, `.mcp.json` and plugins — whose tools
+reach the model as `mcp__<server>__<tool>` (ADR 0029). A **project server** comes with the
+repository (`.mcp.json`, `mcp:` of the project config) and starts only after an
+**approval**; the person's own servers need none. Raider's own in-process tool servers
+(files, bash, web, …) are *stock* tool servers, not MCP servers in this sense.
+
 **Permission mode**: how a session treats tool calls no rule decides — `default` (asks
 before writing, running code, the network), `acceptEdits`, `plan` (read and plan only),
 `bypassPermissions` (ADR 0021). Set locally (flag, config, settings), never by a prompt.

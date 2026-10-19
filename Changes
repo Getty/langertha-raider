@@ -260,6 +260,73 @@ Revision history for Langertha-Raider
     - Tests t/260-t/266, scenarios 190-194; the scenario harness sends
       /NAME prompts as slash commands.
 
+  [MCP servers like Claude Code]
+    - ADR 0029 decides how raider connects to the MCP servers a person
+      configures, as Claude Code does: sources, precedence, ${VAR}
+      expansion, tool names mcp__<server>__<tool>, approval of a
+      repository's servers, timeouts, statuses.
+    - The configured servers run: stdio (own session, in the root, with the
+      entry's env and CLAUDE_PROJECT_DIR; stderr kept for the status, never
+      on the terminal) and streamable HTTP (session id, protocol header,
+      JSON and event-stream answers). All start in parallel before the
+      first raid, each within MCP_TIMEOUT (30 s); a server that fails,
+      hangs or exits is reported (mcp.server event) and never stops the
+      run. Tools reach the model as mcp__<server>__<tool>; calls are bounded
+      by the server's timeout or MCP_TOOL_TIMEOUT. Stopped when the
+      one-shot run or the REPL ends.
+    - Raider speaks the initialize handshake of the MCP revisions
+      2024-11-05 to 2025-11-25 itself (Langertha::Raider::MCP::Server,
+      ::Stdio, ::HTTP): the installed Net::Async::MCP 0.006 speaks only
+      2026-07-28 and cannot reach a server of an earlier revision.
+    - The tools of a configured server are foreign to the permission gate:
+      the mode asks, rules name them mcp__<server>__<tool> or mcp__<server>,
+      hooks match the mcp__ name. A result cannot hand raider user messages
+      (_meta raider/ keys are removed). Subagents use the same connections,
+      limited to the mcp__ tools their agent file allows.
+    - Sources, the first entry of a name winning whole: mcp: of
+      .raider/config.yml, mcp: of ~/.raider/config.yml, then in the Claude
+      layout the local servers of ~/.claude.json (projects.<dir>),
+      .mcp.json, the user servers of ~/.claude.json and the servers of
+      enabled plugins (plugin:<plugin>:<server>). --bare has none. The
+      entries are Claude Code's .mcp.json format (stdio command/args/env,
+      http url/headers, timeout); sse, ws, sdk, headersHelper and oauth are
+      reported as unsupported.
+    - .mcp.json servers and mcp: of a project config start only when
+      approved: enabledMcpjsonServers / enableAllProjectMcpServers /
+      disabledMcpjsonServers of the Claude settings -- a repository's own
+      .claude/settings.json only in a folder Claude Code trusts
+      (hasTrustDialogAccepted) -- or the new mcp_approvals: of
+      ~/.raider/config.yml. A disabled entry rejects from any file.
+    - Langertha::Raider::MCP::Config (internal);
+      Langertha::Raider::Config->mcp_servers / mcp_approvals,
+      Langertha::Raider::Context::Settings->mcpjson_approvals,
+      Langertha::Raider::Context::Plugins->mcp_servers. mcp: and
+      mcp_approvals: are raider keys, never engine options; inside a
+      section, or mcp_approvals: in a project file, they are reported by
+      config explain.
+    - The REPL asks once about every .mcp.json (or project mcp:) server that
+      waits for an approval, with Claude Code's three choices (use it / use
+      all project servers / continue without it), before the first prompt.
+      The answer holds at once and is saved where it counts next time:
+      .claude/settings.local.json in a folder Claude Code trusts (as Claude
+      Code saves it), else mcp_approvals of ~/.raider/config.yml. A run
+      nobody can ask in (one-shot, --json, Hall, ACP, piped REPL) keeps them
+      off and says so on stderr; machine output is unchanged.
+    - REPL /mcp shows every configured server: status, scope, transport,
+      source, reason, approval, tools, the last stderr lines of a failed
+      one; /mcp reconnect [NAME|all] restarts servers. /mcp connects the
+      servers first; a one-shot raider -p /mcp prints the same report and
+      exits 0 (/mcp reconnect is REPL-only). config explain and /config list
+      the servers too.
+    - /reload reads the MCP configuration again: an unchanged server keeps
+      running, changed and removed ones are stopped, new ones start with the
+      next prompt. A cancelled turn leaves the servers running; SIGTERM, the
+      end of the REPL and the end of a one-shot run stop them.
+    - Tests: t/250-t/259, t/267-t/268, scenarios 180-188 with a stdio test
+      server (t/lib/mcp-test-server.pl) and a streamable-HTTP one
+      (Test::Raider::MCPHTTP); scenarios may use {{PERL}} and
+      {{MCP_TEST_SERVER}}, and answer pending servers with mcp_answers:.
+
   [Status]
     - Marked as in development (POD and README): a developer release, not yet
       covered end to end. Release it with `dzil release --trial`.
