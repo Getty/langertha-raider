@@ -13,7 +13,7 @@ requires 'IO::Prompt::Tiny';
 requires 'IPC::Run';
 requires 'JSON::MaybeXS', '1.002004';
 requires 'Log::Any';
-requires 'Langertha', '0.503';
+requires 'Langertha', '0.504';
 requires 'Langertha::Manifest';
 requires 'MCP::Server';
 requires 'Module::Runtime';

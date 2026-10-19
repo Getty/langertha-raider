@@ -116,9 +116,10 @@ devices, FIFOs and sockets with its device text.
 
 **Images and PDFs.** PNG, JPEG, GIF, WebP come back as MCP `image` content (at most 3.75 MB, 5 MB
 in base64), PDFs as `PDF file read: P (SIZE)` and a `resource` blob of type `application/pdf`
-(at most 32 MB) — but only when the active engine claims `image_input` **and** its
-`tool_wire_format` is `anthropic`, `responses` or `gemini` (`Application::_engine_sees_images`,
-asked on every call, so `raider_switch_engine` is followed). Otherwise an error result `This model
+(at most 32 MB) — but only when the active engine says so itself: `supports('tool_result_images')`
+for images, `supports('tool_result_pdf')` for PDFs (Langertha ADR 0039; two questions, a model can
+take one and not the other; `Application::_engine_sees_images` / `_engine_reads_pdf`, asked on every
+call, so `raider_switch_engine` is followed). Raider no longer guesses from the wire name. Otherwise an error result `This model
 cannot see images: P was not read. Use a model that can read images, or a shell command or script
 that can describe or convert the file.` (`… see PDF files …`). A placeholder the model cannot
 look at is worse than a clear refusal. **Notebooks** (`.ipynb`) come back as Claude Code shows

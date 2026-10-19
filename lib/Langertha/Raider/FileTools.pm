@@ -38,7 +38,8 @@ C<pages> (C<"3">, C<"1-5">, at most 20 pages) a PDF is read as text through
 C<pdftotext> (poppler) for any model; a PDF of more than 10 pages must be
 read that way. An image
 (PNG, JPEG, GIF, WebP) or a PDF comes back as image or document content
-when the model can see it (C<sees_images>), a Jupyter notebook as its cells
+when the model can take it in a tool result (C<sees_images> for images,
+C<reads_pdf> for PDFs), a Jupyter notebook as its cells
 with their outputs; other binary files, directories and devices are refused
 with a message.
 
@@ -63,7 +64,8 @@ of them apply.
         # extra_roots => sub { [ '/other/dir' ] },
         confine     => 1,                # default; 0 (or a CodeRef) lets the gate decide
         read_state  => $state,           # optional Langertha::Raider::FileTools::ReadState
-        sees_images => sub { 1 },        # optional: may images / PDFs go back as content
+        sees_images => sub { 1 },        # optional: may images go back as content
+        reads_pdf   => sub { 1 },        # optional: may PDFs go back as content
     );
 
 Returns an L<MCP::Server> instance with the tools C<list_files>, C<read_file>,
@@ -84,8 +86,12 @@ directories (ADR 0023) -- never without a gate.
 
 C<read_state> is the record of the files read in this run; without one the
 server keeps its own, which is never emptied. C<sees_images> (a value or a
-CodeRef asked on every call, default true) says whether an image or a PDF
-may go back as content; when false they are refused with a message.
+CodeRef asked on every call, default true) says whether an image (and a
+notebook's output images) may go back as content; C<reads_pdf> (same shape,
+default true) says the same for a PDF. They are independent: a model can take
+one and not the other (the application asks the engine's C<tool_result_images>
+and C<tool_result_pdf> capabilities). What is not taken is refused with a
+message; a PDF read by C<pages> is text and needs neither.
 
 =cut
 
@@ -129,8 +135,12 @@ sub build_file_tools_server {
     extra_roots => $args{extra_roots} // [],
     confine     => exists $args{confine} ? $args{confine} : 1,
   );
-  my $sees = exists $args{sees_images} ? $args{sees_images} : 1;
-  my $sees_images = sub { ref $sees eq 'CODE' ? ( $sees->() ? 1 : 0 ) : ( $sees ? 1 : 0 ) };
+  my $flag = sub {
+    my ($v) = @_;
+    return sub { ref $v eq 'CODE' ? ( $v->() ? 1 : 0 ) : ( $v ? 1 : 0 ) };
+  };
+  my $sees_images = $flag->( exists $args{sees_images} ? $args{sees_images} : 1 );
+  my $reads_pdf   = $flag->( exists $args{reads_pdf}   ? $args{reads_pdf}   : 1 );
   my $state = $args{read_state} // Langertha::Raider::FileTools::ReadState->new;
   my $cwd = $real_root ? "$real_root" : path('.')->absolute->stringify;
 
@@ -264,7 +274,7 @@ sub build_file_tools_server {
         unless -f $p;
       my $ext = $p->basename =~ /\.([^.\/]+)\z/ ? lc $1 : '';
       return _read_image( $tool, $p, $ext, $state, $sees_images, $refuse ) if $IMAGE_MIME{$ext};
-      return _read_pdf( $tool, $p, $state, $sees_images, $refuse, $in ) if $ext eq 'pdf';
+      return _read_pdf( $tool, $p, $state, $reads_pdf, $refuse, $in ) if $ext eq 'pdf';
       return $refuse->($tool, _binary_text($ext)) if $BINARY_EXT{$ext};
       return _read_notebook( $tool, $p, $state, $sees_images, $failed ) if $ext eq 'ipynb';
 
@@ -648,10 +658,10 @@ sub _read_pdf_pages {
 }
 
 sub _read_pdf {
-  my ( $tool, $p, $state, $sees_images, $refuse, $in ) = @_;
+  my ( $tool, $p, $state, $reads_pdf, $refuse, $in ) = @_;
   my $pages = $in->{pages};
   return _read_pdf_pages( $tool, $p, $pages, $state, $refuse ) if defined $pages && length $pages;
-  return $refuse->($tool, _sees_text( 'PDF files', $p )) unless $sees_images->();
+  return $refuse->($tool, _sees_text( 'PDF files', $p )) unless $reads_pdf->();
   my $size = -s $p;
   return $refuse->($tool, 'PDF file ('._size_text($size).') exceeds maximum allowed size ('._size_text($MAX_PDF_BYTES)
     .'). Use a shell command or script that can extract the text (such as pdftotext).') if $size > $MAX_PDF_BYTES;

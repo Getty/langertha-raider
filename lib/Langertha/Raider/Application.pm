@@ -2076,6 +2076,7 @@ sub _build_stock_tool_servers {
   my $files = $self->_file_tools_server(
     read_state  => $self->file_read_state,
     sees_images => sub { $app ? $app->_engine_sees_images : 0 },
+    reads_pdf   => sub { $app ? $app->_engine_reads_pdf : 0 },
   );
 
   my $bash = $self->bash_tools->server;
@@ -2101,7 +2102,7 @@ sub _build_stock_tool_servers {
 
 # A new server with the file tools over the root, with the additional
 # directories and the confinement of the policy -- both asked on every call --
-# and the given read_state and sees_images. The application mounts one over
+# and the given read_state, sees_images and reads_pdf. The application mounts one over
 # file_read_state; a subagent one over a read state of its own (ADR 0023).
 sub _file_tools_server {
   my ($self, %o) = @_;
@@ -2113,6 +2114,7 @@ sub _file_tools_server {
     confine     => sub { $app ? !$app->permissions->ask_outside_roots : 1 },
     ( $o{read_state} ? ( read_state => $o{read_state} ) : () ),
     ( exists $o{sees_images} ? ( sees_images => $o{sees_images} ) : () ),
+    ( exists $o{reads_pdf} ? ( reads_pdf => $o{reads_pdf} ) : () ),
   );
 }
 
@@ -2137,17 +2139,17 @@ has file_read_state => (
 
 sub _build_file_read_state { Langertha::Raider::FileTools::ReadState->new }
 
-# Whether an image or a PDF that read_file finds can go back to the model as
-# content: the model sees images and its wire carries them in a tool result
-# (Langertha::ToolResult: anthropic, responses, gemini; ADR 0023).
-my %IMAGE_WIRE = map { $_ => 1 } qw( anthropic responses gemini );
+# Whether an image, or a PDF, that read_file finds can go back to the model as
+# content: the engine says so itself (tool_result_images / tool_result_pdf,
+# Langertha ADR 0039) -- no guessing from the wire name. Two questions: a model
+# can take one and not the other.
+sub _engine_sees_images { shift->_engine_supports( tool_result_images => @_ ) }
+sub _engine_reads_pdf   { shift->_engine_supports( tool_result_pdf => @_ ) }
 
-sub _engine_sees_images {
-  my ($self, $engine) = @_;
+sub _engine_supports {
+  my ($self, $cap, $engine) = @_;
   $engine //= $self->_has_raider ? $self->_raider->active_engine : $self->_engine;
-  return 0 unless $engine && $engine->can('supports') && $engine->supports('image_input');
-  my $wire = $engine->can('tool_wire_format') ? $engine->tool_wire_format : '';
-  return $IMAGE_WIRE{ $wire // '' } ? 1 : 0;
+  return $engine && $engine->can('supports') && $engine->supports($cap) ? 1 : 0;
 }
 
 =attr task_tools

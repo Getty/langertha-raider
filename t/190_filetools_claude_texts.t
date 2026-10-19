@@ -18,7 +18,7 @@ $root = $root->realpath;
 
 my $state  = Langertha::Raider::FileTools::ReadState->new;
 my $sees   = 1;
-my $server = build_file_tools_server( root => "$root", read_state => $state, sees_images => sub { $sees } );
+my $server = build_file_tools_server( root => "$root", read_state => $state, sees_images => sub { $sees }, reads_pdf => sub { $sees } );
 
 sub run_tool {
   my ( $name, $args ) = @_;

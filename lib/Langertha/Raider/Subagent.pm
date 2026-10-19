@@ -918,6 +918,7 @@ sub _build_own_file_server {
   return $self->app->_file_tools_server(
     read_state  => $self->file_read_state,
     sees_images => sub { $weak && $weak->app ? $weak->app->_engine_sees_images( $weak->engine ) : 0 },
+    reads_pdf   => sub { $weak && $weak->app ? $weak->app->_engine_reads_pdf( $weak->engine ) : 0 },
   );
 }
 

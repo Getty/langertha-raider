@@ -33,6 +33,12 @@ Revision history for Langertha-Raider
     - Then this release; the standalone binaries are built from it.
 
   [File tools]
+    - read_file asks the engine whether images and PDFs may go back as
+      content: supports('tool_result_images') and supports('tool_result_pdf')
+      (Langertha 0.504), replacing the guess from the wire name. Two separate
+      answers, so a model that takes images but no PDFs (or the reverse) gets
+      the one and a refusal for the other. FileTools::build_file_tools_server
+      has reads_pdf next to sees_images; neither falls back on the other.
     - INCOMPATIBLE: read_file, write_file and edit_file answer like Claude
       Code's Read, Write and Edit (ADR 0023): "File created successfully at:
       P", "The file P has been updated successfully.", "String to replace

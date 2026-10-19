@@ -44,19 +44,17 @@ subtest 'the read state lives for one run' => sub {
   $app->end_run('completed');
 };
 
-subtest 'images go back as content only to a model and wire that take them' => sub {
+subtest 'images go back as content only to a model that the engine says takes them' => sub {
   my $root = project( 'CLAUDE.md' => "x\n" );
   $root->child('pic.png')->spew_raw("\x89PNG\r\n\x1a\n0000");
   my $script = [ { tool_calls => [ [ read_file => { path => 'pic.png' } ] ] }, { text => 'seen' } ];
-  my %can = ( image_input => 0 );
-  my $wire = 'anthropic';
+  my %can = ( tool_result_images => 0 );
   no warnings 'redefine';
   my $orig_supports = Langertha::Engine::Virtual->can('supports');
   local *Langertha::Engine::Virtual::supports = sub {
     my ( $self, $flag ) = @_;
     return exists $can{$flag} ? $can{$flag} : $self->$orig_supports($flag);
   };
-  local *Langertha::Engine::Virtual::tool_wire_format = sub { $wire };
 
   my $result_of = sub {
     my $app = mock_app( root => "$root", script => $script );
@@ -64,17 +62,13 @@ subtest 'images go back as content only to a model and wire that take them' => s
     return $app->mock_engine->results->[0]{result};
   };
   my $r = $result_of->();
-  ok $r->{isError}, 'a model without image_input: refused';
+  ok $r->{isError}, 'tool_result_images false: refused';
   like $r->{content}[0]{text}, qr/This model cannot see images/, '... saying why';
 
-  $can{image_input} = 1;
+  $can{tool_result_images} = 1;
   $r = $result_of->();
-  ok !$r->{isError}, 'image_input on the anthropic wire: read';
+  ok !$r->{isError}, 'tool_result_images true: read';
   is $r->{content}[0]{type}, 'image', 'as image content';
-
-  $wire = 'openai';
-  $r = $result_of->();
-  ok $r->{isError}, 'the openai wire has no image in a tool result: refused rather than a placeholder';
 };
 
 done_testing;
