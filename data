@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-10-19T11:16:50Z
+claimed_by: strom-d2
+class: standard
+completed: 2026-10-19T11:16:49Z
+created: 2026-10-19T10:34:55Z
+id: 163
+priority: medium
+started: 2026-10-19T10:35:29Z
+status: done
+tags:
+- claude-code-flow
+title: 'Tool parity follow-ups: task hooks, task list on resume, usage in /stats,
+  hook deny text, PDF pages, shared path confinement'
+updated: 2026-10-19T11:16:50Z
+---
+
+Strom D2: Folgepunkte aus #159.
+
+2026-10-19 10:56 Aufgabe 3 (usage in /stats) umgesetzt: Application note_usage/usage_stats, Events-Plugin model.usage je Modellaufruf, Subagenten via run_plugins-Wrapper, /stats je Modell, metrics.usage; ADR 0026 Nachtrag; t/240-244, Szenarien 170-174.
+
+2026-10-19 10:57 Worker Punkte 5-7 fertig (kein handoff, Karte teilen sich 3 Worker): read_file pages (pdftotext) + Token-Grenze 25000 (bytes/4), CLAUDE.md/AGENTS.md des Prompts in begin_run als gelesen, PathConfine.pm fuer FileTools+SearchTools. ADR 0023 Nachtrag, t/235-239, Szenarien 165-169. Binary: optionale Laufzeitabhaengigkeit pdftotext/pdfinfo (poppler, per PATH).
+
+2026-10-19 11:08 Commits auf worktree-d2-folgepunkte: c68a189 (A: Task-Hooks, Task-Liste beim Resume, Claude-Wortlaut Hook-deny/unknown tool), 8d25afa (B: read_file PDF pages + Token-Grenze, CLAUDE.md als gelesen, PathConfine), b22ccb2 (C: Token-Ledger, /stats, Metriken). Punkte 1-7 erledigt. Offen: Subagenten-Task-Listen ohne Task-Hooks; nicht belegte Wortlaute 'TaskCreated hook error:' und 'hook blocked the tool call'; Compaction-Aufruf und Resume zaehlen nicht im Ledger; pdftotext-Realtest ohne poppler uebersprungen; Binary: pdftotext/pdfinfo sind optionale externe Programme.
+
+2026-10-19 11:08 Drei Commits c68a189, 8d25afa, b22ccb2; volle Suite gruen (186 Dateien/1623 Tests), Basis main f069836 unveraendert.
+
+Koordinator 2026-10-19: geprüft (1623 grün -j3, neue Tests rot gegen alten Code), gemerged (b22ccb2).
