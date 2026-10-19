@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-10-19T04:43:27Z
+claimed_by: strom-t
+class: standard
+completed: 2026-10-19T04:43:23Z
+created: 2026-10-19T04:06:54Z
+id: 152
+priority: high
+started: 2026-10-19T04:08:02Z
+status: done
+tags:
+- claude-code-flow
+title: Tools glob, grep, todo_write, ask_user and a built-in loadguard gate for bash
+updated: 2026-10-19T04:43:27Z
+---
+
+Strom T. Plan: /home/getty/dev/perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md
+
+Strom T done on branch worktree-strom-t-tools (commits 6bc188e, 3816898). Built: glob/grep (SearchTools, rg or Perl, identical output), todo_write (TodoTools, Application todos, journal+stream event todo.updated), ask_user (AskTools; REPL binds on_ask_user on a terminal, otherwise plain refusal), Loadguard as validator of bash (PSI/swap/slots, LOADGUARD_*, fail-open, optional LOADGUARD_CONFINE=1 scope via bin/raider re-exec, verified live), ToolNames table, effect classes. Decisions in ADR 0018. Suite 118 files / 1099 tests green (baseline 114/1044).
+
+Follow-ups: (1) stream P needs Claude-to-raider ARGUMENT name mapping (file_path to path etc), not in ToolNames. (2) Binary: grep spawns the host rg via IPC::Run (not packed, Perl fallback); LOADGUARD_CONFINE re-execs via packed_binary() or the running perl - raider-binary-worker should check. (3) Tool count/positions of the stock set asserted in t/23, 27, 64, 65, 105 - stream K skill tool will collide there at merge. (4) FileTools path confinement duplicated privately in SearchTools, could be shared. (5) Loadguard tokenizer is a hand port of the C hook, keep in step.
+
+Done on branch worktree-strom-t-tools: glob, grep, todo_write, ask_user, loadguard gate for bash, ToolNames, effect classes, ADR 0018. Suite green: 118 files, 1099 tests. Follow-ups are in the notes above.
+
+Koordinator 2026-10-19: geprüft (1099 Tests grün mit langertha-lib; neue Tests rot gegen alten Code), nach main gemerged (3816898). Folgepunkte: Binary-Prüfung (grep Perl-Weg, LOADGUARD_CONFINE-Neustart über packed_binary, -I geht beim Neustart verloren) -> Strom B; Claude-Argumentnamen (file_path …) in ToolNames -> Strom H; doppelte Pfad-Einsperrung SearchTools/FileTools und Tokenizer-Port als Aufräumpunkt (B).
