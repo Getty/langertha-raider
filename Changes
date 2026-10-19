@@ -255,6 +255,22 @@ Revision history for Langertha-Raider
     - Langertha::Raider::ToolNames translates tool arguments too, both ways:
       path <-> file_path for read_file, write_file and edit_file, the bash
       timeout in seconds <-> milliseconds; every other key passes unchanged.
+    - Agent files (ADR 0020, first step): raider now reads Claude Code's
+      subagent definitions -- Markdown with frontmatter -- from
+      .raider/agents and ~/.raider/agents and, in the Claude layout, from
+      .claude/agents, ~/.claude/agents ($CLAUDE_CONFIG_DIR respected) and
+      enabled plugins (as plugin:agent), walked recursively, hidden files
+      skipped; the first agent of a name wins, a built-in general-purpose
+      agent comes last. tools / disallowedTools are mapped to raider tool
+      names (unknown ones such as NotebookEdit are ignored and reported),
+      skills and briefing.skills are both read, and model (sonnet, opus,
+      haiku, a claude-* id) maps to a Claude model only under the Anthropic
+      API engine -- elsewhere the agent inherits the caller's model. config
+      explain lists every agent with its tools, model, declared skills,
+      unused keys, shadowed agents and files that are not agents. New config
+      keys agent_models (model per alias) and max_agent_depth (default 1)
+      are read; nothing starts a subagent yet. The lenient frontmatter reader
+      now keeps one level of nesting (briefing: / skills: / - item).
 
   [Permissions]
     - INCOMPATIBLE: every tool call of raider now passes a permission policy

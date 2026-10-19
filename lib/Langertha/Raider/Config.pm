@@ -89,7 +89,8 @@ use -- raider runs in the home directory itself -- it is read once, as the
 project file, and there is no home layer.
 
 A file, project or home, that does not parse, whose top level is not a mapping, or that holds
-a mapping under one of raider's own keys other than C<skills>, C<detect> and C<project_tools>
+a mapping under one of raider's own keys other than C<skills>, C<detect>, C<project_tools>,
+C<providers>, C<permissions> and C<agent_models>
 (see L</is_app_key>) -- at top level or in any section, active or not -- is
 an error: readers croak and the writer refuses to
 overwrite it.
@@ -97,7 +98,7 @@ overwrite it.
 =cut
 
 # Keys that configure raider itself and never reach the engine constructor.
-my %APP_KEY = map { $_ => 1 } qw( claude detect engine no_detect packs permissions perl preferred_lib_target project_tools providers skills );
+my %APP_KEY = map { $_ => 1 } qw( agent_models claude detect engine max_agent_depth no_detect packs permissions perl preferred_lib_target project_tools providers skills );
 
 my %PROFILE_KEYWORD = (
   claude => 'claude',
@@ -338,7 +339,7 @@ sub file_exists { -f $_[0]->file ? 1 : 0 }
 sub _may_be_mapping {
   my ( $self, $key ) = @_;
   return $key eq 'skills' || $key eq 'detect' || $key eq 'project_tools' || $key eq 'providers'
-    || $key eq 'permissions';
+    || $key eq 'permissions' || $key eq 'agent_models';
 }
 
 sub _is_section {
@@ -615,7 +616,8 @@ sub normalize_bools {
 
     my $opts = $config->engine_options($engine_name);
 
-L</options> without raider's own keys (C<claude>, C<detect>, C<engine>, C<no_detect>,
+L</options> without raider's own keys (C<agent_models>, C<claude>, C<detect>, C<engine>,
+C<max_agent_depth>, C<no_detect>,
 C<packs>, C<perl>, C<preferred_lib_target>, C<project_tools>, C<providers>,
 C<skills>): what goes to the engine constructor.
 
@@ -632,7 +634,8 @@ sub engine_options {
 
     $config->is_app_key('perl');   # 1
 
-True for the keys that configure raider itself (C<claude>, C<detect>, C<engine>,
+True for the keys that configure raider itself (C<agent_models>, C<claude>,
+C<detect>, C<engine>, C<max_agent_depth>,
 C<no_detect>, C<packs>, C<permissions>, C<perl>, C<preferred_lib_target>, C<project_tools>,
 C<providers>, C<skills>) and never reach the engine constructor.
 

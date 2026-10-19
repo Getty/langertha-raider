@@ -502,6 +502,48 @@ has max_iterations => (
   default => 10_000,
 );
 
+=attr max_agent_depth
+
+How deep subagents may nest (ADR 0020 E<sect>4): the main run has depth 0,
+and a run at this depth gets no C<agent> tool. From C<max_agent_depth> of
+the configuration (or C<-o max_agent_depth=>), a non-negative integer;
+defaults to 1, Claude Code's behaviour -- subagents cannot start subagents.
+A value that is not a non-negative integer counts as unset.
+
+=attr agent_models
+
+The model per alias for agent files (ADR 0020 E<sect>5), from the mapping
+C<agent_models> of the configuration, e.g.
+C<< { sonnet => 'claude-sonnet-4-6' } >>; overrides
+L<Langertha::Raider::Context::Agents/model_aliases> per alias. Defaults to
+none.
+
+=cut
+
+has max_agent_depth => (
+  is         => 'ro',
+  isa        => 'Int',
+  lazy_build => 1,
+);
+
+sub _build_max_agent_depth {
+  my ($self) = @_;
+  my $depth = $self->_load_yml_options->{max_agent_depth};
+  return defined $depth && !ref $depth && $depth =~ /\A\d+\z/ ? 0 + $depth : 1;
+}
+
+has agent_models => (
+  is         => 'ro',
+  isa        => 'HashRef',
+  lazy_build => 1,
+);
+
+sub _build_agent_models {
+  my ($self) = @_;
+  my $models = $self->_load_yml_options->{agent_models};
+  return ref $models eq 'HASH' ? { %$models } : {};
+}
+
 =attr on_event
 
 Optional code reference called as C<< $on_event->($type, %payload) >> for
@@ -2440,6 +2482,13 @@ C<permissions> is L<Langertha::Raider::Permissions/report> of
 L</permissions>: the mode and where it came from, mode names from files
 that were ignored, the valid rules per kind with their sources, the
 invalid rules and the additional directories.
+C<agents>, C<shadowed_agents> and C<agent_problems> come from the same
+report (L<Langertha::Raider::Context::Agents/report>): every agent a run
+could start (ADR 0020) with its root, its tools in raider names (C<*> for
+all), the disallowed ones, the model it would get under this engine and
+L</agent_models> (or why it inherits), its declared skills, the tool names
+and frontmatter keys raider does not use; the agents shadowed by an earlier
+one of the same name; and files in an agent root that are not agents.
 
 C<tools> lists the mounted tools, each with its C<name>, its C<source>
 (C<engine:N>) and C<effects>: what it can do, from a static built-in table
@@ -2569,7 +2618,11 @@ sub explain_config {
     tools         => $self->_tool_effects_report,
     permissions   => $self->permissions->report,
     ignored_instructions_files => [ $self->instructions->ignored_files ],
-    %{ $self->context->report },
+    %{ $self->context->report(
+      engine_class => scalar eval { $self->_engine_class },
+      engine_name  => $engine,
+      agent_models => $self->agent_models,
+    ) },
   };
 }
 

@@ -281,12 +281,14 @@ Two kinds of keys live in the file:
   the engine constructor. `-o key=value` on the command line overrides them (values
   are auto-coerced: `0.2` → Float, `4096` → Int, `true`/`false` → 1/0).
 - **Raider's own keys** — `engine`, `perl`, `packs`, `skills`, `detect`,
-  `no_detect`, `preferred_lib_target`, `project_tools` (home file only) — configure
+  `no_detect`, `preferred_lib_target`, `project_tools` (home file only),
+  `max_agent_depth`, `agent_models` (subagents, ADR 0020) — configure
   raider itself and never reach the engine. `skills` is merged across layers instead
   of replaced.
 
 A file that does not parse, whose top level is not a mapping, or that puts a mapping
-under one of raider's own keys (other than `skills`, `project_tools` and `detect`,
+under one of raider's own keys (other than `skills`, `project_tools`, `providers`,
+`agent_models` and `detect`,
 whose `detect:` map holds per-pack detection rules) is a hard error naming the offending key —
 raider stops instead of loading half of it.
 

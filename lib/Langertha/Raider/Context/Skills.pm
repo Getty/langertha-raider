@@ -4,7 +4,7 @@ our $VERSION = '0.504';
 use Moose;
 use namespace::autoclean;
 use Path::Tiny;
-use YAML::PP ();
+use Langertha::Raider::Context::Frontmatter;
 
 =head1 SYNOPSIS
 
@@ -53,15 +53,12 @@ C<E<lt>pluginE<gt>:E<lt>dirE<gt>>.
 collapsed), else the first non-empty line of the body that is not a
 Markdown heading, trimmed and cut to 250 characters.
 
-=item * B<Frontmatter.> A leading C<---> ... C<---> block, parsed as YAML.
-What YAML rejects but Claude Code reads -- typically an unquoted C<: >
-inside a description -- is read line by line instead: C<key: value> at
-column 0 (the value is everything after the first C<: >, trimmed, outer
-quotes stripped; C<true> / C<false> are booleans for
-C<disable-model-invocation> and C<user-invocable>), indented lines continue
-the previous key (joined with a space, C<- item> lines make a list). Only
-when that finds no key either, or the YAML is not a mapping, the frontmatter
-is empty and L</problems> gets an entry; the skill is still loaded.
+=item * B<Frontmatter.> A leading C<---> ... C<---> block, read by
+L<Langertha::Raider::Context::Frontmatter>: YAML, else the lenient line
+reader for what YAML rejects but Claude Code reads (C<true> / C<false> are
+booleans for C<disable-model-invocation> and C<user-invocable>). Only when
+that finds no key either, or the YAML is not a mapping, the frontmatter is
+empty and L</problems> gets an entry; the skill is still loaded.
 
 =item * B<Precedence.> Roots in the given order, then plugins. The first
 skill of a name wins; later ones are reported by L</shadowed>. Plugin
@@ -221,80 +218,19 @@ sub _add {
   return;
 }
 
-# ( frontmatter hashref, body ) of a skill file. The body loses the
-# frontmatter and its leading blank lines.
+# ( frontmatter hashref, body ) of a skill file, through the shared lenient
+# reader; a broken frontmatter is a problem and leaves the frontmatter empty.
 sub _split {
   my ( $self, $text, $file, $problems ) = @_;
-  my $fm = {};
-  if ($text =~ s/\A---[ \t]*\r?\n(.*?)^---[ \t]*(?:\r?\n|\z)//ms) {
-    my $yaml = $1;
-    my $data = eval { YAML::PP->new->load_string($yaml) };
-    if (my $err = $@) {
-      if (my $lenient = $self->_lenient_frontmatter($yaml)) {
-        $fm = $lenient;
-      }
-      else {
-        my ( $line ) = grep { /\S/ } split /\n/, "$err";
-        $line //= 'syntax error';
-        $line =~ s/ at (?:(?! at ).)+ line \d+\.?\z//;
-        push @$problems, { file => $file->stringify, reason => 'invalid frontmatter: '.$line };
-      }
-    }
-    elsif (ref $data eq 'HASH') {
-      $fm = $data;
-    }
-    elsif (defined $data) {
-      push @$problems, { file => $file->stringify, reason => 'frontmatter is not a mapping' };
-    }
-  }
-  $text =~ s/\A(?:[ \t]*\r?\n)+//;
-  return ( $fm, $text );
+  my ( $fm, $body, $problem ) = $self->frontmatter_class->parse($text, booleans => [ $self->boolean_keys ]);
+  push @$problems, { file => $file->stringify, reason => $problem } if defined $problem;
+  return ( $fm, $body );
 }
 
-# The frontmatter keys whose true / false the line parser reads as booleans.
-my %BOOL_KEY = map { $_ => 1 } qw( disable-model-invocation user-invocable );
+sub frontmatter_class { 'Langertha::Raider::Context::Frontmatter' }
 
-# The frontmatter YAML rejects but Claude Code reads (an unquoted ': ' in a
-# description): 'key: value' lines at column 0 -- the value is everything
-# after the first ': ', trimmed, surrounding quotes stripped; indented lines
-# continue the previous key (joined with a space), '- item' lines make it a
-# list; a '|' / '>' block becomes its lines joined with spaces. Undef when
-# no key is found.
-sub _lenient_frontmatter {
-  my ( $self, $yaml ) = @_;
-  my ( %fm, $key );
-  for my $line (split /\r?\n/, $yaml) {
-    next unless $line =~ /\S/;
-    if ($line =~ /\A([A-Za-z0-9_][\w.-]*):(?:[ \t]+(.*?))?[ \t]*\z/) {
-      $key = $1;
-      my $value = $2 // '';
-      $value = '' if $value =~ /\A[|>][+-]?\z/;
-      $fm{$key} = length $value ? $self->_lenient_value($key, $value) : undef;
-      next;
-    }
-    next if $line =~ /\A#/ || !defined $key || $line !~ /\A[ \t]+(.*?)[ \t]*\z/;
-    my $more = $1;
-    if ($more =~ /\A-[ \t]+(.*)\z/ && ( !defined $fm{$key} || ref $fm{$key} eq 'ARRAY' )) {
-      push @{ $fm{$key} }, $self->_unquote($1);
-    }
-    elsif (!ref $fm{$key}) {
-      $fm{$key} = defined $fm{$key} && length $fm{$key} ? $fm{$key}.' '.$more : $more;
-    }
-  }
-  return %fm ? \%fm : undef;
-}
-
-sub _lenient_value {
-  my ( $self, $key, $value ) = @_;
-  return $value eq 'true' ? !!1 : !!0 if $BOOL_KEY{$key} && $value =~ /\A(?:true|false)\z/;
-  return $self->_unquote($value);
-}
-
-sub _unquote {
-  my ( $self, $value ) = @_;
-  $value =~ s/\A(["'])(.*)\1\z/$2/s;
-  return $value;
-}
+# The frontmatter keys whose true / false the line reader reads as booleans.
+sub boolean_keys { qw( disable-model-invocation user-invocable ) }
 
 sub _description {
   my ( $self, $fm, $body ) = @_;

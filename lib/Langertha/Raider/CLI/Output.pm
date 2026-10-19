@@ -165,7 +165,11 @@ each mounted tool with its source and effect classes; the permission policy
 (L</permissions_report>) (C<unknown> for a tool
 the built-in table does not know); each skill with its state (C<listed>,
 or C<hidden> for C<disable-model-invocation>) and root, the shadowed skills
-and the broken skill files; in the Claude layout the settings -- each file
+and the broken skill files; each agent (ADR 0020) with its root, its tools
+in raider names (C<*> for all of the caller's), the disallowed ones, the
+model it would get or why it inherits, its declared skills, the tool names
+and frontmatter keys raider does not use, then the shadowed agents and the
+files in an agent root that are not agents; in the Claude layout the settings -- each file
 (read, not present, or its error), the permission rule counts and default
 mode, the names of the C<env> keys (never their values), the hook events
 with their group counts, the enabled plugins and the keys raider does not
@@ -255,6 +259,30 @@ sub config_report {
     }
     for my $p (@{ $report->{skill_problems} // [] }) {
       $self->emit('  ', $self->c(warn => 'skill file '.$p->{file}.': '.$p->{reason}), "\n");
+    }
+  }
+  if (my $agents = $report->{agents}) {
+    $self->emit($self->c(meta => 'agents: '), $self->c(meta => '(started by the agent tool; tools in raider names)'), "\n");
+    my ( $width ) = sort { $b <=> $a } 22, map { length $_->{name} } @$agents;
+    for my $ag (@$agents) {
+      my $m = $ag->{model};
+      $self->emit('  ', $self->c(title => sprintf('%-'.$width.'s', $ag->{name})), ' ', $self->c(meta => $ag->{source}), "\n");
+      $self->emit('    ', join('; ',
+        'tools '.( ref $ag->{tools} ? ( @{ $ag->{tools} } ? join(', ', @{ $ag->{tools} }) : 'none' ) : $ag->{tools} ),
+        ( @{ $ag->{disallowed} } ? 'not '.join(', ', @{ $ag->{disallowed} }) : () ),
+        'model '.( defined $m->{model} ? $m->{model} : 'inherit ('.$m->{reason}.')' ),
+        ( @{ $ag->{skills} } ? 'skills '.join(', ', @{ $ag->{skills} }) : () ),
+      ), "\n");
+      $self->emit('    ', $self->c(warn => 'unknown tools: '.join(', ', @{ $ag->{unknown_tools} })), "\n")
+        if @{ $ag->{unknown_tools} };
+      $self->emit('    ', $self->c(meta => 'not used by raider: '.join(', ', @{ $ag->{ignored_keys} })), "\n")
+        if @{ $ag->{ignored_keys} };
+    }
+    for my $s (@{ $report->{shadowed_agents} // [] }) {
+      $self->emit('  ', $self->c(warn => 'shadowed agent '.$s->{name}.' ('.$s->{source}.') by '.$s->{by}), "\n");
+    }
+    for my $p (@{ $report->{agent_problems} // [] }) {
+      $self->emit('  ', $self->c(warn => 'agent file '.$p->{file}.': '.$p->{reason}), "\n");
     }
   }
   if (my $st = $report->{settings}) {

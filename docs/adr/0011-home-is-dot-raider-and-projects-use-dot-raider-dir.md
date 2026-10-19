@@ -51,3 +51,9 @@ Maintainer comments on the target-state README, 2026-09-24.
 A project with `.raider/` stays raider-native; it reads the Claude Code layout only with
 `claude: true` in its config (ADR 0019). Skills in `.raider/skills` and `~/.raider/skills`
 are discovered and loaded on demand through the `skill` tool like Claude Code skills.
+
+## Update (2026-10-19, karr #153)
+
+Named agents are Markdown files with YAML frontmatter in `agents/<name>.md` (home and
+project), Claude Code's agent format; `raiders/<name>.yml` is dropped before it was ever
+read (ADR 0020).

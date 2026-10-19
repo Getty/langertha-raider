@@ -16,6 +16,7 @@ use Langertha::Raider::Home;
     );
     for my $p (@{ $plugins->plugins }) {
       my @dirs = $plugins->skill_dirs($p);   # each dir holds a SKILL.md
+      my @agents = $plugins->agent_dirs($p); # agent dirs and *.md files
     }
 
 =head1 DESCRIPTION
@@ -306,6 +307,32 @@ sub hooks {
     elsif (!ref $item)        { $file->($item, 0) }
   }
   return ( \%groups, \@errors );
+}
+
+=method agent_dirs
+
+    my @paths = $plugins->agent_dirs($plugin);   # absolute paths as strings
+
+Where Claude Code finds the agents of one entry of L</plugins> (ADR 0020
+E<sect>1): the plugin's F<agents/>, then each path of the manifest's
+C<agents> (a string or a list), resolved against the plugin root. Each
+returned path exists and is either a directory, to be walked for F<*.md>
+(L<Langertha::Raider::Context::Agents>), or one F<*.md> file. A path that
+leaves the plugin root is skipped; a path reached twice is returned once.
+
+=cut
+
+sub agent_dirs {
+  my ( $self, $plugin ) = @_;
+  my $root = $self->_normpath($plugin->{root});
+  my $extra = $plugin->{manifest}{agents};
+  $extra = [ $extra ] if defined $extra && !ref $extra;
+  my @paths = ( $root.'/agents' );
+  push @paths, map { $self->_normpath( m{\A/} ? $_ : $root.'/'.$_ ) }
+    grep { defined && !ref } @$extra
+    if ref $extra eq 'ARRAY';
+  my %seen;
+  return grep { !$seen{$_}++ && $self->_within($_, $root) && ( -d $_ || ( -f $_ && /\.md\z/ ) ) } @paths;
 }
 
 # A JSON object from a file, {} when it is missing, broken or not an object.

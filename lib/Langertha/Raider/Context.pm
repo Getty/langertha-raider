@@ -1,5 +1,5 @@
 package Langertha::Raider::Context;
-# ABSTRACT: Internal context of an application: layout mode, Claude memory and settings, skills
+# ABSTRACT: Internal context of an application: layout mode, Claude memory and settings, skills, agents
 our $VERSION = '0.504';
 use Moose;
 use namespace::autoclean;
@@ -10,6 +10,7 @@ use Langertha::Raider::Context::Memory;
 use Langertha::Raider::Context::Settings;
 use Langertha::Raider::Context::Plugins;
 use Langertha::Raider::Context::Skills;
+use Langertha::Raider::Context::Agents;
 
 =head1 SYNOPSIS
 
@@ -24,6 +25,7 @@ use Langertha::Raider::Context::Skills;
     $context->apply_env;                        # settings env into %ENV, once
     my @items = $context->prompt_items;         # memory, AGENTS.md, skill listing
     my $skills = $context->skill_catalog;       # Langertha::Raider::Context::Skills
+    my $agents = $context->agent_catalog;       # Langertha::Raider::Context::Agents
     my $more  = $context->nested_memory_for('lib/Foo.pm');   # or undef
     my @notes = $context->nested_reminders_for('lib/Foo.pm');  # CLAUDE.md, skills
     $context->reload;                           # /reload: read it all again
@@ -65,9 +67,14 @@ Skills can also arrive during a session: the F<.claude/skills> of a subtree
 a tool touches, and skills with C<paths:> frontmatter once a matching file is
 touched (L</nested_skills_for>, ADR 0019 Addendum 1).
 
-A directory that appears twice is read once, at its first place. With
-L</bare> nothing is read at all: mode C<bare>, no memory, no settings, no
-skills, no F<AGENTS.md>.
+A directory that appears twice is read once, at its first place.
+
+The agent catalogue (L<Langertha::Raider::Context::Agents>) has its roots
+in the precedence of ADR 0020 E<sect>1 (L</agent_roots>).
+
+With L</bare> nothing is read at all: mode C<bare>, no memory, no settings,
+no skills, no agent files (only the built-in C<general-purpose> agent), no
+F<AGENTS.md>.
 
 =attr root
 
@@ -144,6 +151,7 @@ sub memory_class   { 'Langertha::Raider::Context::Memory' }
 sub settings_class { 'Langertha::Raider::Context::Settings' }
 sub plugins_class  { 'Langertha::Raider::Context::Plugins' }
 sub skills_class   { 'Langertha::Raider::Context::Skills' }
+sub agents_class   { 'Langertha::Raider::Context::Agents' }
 
 =attr home
 
@@ -414,6 +422,73 @@ has _nested_skill_dirs_seen => (
   init_arg => undef,
   default  => sub { {} },
 );
+=attr agent_roots
+
+The agent roots in precedence order (ADR 0020 E<sect>1), each
+C<< { dir, source } >> as L<Langertha::Raider::Context::Agents/roots> takes
+them: F<.raider/agents> of L</root>, then F<~/.raider/agents>; only in the
+Claude layout F<.claude/agents> of the project directory, then
+F<< <claude_home>/agents >>. Roots that do not exist are listed too; the
+catalogue skips them. None with L</bare>.
+
+=cut
+
+has agent_roots => (
+  is         => 'ro',
+  isa        => 'ArrayRef[HashRef]',
+  init_arg   => undef,
+  lazy_build => 1,
+);
+
+sub _build_agent_roots {
+  my ( $self ) = @_;
+  return [] if $self->bare;
+  my $home_class = $self->home_class;
+  my @roots = ( {
+    dir    => $home_class->project_base(path($self->root)->absolute)->child('agents')->stringify,
+    source => $home_class->dir_name.'/agents',
+  } );
+  push @roots, {
+    dir    => $home_class->home_base($self->home)->child('agents')->stringify,
+    source => '~/'.$home_class->dir_name.'/agents',
+  } if defined $self->home;
+  if ($self->claude_layout) {
+    my $dir = $self->layout->project_dir->child('.claude', 'agents');
+    push @roots, { dir => $dir->stringify, source => $self->_root_label($dir) };
+    if (defined( my $ch = $self->claude_home )) {
+      my $user = path($ch)->child('agents');
+      push @roots, { dir => $user->stringify, source => $self->_home_label($user) };
+    }
+  }
+  my %seen;
+  return [ grep { !$seen{ $self->_real($_->{dir}) }++ } @roots ];
+}
+
+=attr agent_catalog
+
+The L<Langertha::Raider::Context::Agents> over L</agent_roots> and, in the
+Claude layout, the agent paths of L</plugins>
+(L<Langertha::Raider::Context::Plugins/agent_dirs>), named C<plugin:agent>.
+
+=cut
+
+has agent_catalog => (
+  is         => 'ro',
+  isa        => 'Langertha::Raider::Context::Agents',
+  init_arg   => undef,
+  lazy_build => 1,
+);
+
+sub _build_agent_catalog {
+  my ( $self ) = @_;
+  my $plugins = $self->plugins;
+  return $self->agents_class->new(
+    roots   => $self->agent_roots,
+    plugins => $plugins
+      ? [ map { { name => $_->{name}, dirs => [ $plugins->agent_dirs($_) ] } } @{ $plugins->plugins } ]
+      : [],
+  );
+}
 
 =attr agents_md
 
@@ -570,8 +645,8 @@ sub apply_env {
 Reads everything again that was read from disk: the layout mode, the
 memory files, the settings (and their C<env>, applied again -- a key the
 settings no longer carry gets back the value it had before), the enabled
-plugins and the skill catalogue, as C</reload> in the REPL does. What was
-decided from the constructor arguments (C<--claude>, C<claude:>, C<--bare>,
+plugins, the skill catalogue and the agent catalogue, as C</reload> in the
+REPL does. What was decided from the constructor arguments (C<--claude>, C<claude:>, C<--bare>,
 the explicit skill directories) stays. The nested F<CLAUDE.md> files
 already handed out in this session are not handed out again. Returns the
 object.
@@ -581,7 +656,8 @@ object.
 sub reload {
   my ( $self ) = @_;
   $self->$_ for qw( clear_layout clear_memory clear_settings clear_plugins
-    clear_skill_roots clear_skill_catalog clear_agents_md );
+    clear_skill_roots clear_skill_catalog clear_agent_roots clear_agent_catalog
+    clear_agents_md );
   $self->_env_done(0);
   $self->apply_env;
   return $self;
@@ -678,7 +754,7 @@ sub nested_reminders_for {
 
 =method report
 
-    my $report = $context->report;
+    my $report = $context->report(engine_class => $class, engine_name => 'openai', agent_models => {});
 
 What C<config explain> shows of the context, plain data (JSON-safe):
 
@@ -699,15 +775,22 @@ What C<config explain> shows of the context, plain data (JSON-safe):
       shadowed_skills => [ { name, source, by }, ... ],
       skill_problems  => [ { file, reason }, ... ],
       plugins         => [ { name, key, scope }, ... ],
+      agents          => [ { name, source, file, tools, disallowed, model,
+                             skills, unknown_tools, ignored_keys }, ... ],
+      shadowed_agents => [ { name, source, file, by }, ... ],
+      agent_problems  => [ { file, reason }, ... ],
     }
 
-C<memory> includes the F<AGENTS.md> item.
+C<memory> includes the F<AGENTS.md> item. C<agents>, C<shadowed_agents>
+and C<agent_problems> are L<Langertha::Raider::Context::Agents/report>;
+the arguments go there, for the model each agent would get.
 
 =cut
 
 sub report {
-  my ( $self ) = @_;
+  my ( $self, %arg ) = @_;
   my $layout = $self->layout;
+  my $agents = $self->agent_catalog->report(%arg);
   my $claude = $self->claude_layout ? 1 : 0;
   my $catalog = $self->skill_catalog;
   my $plugins = $self->plugins;
@@ -730,6 +813,9 @@ sub report {
     shadowed_skills => [ map { { name => $_->{name}, source => $_->{source}, by => $_->{by} } } $catalog->shadowed ],
     skill_problems  => [ map { { file => $_->{file}, reason => $_->{reason} } } $catalog->problems ],
     plugins         => $plugins ? [ map { { name => $_->{name}, key => $_->{key}, scope => $_->{scope} } } @{ $plugins->plugins } ] : [],
+    agents          => $agents->{agents},
+    shadowed_agents => $agents->{shadowed},
+    agent_problems  => $agents->{problems},
   };
 }
 
