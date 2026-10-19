@@ -43,6 +43,13 @@ Revision history for Langertha-Raider
       the [situation] line is left out, because rules match word for word.
 
   [Tests]
+    - t/53_repl_interrupt_tools waits for the model request before its
+      SIGINT instead of giving raider 5 s to start (it takes 4 s idle, up to
+      7 s under load; a SIGINT before the REPL's handler killed raider). The
+      stub engine gained `seen => $file`, created when the request arrives.
+    - The hall scenarios (t/202) count the hall as started when it answers
+      `ps` on the control socket, not when the socket accepts: the hall
+      opens the ACP port later, and under load the ACP connect failed.
     - Scenario suite: t/200_scenarios.t runs every t/scenarios/*.yml with a
       scripted model (Langertha::Engine::Virtual, via Test::Raider::MockAI; skipped
       without Langertha 0.504 or later) driving the real application, raid

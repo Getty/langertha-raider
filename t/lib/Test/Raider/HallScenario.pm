@@ -171,13 +171,30 @@ sub _like {
       POSIX::_exit(0);
     }
     $self->{pid} = $pid;
-    my $up;
-    for ( 1 .. 100 ) {
+    # Up means: the hall answers on its control socket. The socket accepts
+    # as soon as it listens, which is before the hall opened its ACP port
+    # (Hall->run sets the socket up first); an answer comes only from the
+    # running loop, so everything the hall sets up before is in place.
+    my $deadline = Time::HiRes::time() + 60;
+    while ( Time::HiRes::time() < $deadline ) {
       last if waitpid( $pid, WNOHANG ) > 0;
-      $up = -S $sock && IO::Socket::UNIX->new( Peer => $sock ) and last;
+      return 1 if $self->answers( $deadline );
       select undef, undef, undef, 0.1;
     }
-    return $up ? 1 : 0;
+    return 0;
+  }
+
+  # Whether the hall answers a ps on its control socket before $deadline.
+  sub answers {
+    my ( $self, $deadline ) = @_;
+    my $sock = -S $self->socket_path && IO::Socket::UNIX->new( Peer => $self->socket_path ) or return 0;
+    my $conn = Test::Raider::HallScenario::Conn->new($sock);
+    $conn->send( $JSON->encode({ type => 'command', payload => { cmd => 'ps' } }) . "\n" )
+      or return 0;
+    $conn->pump(0.1) until @{ $conn->{lines} } || $conn->{eof} || Time::HiRes::time() > $deadline;
+    my $answered = @{ $conn->{lines} } ? 1 : 0;
+    $conn->close;
+    return $answered;
   }
 
   # TERM, then KILL; true when the hall is gone.
@@ -1059,10 +1076,13 @@ YAML
     $self->{telegram}->stop if $self->{telegram};
     # What the hall started is gone with it: a raider is not ours to wait for
     # (it is a child of the hall), so look at the process table.
+    # The deadline only bounds a failing run; on a loaded machine a raider
+    # takes seconds to end (04c leaves a `sleep 3` behind on purpose).
     my @left;
-    for ( 1 .. 50 ) {
+    my $deadline = Test::Raider::HallScenario::now() + 30;
+    while (1) {
       @left = ( ( grep { kill 0, $_ } keys %{ $self->{pids} } ), $self->_in_root );
-      last unless @left;
+      last if !@left || Test::Raider::HallScenario::now() > $deadline;
       select undef, undef, undef, 0.1;
     }
     if (@left) {
