@@ -131,7 +131,6 @@ mods+=(-M Langertha)
 #                         boot dies half-way and the next JSON call segfaults.
 #                         pp reaches it only through incidental modules.
 #   LWP::Protocol::*      LWP loads the scheme handler by name.
-#   MCP::Run::**          the bash tool's server and its compress filters.
 #   Metrics::Any::Adapter::**  Net::Async::HTTP's metrics adapter, by name.
 #   IO::Async::**         IO::Async::Internals::Connector (every outgoing
 #                         connect) and IO::Async::OS::linux load by name; a
@@ -175,7 +174,7 @@ PAR_VERBATIM=1 pp -o "$OUT" \
   -M 'Metrics::Any::Adapter::**' \
   -M Net::Async::MCP -M 'Net::Async::MCP::Transport::**' \
   -M Net::Async::WebSearch \
-  -M MCP::Server -M MCP::Run -M 'MCP::Run::**' \
+  -M MCP::Server \
   -M Mojo::Reactor::Poll \
   -M IO::Socket::SSL -M Net::SSLeay -M Mozilla::CA \
   -M LWP::UserAgent -M LWP::Protocol::http -M LWP::Protocol::https \

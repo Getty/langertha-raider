@@ -336,6 +336,11 @@ Revision history for Langertha-Raider
       the agent tool with briefing from a skilletor git source, and the
       packed Skilletor (https through HTTP::Tiny, gzip, punycode). It now
       needs git.
+    - The binary no longer packs MCP::Run, since bash runs through
+      Langertha::Raider::BashTools; scripts/verify-binary.sh checks the new
+      tools in it: background shells, the task tools, read before write with
+      multi_edit, the skill message, the new refusal texts and
+      enter_plan_mode.
     - scripts/verify-binary.sh runs its offline raid, the REPL and the hall
       raider with bypassPermissions: since the permission modes, a run with
       nobody to ask refused their bash and web_fetch calls.

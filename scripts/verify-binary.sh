@@ -144,10 +144,12 @@ PLIB="$plib" BIN_LANGERTHA="$bin_langertha" RAIDER_SHARE="$root/share" perl -e '
     push @skilletor, join "::", split m{/}, $f;
   }
   $load->($_) for sort @skilletor;
+  # File::Temp: Path::Tiny requires it inside tempdir(), where the bash tool
+  # (Langertha::Raider::BashTools) keeps the output file of each command.
   $load->($_) for qw(
     IO::Async::Loop IO::Async::SSL IO::Socket::SSL Net::SSLeay Mozilla::CA
     Net::Async::HTTP LWP::UserAgent LWP::Protocol::https
-    Net::Async::MCP MCP::Server MCP::Run::Bash
+    Net::Async::MCP MCP::Server File::Temp
     Langertha JSON::MaybeXS YAML::PP YAML::XS Data::MessagePack
     File::ShareDir File::ShareDir::ProjectDistDir
     Skilletor::Source::Git Skilletor::Source::Url Skilletor::Source::Local
@@ -209,7 +211,7 @@ echo "packs (${packs[*]}): OK"
 # --- 5. an offline raid ------------------------------------------------------------
 # A real run end to end: engine resolution and loading by name, Net::Async::HTTP,
 # the Langertha tool loop, the in-process MCP tool servers (read_file and
-# MCP::Run::Bash), the session journal and --json output. The model is a
+# bash, Langertha::Raider::BashTools), the session journal and --json output. The model is a
 # fake OpenAI endpoint that asks for tool calls one by one, then answers
 # "SMOKE-DONE " with what they returned. Which calls: a prompt (any user
 # message) naming scenario=NAME gets those of $work/scenarios/NAME.json, a
@@ -310,6 +312,33 @@ grep -q "raider-web-ok" <<< "$out" || fail "offline raid: web_fetch result missi
 expect "offline raid: session journal" '.' "$BIN" session list -r "$work/project"
 echo "offline raid (fake OpenAI endpoint, read_file + bash + web_fetch tools, session journal, --json): OK"
 
+# Background shells (ADR 0024): bash forks, execs bash in a process group of
+# its own and leaves it to the loop's watch_process -- fork in the packed
+# perl, the output file in a Path::Tiny tempdir. bash_1 ends on its own and
+# bash_output waits for it; bash_2 would sleep for minutes under a name of
+# its own (exec -a) until kill_shell stops its process group.
+cat > "$work/scenarios/bg.json" <<JSON
+[ ["bash", {"command": "echo raider-bg-\$((6*7))", "run_in_background": true}],
+  ["bash", {"command": "exec -a raider-bg-sleep-$$ sleep 300", "run_in_background": true}],
+  ["bash_output", {"bash_id": "bash_1", "block": true, "timeout": 30}],
+  ["kill_shell", {"shell_id": "bash_2"}],
+  ["bash_output", {"bash_id": "bash_2"}] ]
+JSON
+out=$(run -r "$work/project" -e openai -k fake -m fake -o "url=http://127.0.0.1:$port/v1" \
+        --bare --no-session --permission-mode bypassPermissions --json "scenario=bg") \
+  || fail "background-shell raid exited $?: $out"
+for want in 'SMOKE-DONE Command running in background with ID: bash_1\.' \
+            'Command running in background with ID: bash_2\.' \
+            '<status>completed</status>[^|]*<exit_code>0</exit_code>[^|]*raider-bg-42' \
+            'Successfully stopped task: bash_2 \(exec -a raider-bg-sleep-' '<status>killed</status>'; do
+  grep -qE -- "$want" <<< "$out" || fail "background-shell raid: no /$want/ in: $out"
+done
+# No pgrep (procps) needed: a process whose argv[0] is the name, from /proc.
+perl -e 'for (glob "/proc/[0-9]*/cmdline") { open my $f, "<", $_ or next; local $/;
+  exit 1 if index( <$f> // "", $ARGV[0] ) == 0 }' "raider-bg-sleep-$$" \
+  || fail "kill_shell: raider-bg-sleep-$$ still running after the raid"
+echo "background shells (run_in_background, bash_output --block, kill_shell of the process group): OK"
+
 # The REPL on a pipe: Term::ReadLine without Gnu (left out of the build),
 # slash commands, one raid.
 repl=$(printf '/help\n/packs\ngo\n/quit\n' \
@@ -354,7 +383,8 @@ mkdir "$work/hall"
   # On failure the raider's own stderr, the slot log, says why.
   spawned=$(run hall spawn --attach astrid "read smoke.txt, run the bash check, fetch the page" 2>&1) \
     || fail "hall spawn --attach (exit $?): $spawned"
-  grep -qE "SMOKE-DONE raider-hall-marker-$$.*raider-bash-42.*raider-web-ok.*\"status\":\"completed\".*\"type\":\"run.finished\"" \
+  # read_file numbers its lines (ADR 0023): the marker follows "1\t".
+  grep -qE "SMOKE-DONE 1[^ ]*raider-hall-marker-$$.*raider-bash-42.*raider-web-ok.*\"status\":\"completed\".*\"type\":\"run.finished\"" \
     <<< "$spawned" \
     || fail "hall spawn --attach: no completed run in: $spawned
 slot log: $(tail -n 20 .raider-hall/logs/astrid.log 2>&1)"
@@ -367,7 +397,8 @@ slot log: $(tail -n 20 .raider-hall/logs/astrid.log 2>&1)"
   printf '[["write_file",{"path":"acp-out.txt","content":"x"}]]' > "$work/scenarios/acp.json"
   asked=$(run acp prompt "127.0.0.1:$acp_port" --raider sigrid "scenario=acp" 2>&1) \
     || fail "acp prompt (exit $?): $asked"
-  grep -q 'SMOKE-DONE .*the client rejected the call' <<< "$asked" \
+  grep -q "SMOKE-DONE The user doesn't want to proceed with this tool use" <<< "$asked" \
+    && grep -q 'the client rejected the call' <<< "$asked" \
     || fail "acp prompt: write_file not refused by the ACP client in: $asked
 slot log: $(tail -n 20 .raider-hall/logs/sigrid.log 2>&1)"
   [ ! -e acp-out.txt ] || fail "acp prompt: write_file ran although the client rejected it"
@@ -380,8 +411,10 @@ echo "hall + acp (init, add-raider, install, start --daemon, status, ps, acp pin
 # --- 7. the Claude Code flow ----------------------------------------------------------
 # One Claude project (CLAUDE.md, .claude/) under a home of its own, run
 # against the fake endpoint of step 5: Claude mode and its memory, settings,
-# project and plugin skills (ADR 0019), glob/grep/todo_write and the loadguard
-# gate (ADR 0018), permission modes and plan mode (ADR 0021), hooks (ADR 0022),
+# project and plugin skills (ADR 0019, the body a message of its own: ADR
+# 0026), glob/grep and the loadguard gate (ADR 0018), the task tools and
+# enter_plan_mode (ADR 0025), read before write and multi_edit (ADR 0023),
+# permission modes and plan mode (ADR 0021), hooks (ADR 0022),
 # agent files, the agent tool and the briefing preload, also from a
 # skilletor.json source over git (ADR 0020). Each check names the marker it
 # looks for: a VERIFY-* string placed in one file of the project.
@@ -392,6 +425,7 @@ mkdir -p "$cc/.claude/skills/proj-skill" "$cc/.claude/agents" "$cc/sub" "$cc/hoo
 echo "Project memory: VERIFY-CLAUDEMD" > "$cc/CLAUDE.md"
 echo "Nested memory: VERIFY-NESTED" > "$cc/sub/CLAUDE.md"
 echo "grep-needle-$$" > "$cc/sub/file.txt"
+printf 'alpha\nbeta\n' > "$cc/edit.txt"
 printf -- '---\nname: proj-skill\ndescription: A project skill.\n---\nVERIFY-PROJ-SKILL-BODY\n' \
   > "$cc/.claude/skills/proj-skill/SKILL.md"
 # A user-scoped plugin, enabled in the home's settings: its skills are
@@ -462,8 +496,10 @@ done
 echo "claude: config explain (CLAUDE.md, settings, hooks, project + plugin skills, agent with a skilletor skill): OK"
 
 # The tools, in Claude mode with bypassPermissions (the hooks still decide):
-# the two skills, a read that pulls in sub/CLAUDE.md (Plugin::NestedMemory),
-# glob, grep, todo_write, bash refused by the PreToolUse hook, a heavy bash
+# the two skills (each body a user message after the tool result), a read
+# that pulls in sub/CLAUDE.md (Plugin::NestedMemory), glob, grep, the task
+# tools, a write to edit.txt refused because it was not read, the read,
+# multi_edit and edit_file on it, bash refused by the PreToolUse hook, a heavy bash
 # command refused by loadguard -- one heavy slot (LOADGUARD_HEAVY_SLOTS=1),
 # held by a "prove" below a process that calls itself raider -- and the
 # agent tool starting "briefed", whose child run (scenario=child) sees the
@@ -474,7 +510,13 @@ cat > "$work/scenarios/claude.json" <<'JSON'
   ["read_file", {"path": "sub/file.txt"}],
   ["glob", {"pattern": "**/*.txt"}],
   ["grep", {"pattern": "grep-needle", "output_mode": "content"}],
-  ["todo_write", {"todos": [{"content": "Verify the binary", "status": "in_progress", "activeForm": "Verifying"}]}],
+  ["task_create", {"subject": "Verify the binary", "description": "Run every tool once", "activeForm": "Verifying"}],
+  ["task_update", {"taskId": "1", "status": "in_progress"}],
+  ["task_list", {}],
+  ["write_file", {"path": "edit.txt", "content": "unread"}],
+  ["read_file", {"path": "edit.txt"}],
+  ["multi_edit", {"path": "edit.txt", "edits": [{"old_string": "alpha", "new_string": "ALPHA"}, {"old_string": "beta", "new_string": "BETA"}]}],
+  ["edit_file", {"path": "edit.txt", "old_string": "BETA", "new_string": "GAMMA"}],
   ["bash", {"command": "echo hook-deny-me"}],
   ["bash", {"command": "prove -l t"}],
   ["agent", {"description": "verify", "prompt": "scenario=child", "subagent_type": "briefed"}] ]
@@ -489,34 +531,43 @@ out=$(LOADGUARD_HEAVY_SLOTS=1 ccrun -e openai -k fake -m fake -o "url=http://127
         --permission-mode bypassPermissions --json "scenario=claude") \
   || fail "claude raid exited $?: $out"
 kill "$holder" 2>/dev/null || true
-for want in 'SMOKE-DONE' 'VERIFY-PLUGIN-SKILL-BODY' 'VERIFY-PROJ-SKILL-BODY' 'grep-needle-'"$$" \
-            'VERIFY-NESTED' 'sub/file\.txt' 'Verify the binary' 'VERIFY-HOOK-DENY' 'refused by loadguard' \
+for want in 'SMOKE-DONE Launching skill: [^|]*plug-skill \| Launching skill: proj-skill \|' \
+            'CTX\[[^]]*VERIFY-PLUGIN-SKILL-BODY[^]]*VERIFY-PROJ-SKILL-BODY[^]]*VERIFY-PROMPTSUBMIT' \
+            'grep-needle-'"$$" 'VERIFY-NESTED' 'sub/file\.txt' \
+            'Task #1 created successfully: Verify the binary' 'Updated task #1 status' \
+            '#1 \[in_progress\] Verify the binary' \
+            'File has not been read yet\. Read it first before writing to it\.' \
+            'Applied 2 edits to [^ ]*/edit\.txt' \
+            'VERIFY-HOOK-DENY' 'refused by loadguard' \
             'CTX\[[^]]*VERIFY-AGENT-BODY[^]]*VERIFY-PROJ-SKILL-BODY[^]]*VERIFY-SKILLETOR-SKILL-BODY' \
             'CTX\[[^]]*VERIFY-CLAUDEMD[^]]*VERIFY-PROMPTSUBMIT[^]]*VERIFY-SESSIONSTART'; do
   grep -qE -- "$want" <<< "$out" || fail "claude raid: no /$want/ in: $out"
 done
+[ "$(cat "$cc/edit.txt")" = "$(printf 'ALPHA\nGAMMA')" ] \
+  || fail "claude raid: edit.txt is not ALPHA/GAMMA after multi_edit and edit_file: $(cat "$cc/edit.txt")"
 grep -q '"tool_name":"Glob"' "$cc/post-tool.jsonl" 2>/dev/null \
   || fail "claude raid: PostToolUse hook did not log the glob call: $(cat "$cc/post-tool.jsonl" 2>&1)"
-echo "claude: raid (skill tool on a plugin and a project skill, nested CLAUDE.md, glob, grep without rg, todo_write, hooks, loadguard gate, agent tool with skilletor briefing): OK"
+echo "claude: raid (skill tool on a plugin and a project skill, nested CLAUDE.md, glob, grep without rg, task tools, read before write, multi_edit + edit_file, hooks, loadguard gate, agent tool with skilletor briefing): OK"
 
 # Permissions without anyone to ask: plan mode refuses a write and cannot
-# leave plan mode; default mode refuses bash.
+# leave plan mode; default mode refuses bash and enter_plan_mode -- each in
+# Claude Code's words, raider's reason after them.
 cat > "$work/scenarios/plan.json" <<'JSON'
 [ ["write_file", {"path": "plan-out.txt", "content": "x"}],
   ["exit_plan_mode", {"plan": "write plan-out.txt"}] ]
 JSON
-printf '[["bash",{"command":"touch default-out.txt"}]]' > "$work/scenarios/default.json"
+printf '[["bash",{"command":"touch default-out.txt"}],["enter_plan_mode",{}]]' > "$work/scenarios/default.json"
 out=$(ccrun -e openai -k fake -m fake -o "url=http://127.0.0.1:$port/v1" --no-session \
         --permission-mode plan --json "scenario=plan") || fail "plan-mode raid exited $?: $out"
-grep -qE "SMOKE-DONE Tool call 'write_file' was denied: plan mode: .*Nobody can approve the plan" <<< "$out" \
+grep -qE "SMOKE-DONE Permission to use write_file has been denied\. Reason: plan mode: .* \| Permission to use exit_plan_mode has been denied\. Reason: nobody can approve the plan in this run" <<< "$out" \
   || fail "plan-mode raid: write_file and exit_plan_mode not refused in: $out"
 [ ! -e "$cc/plan-out.txt" ] || fail "plan mode: write_file ran"
 out=$(ccrun -e openai -k fake -m fake -o "url=http://127.0.0.1:$port/v1" --no-session \
         --json "scenario=default") || fail "default-mode raid exited $?: $out"
-grep -q "SMOKE-DONE Tool call 'bash' was denied: default mode asks .*nobody can approve it" <<< "$out" \
-  || fail "default-mode raid: bash not refused in: $out"
+grep -qE "SMOKE-DONE Permission to use bash with command touch default-out\.txt has been denied\. Reason: default mode asks .*nobody can approve it in this run.* \| Permission to use enter_plan_mode has been denied\. Reason: default mode asks before this call: enter_plan_mode switches the session to plan mode.*nobody can approve it in this run" <<< "$out" \
+  || fail "default-mode raid: bash and enter_plan_mode not refused in: $out"
 [ ! -e "$cc/default-out.txt" ] || fail "default mode, nobody to ask: bash ran"
-echo "claude: permissions (plan mode refuses write_file and exit_plan_mode, default mode refuses bash): OK"
+echo "claude: permissions (plan mode refuses write_file and exit_plan_mode, default mode refuses bash and enter_plan_mode): OK"
 
 # LOADGUARD_CONFINE=1: the raider starts itself again in a systemd user scope
 # -- the binary itself, never "perl <binary>" -- and its bash runs in there.
