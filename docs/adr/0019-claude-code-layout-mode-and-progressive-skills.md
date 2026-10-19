@@ -195,3 +195,14 @@ As in Claude Code, skills can appear while working:
 Not supported: `paths:` as a gate for rules/memory files, and a `paths:` glob over a file that
 only a `bash` command touched (only tools with a `path` / `file_path` argument count, as for
 nested memory).
+
+## Addendum 2 — what makes `.raider/` a raider project (2026-10-19)
+
+raider writes `.raider/sessions/` (the journal, ADR 0015), `.raider/.gitignore`
+and `.raider/lib/` (perl_cpanm's local::lib) into any project it runs in.
+Counting any `.raider/` as the marker turned a Claude Code project native from
+its second run on: CLAUDE.md, `.claude/skills`, `.claude/agents` and the
+settings were no longer read. `.raider/` now decides the mode only when it
+holds project files: `config.yml`, `instructions.md`, or one of the
+directories `skills/`, `agents/`, `raiders/`, `packs/`. The reason names the
+file (`.raider/config.yml in root`). Found by stream A (karr #153).

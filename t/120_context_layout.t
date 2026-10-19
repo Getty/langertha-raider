@@ -54,9 +54,18 @@ subtest 'defaults' => sub {
 };
 
 subtest 'mode table' => sub {
-  is_mode(dir($out, '.raider/', 'CLAUDE.md'), bare => '--bare', 'bare wins over everything', bare => 1);
-  is_mode(dir($out, '.raider/', 'CLAUDE.md', '.claude/'), raider => '.raider/ in root',
-    '.raider/ wins over Claude files');
+  is_mode(dir($out, '.raider/', '.raider/config.yml', 'CLAUDE.md'), bare => '--bare', 'bare wins over everything', bare => 1);
+  is_mode(dir($out, '.raider/', '.raider/config.yml', 'CLAUDE.md', '.claude/'), raider => '.raider/config.yml in root',
+    '.raider/config.yml wins over Claude files');
+  is_mode(dir($out, '.raider/', '.raider/instructions.md'), raider => '.raider/instructions.md in root',
+    '.raider/instructions.md');
+  is_mode(dir($out, '.raider/', '.raider/skills/'), raider => '.raider/skills/ in root', '.raider/skills/');
+  is_mode(dir($out, '.raider/', '.raider/agents/'), raider => '.raider/agents/ in root', '.raider/agents/');
+  # raider writes these itself in any project it runs in (journal, local::lib):
+  # they must not turn a Claude Code project native (found by stream A).
+  is_mode(dir($out, '.raider/', '.raider/sessions/', '.raider/.gitignore', '.raider/lib/', 'CLAUDE.md'),
+    claude => 'CLAUDE.md in root', 'raider\'s own sessions/, lib/, .gitignore are no project marker');
+  is_mode(dir($out, '.raider/'), native => 'no raider or Claude files', 'an empty .raider/ is no marker');
   is_mode(dir($out, '.raider.yml', 'CLAUDE.md'), raider => '.raider.yml in root', 'legacy .raider.yml');
   is_mode(dir($out, '.raider.md'), raider => '.raider.md in root', 'legacy .raider.md');
   is_mode(dir($out, '.raider'), native => 'no raider or Claude files', 'a .raider file is not a layout');
@@ -119,7 +128,8 @@ subtest 'markers along the walk' => sub {
 
   my $raider_below = dir($dev);
   $raider_below->child('.raider')->mkpath;
-  is_mode($raider_below, raider => '.raider/ in root', 'raider files in root beat an ancestor CLAUDE.md');
+  $raider_below->child('.raider', 'config.yml')->spew_utf8("x\n");
+  is_mode($raider_below, raider => '.raider/config.yml in root', 'raider files in root beat an ancestor CLAUDE.md');
 };
 
 subtest 'repository walk' => sub {
@@ -143,15 +153,15 @@ subtest 'repository walk' => sub {
 
 subtest 'claude_layout' => sub {
   my @cases = (
-    [ 'bare',             [ '.raider/', 'CLAUDE.md' ], { bare => 1, force_claude => 1, config_claude => 1 },
+    [ 'bare',             [ '.raider/', '.raider/config.yml', 'CLAUDE.md' ], { bare => 1, force_claude => 1, config_claude => 1 },
       0, 'off: --bare' ],
     [ 'claude mode',      [ 'CLAUDE.md' ], {}, 1, 'Claude mode' ],
     [ 'claude + --claude', [ 'CLAUDE.md' ], { force_claude => 1 }, 1, 'Claude mode' ],
-    [ 'raider',           [ '.raider/', 'CLAUDE.md' ], {}, 0, 'off: raider project without claude: true' ],
-    [ 'raider claude: false', [ '.raider/' ], { config_claude => 0 }, 0,
+    [ 'raider',           [ '.raider/', '.raider/config.yml', 'CLAUDE.md' ], {}, 0, 'off: raider project without claude: true' ],
+    [ 'raider claude: false', [ '.raider/', '.raider/config.yml' ], { config_claude => 0 }, 0,
       'off: raider project without claude: true' ],
-    [ 'raider claude: true',  [ '.raider/' ], { config_claude => 1 }, 1, 'claude: true in config' ],
-    [ 'raider --claude',  [ '.raider/' ], { force_claude => 1, config_claude => 0 }, 1, '--claude' ],
+    [ 'raider claude: true',  [ '.raider/', '.raider/config.yml' ], { config_claude => 1 }, 1, 'claude: true in config' ],
+    [ 'raider --claude',  [ '.raider/', '.raider/config.yml' ], { force_claude => 1, config_claude => 0 }, 1, '--claude' ],
     [ 'native',           [], {}, 0, 'off: no raider or Claude files' ],
     [ 'native claude: true', [], { config_claude => 1 }, 0, 'off: no raider or Claude files' ],
     [ 'native --claude',  [], { force_claude => 1 }, 1, '--claude' ],

@@ -2,6 +2,12 @@ Revision history for Langertha-Raider
 
 {{$NEXT}}
 
+    - A .raider/ directory makes a raider project only when it holds
+      config.yml, instructions.md, skills/, agents/, raiders/ or packs/.
+      raider's own .raider/sessions, .raider/lib and .gitignore turned a
+      Claude Code project native from its second run on (ADR 0019
+      addendum 2).
+
   [Status]
     - Marked as in development (POD and README): a developer release, not yet
       covered end to end. Release it with `dzil release --trial`.

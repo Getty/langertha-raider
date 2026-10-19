@@ -179,7 +179,9 @@ sub _build__decision {
   my $home = $self->_real_home;
   return [ native => 'root is the home directory' ]
     if defined $home && $root->stringify eq $home->stringify;
-  return [ raider => '.raider/ in root' ] if -d $root->child('.raider');
+  if ( defined( my $marker = $self->_raider_marker($root) ) ) {
+    return [ raider => $marker.' in root' ];
+  }
   for my $legacy (qw( .raider.yml .raider.md )) {
     return [ raider => $legacy.' in root' ] if -f $root->child($legacy);
   }
@@ -202,7 +204,8 @@ The layout mode, decided once per object (see L</DESCRIPTION>).
     my $why = $layout->reason;
 
 What decided L</mode>, for C<config explain>: C<--bare>,
-C<root is the home directory>, C<.raider/ in root>, C<.raider.yml in root>,
+C<root is the home directory>, C<.raider/config.yml in root> (or another
+project file in C<.raider/>, see below), C<.raider.yml in root>,
 C<.raider.md in root>, C<CLAUDE.md in root> (or C<CLAUDE.local.md>,
 C<.claude/>; an ancestor of the walk is named by its absolute path, as in
 C<CLAUDE.md in /abs/dir>), or C<no raider or Claude files>.
@@ -327,6 +330,27 @@ sub project_dir {
     return $dir if $self->_has_project_claude_dir($dir) || -f $dir->child('CLAUDE.md');
   }
   return $self->_real_root;
+}
+
+# A .raider/ directory makes a raider project only when it holds project
+# files. raider itself creates .raider/sessions (the journal, ADR 0015), its
+# .gitignore and .raider/lib (perl_cpanm's local::lib) in any project it runs
+# in; counting those turned a Claude Code project native from its second run
+# on.
+my @RAIDER_PROJECT_FILES = qw( config.yml instructions.md );
+my @RAIDER_PROJECT_DIRS  = qw( skills agents raiders packs );
+
+sub _raider_marker {
+  my ( $self, $root ) = @_;
+  my $dir = $root->child('.raider');
+  return unless -d $dir;
+  for my $file (@RAIDER_PROJECT_FILES) {
+    return ".raider/$file" if -f $dir->child($file);
+  }
+  for my $sub (@RAIDER_PROJECT_DIRS) {
+    return ".raider/$sub/" if -d $dir->child($sub);
+  }
+  return;
 }
 
 sub _claude_marker {
