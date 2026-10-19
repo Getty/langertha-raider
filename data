@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-10-19T05:37:13Z
+claimed_by: k2
+class: standard
+completed: 2026-10-19T05:37:12Z
+created: 2026-10-19T05:08:08Z
+id: 157
+priority: medium
+started: 2026-10-19T05:08:58Z
+status: done
+tags:
+- claude-code-flow
+title: 'Claude mode follow-ups: persona off, /reload, claude=false, file skills, nested
+  skills and paths frontmatter'
+updated: 2026-10-19T05:37:13Z
+---
+
+Strom K2 (Folgepunkte aus #151). Plan: /home/getty/dev/perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md
+
+2026-10-19 05:28 K2 done: persona/default packs off in Claude mode (mode claude only; raider project with claude:true keeps persona), /reload via Context::reload + Application::reload_context, Config::parse_bool for claude/perl/detect, type:file skills included (also --skills FILE; unknown type/no path croaks), nested .claude/skills + paths: frontmatter announced in a 2nd system-reminder block, skill tool always mounted in Claude layout. Decisions in ADR 0019 Addendum 1. Scenarios 40-46, tests t/130-133. Full suite green (130 files). Open: pack selection not re-decided on /reload mode flip; paths: via bash-touched files not supported.
+
+2026-10-19 05:28 Done, see note; suite green
+
+Koordinator 2026-10-19: geprüft (1195 grün, Gegenprobe rot), zu b6bb59d zusammengefasst und gemerged. Offen: paths: nur bei Tools mit path-Argument (nicht bash); Pack-Auswahl nach /reload bei Moduswechsel nicht neu bewertet.
