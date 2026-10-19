@@ -499,7 +499,7 @@ is not described. The built-ins:
 | Tool                                                        | Notes                                     |
 |-------------------------------------------------------------|-------------------------------------------|
 | `list_files(path)`                                          | Directory listing, dirs suffixed with `/` |
-| `read_file(path)`                                           | Full text file                            |
+| `read_file(path, offset, limit, pages)`                     | Numbered text; PDF pages as text          |
 | `write_file(path, content)`                                 | Creates parents, overwrites               |
 | `edit_file(path, old_string, new_string)`                   | Exact unique-match substitution           |
 | `bash(command, [compress], [timeout], [working_directory])` | Real shell; stdout/stderr/exit code       |

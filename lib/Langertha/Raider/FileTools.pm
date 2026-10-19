@@ -10,8 +10,11 @@ use Encode qw( decode encode FB_DEFAULT );
 use JSON::MaybeXS qw( JSON );
 use MIME::Base64 qw( encode_base64 );
 use Path::Tiny;
+use File::Which ();
+use IPC::Run ();
 use MCP::Server;
 use Langertha::Raider::FileTools::ReadState;
+use Langertha::Raider::PathConfine;
 
 use Exporter 'import';
 our @EXPORT_OK = qw( build_file_tools_server );
@@ -19,7 +22,7 @@ our @EXPORT_OK = qw( build_file_tools_server );
 =description
 
 The file tools of L<raider>: an L<MCP::Server> with C<list_files(path)>,
-C<read_file(path, offset, limit)>, C<write_file(path, content)>,
+C<read_file(path, offset, limit, pages)>, C<write_file(path, content)>,
 C<edit_file(path, old_string, new_string, replace_all)> and
 C<multi_edit(path, edits)>, which answer as Claude Code's C<Read>, C<Write>,
 C<Edit> and C<MultiEdit> do (ADR 0023): the same result and error texts, the
@@ -29,7 +32,11 @@ same error flag.
 
 =item * C<read_file> returns the file in C<cat -n> form (line number, a tab,
 the line), at most 2000 lines unless C<limit> says otherwise, from line
-C<offset> (1-based); a line longer than 2000 characters is cut. An image
+C<offset> (1-based); a line longer than 2000 characters is cut; a result of
+more than 25000 tokens (a token counted as four bytes) is refused. With
+C<pages> (C<"3">, C<"1-5">, at most 20 pages) a PDF is read as text through
+C<pdftotext> (poppler) for any model; a PDF of more than 10 pages must be
+read that way. An image
 (PNG, JPEG, GIF, WebP) or a PDF comes back as image or document content
 when the model can see it (C<sees_images>), a Jupyter notebook as its cells
 with their outputs; other binary files, directories and devices are refused
@@ -87,6 +94,9 @@ my $MAX_LINE_CHARS  = 2000;
 my $MAX_READ_BYTES  = 256 * 1024;
 my $MAX_IMAGE_BYTES = 3_932_160;          # 3.75 MB: 5 MB once in base64
 my $MAX_PDF_BYTES   = 32 * 1024 * 1024;
+my $MAX_READ_TOKENS = 25_000;             # Claude Code's limit on what one read returns
+my $PDF_INLINE_PAGES = 10;                # a PDF with more pages is read by page range
+my $PDF_MAX_PAGES    = 20;                # pages per request
 my $STATE_NOTE      = ' (file state is current in your context — no need to Read it back)';
 
 my %IMAGE_MIME = (
@@ -114,14 +124,11 @@ sub build_file_tools_server {
   my $root_realpath = $root ? realpath($root) : undef;
   die "Root does not exist: $root\n" if $root && !defined $root_realpath;
   my $real_root = $root ? path($root_realpath)->absolute : undef;
-  my $extra = $args{extra_roots};
-  my $real_roots = sub {
-    my @extra = ref $extra eq 'CODE' ? $extra->() : @{ $extra // [] };
-    @extra = @{ $extra[0] } if @extra == 1 && ref $extra[0] eq 'ARRAY';
-    return ( $real_root, map { path($_)->absolute } grep { defined } map { realpath($_) } grep { defined } @extra );
-  };
-  my $confine = exists $args{confine} ? $args{confine} : 1;
-  my $confined = sub { ref $confine eq 'CODE' ? ( $confine->() ? 1 : 0 ) : ( $confine ? 1 : 0 ) };
+  my $confinement = Langertha::Raider::PathConfine->new(
+    root        => $real_root ? "$real_root" : undef,
+    extra_roots => $args{extra_roots} // [],
+    confine     => exists $args{confine} ? $args{confine} : 1,
+  );
   my $sees = exists $args{sees_images} ? $args{sees_images} : 1;
   my $sees_images = sub { ref $sees eq 'CODE' ? ( $sees->() ? 1 : 0 ) : ( $sees ? 1 : 0 ) };
   my $state = $args{read_state} // Langertha::Raider::FileTools::ReadState->new;
@@ -129,9 +136,7 @@ sub build_file_tools_server {
 
   my $assert_in_root = sub {
     my ($p) = @_;
-    return unless $real_root && $confined->();
-    my @real_roots = $real_roots->();
-    die "Path escapes root: $p\n" unless grep { $_->subsumes($p) } @real_roots;
+    die "Path escapes root: $p\n" unless $confinement->allows("$p");
     return;
   };
 
@@ -235,6 +240,8 @@ sub build_file_tools_server {
       '- Reads up to '.$MAX_LINES.' lines by default; `offset` (the 1-based line to start at) and `limit` (the number of lines) read a part. When you already know which part of the file you need, only read that part.',
       '- Results are returned using cat -n format, with line numbers starting at 1: the line number, a tab, then the line as it is in the file. Lines longer than '.$MAX_LINE_CHARS.' characters are truncated.',
       '- Reads images (PNG, JPG, GIF, WebP) and PDFs when the model can see them, and Jupyter notebooks (.ipynb) as cells with outputs.',
+      '- A PDF of more than '.$PDF_INLINE_PAGES.' pages must be read by page range with `pages` (e.g. "1-5"), at most '.$PDF_MAX_PAGES.' pages per request; those pages come back as text (needs pdftotext from poppler-utils).',
+      '- A read that returns more than '.$MAX_READ_TOKENS.' tokens is refused; read a part with `offset` and `limit`.',
       '- Reading a directory, a missing file, or an empty file returns an error or system reminder rather than content.',
     ),
     input_schema => {
@@ -243,6 +250,7 @@ sub build_file_tools_server {
         path   => { type => 'string',  description => 'The path of the file to read, absolute or relative to the project root' },
         offset => { type => 'integer', description => 'The line number to start reading from. Only provide if the file is too large to read at once' },
         limit  => { type => 'integer', description => 'The number of lines to read. Only provide if the file is too large to read at once.' },
+        pages  => { type => 'string',  description => 'Page range for PDF files (e.g., "1-5", "3", "10-20"). Only applicable to PDF files. Maximum '.$PDF_MAX_PAGES.' pages per request.' },
       },
       required => ['path'],
     },
@@ -256,7 +264,7 @@ sub build_file_tools_server {
         unless -f $p;
       my $ext = $p->basename =~ /\.([^.\/]+)\z/ ? lc $1 : '';
       return _read_image( $tool, $p, $ext, $state, $sees_images, $refuse ) if $IMAGE_MIME{$ext};
-      return _read_pdf( $tool, $p, $state, $sees_images, $refuse ) if $ext eq 'pdf';
+      return _read_pdf( $tool, $p, $state, $sees_images, $refuse, $in ) if $ext eq 'pdf';
       return $refuse->($tool, _binary_text($ext)) if $BINARY_EXT{$ext};
       return _read_notebook( $tool, $p, $state, $sees_images, $failed ) if $ext eq 'ipynb';
 
@@ -539,7 +547,11 @@ sub _read_text {
     push @out, $n."\t".$line;
   }
   my $text = join "\n", @out;
-  my $cut  = !defined $asked && $end < $total;
+  if ( my $tokens = _tokens_over($text) ) {
+    return $tool->text_result('File content ('.$tokens.' tokens) exceeds maximum allowed tokens ('.$MAX_READ_TOKENS
+      .'). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.', 1);
+  }
+  my $cut = !defined $asked && $end < $total;
   $text .= "\n\n[Truncated: PARTIAL view — ".$p.': showing lines '.$start.'-'.$end.' of '.$total.' total. Call read_file with offset='
     .( $end + 1 ).' limit='.$MAX_LINES.' for the next page, or grep to find a specific section. Do NOT answer from this page alone if the answer may be further in the file.]'
     if $cut;
@@ -569,12 +581,84 @@ sub _read_image {
   };
 }
 
+# The size in tokens of a text when it is over the limit of one read, else 0.
+# A token is about four bytes, as Claude Code counts them without a tokenizer.
+sub _tokens_over {
+  my ( $text ) = @_;
+  my $tokens = int( ( length( encode( 'UTF-8', $text ) ) + 3 ) / 4 );
+  return $tokens > $MAX_READ_TOKENS ? $tokens : 0;
+}
+
+# The number of pages of a PDF from pdfinfo (poppler), or undef.
+sub _pdf_page_count {
+  my ( $p ) = @_;
+  my $pdfinfo = File::Which::which('pdfinfo') or return;
+  my ( $out, $err );
+  eval { IPC::Run::run( [ $pdfinfo, "$p" ], \undef, \$out, \$err ) } or return;
+  return $out =~ /^Pages:\s+(\d+)/m ? int $1 : undef;
+}
+
+my $BAD_PAGES = 'Invalid pages parameter: "%s". Use formats like "1-5", "3", or "10-20". Pages are 1-indexed.';
+
+# A page range "N", "N-M" or "N-" as ( first, last ), last undef when open,
+# or ( undef, undef, error text ).
+sub _pdf_range {
+  my ( $pages ) = @_;
+  my ( $first, $dash, $last ) = $pages =~ /\A\s*(\d+)\s*(?:(-)\s*(\d*))?\s*\z/
+    or return ( undef, undef, sprintf $BAD_PAGES, $pages );
+  $last = $dash ? ( length $last ? int $last : undef ) : int $first;
+  $first = int $first;
+  return ( undef, undef, sprintf $BAD_PAGES, $pages ) if $first < 1 || ( defined $last && $last < $first );
+  return ( $first, $last );
+}
+
+# Some pages of a PDF as text through pdftotext (poppler); this works for a
+# model that cannot see PDFs, too.
+sub _read_pdf_pages {
+  my ( $tool, $p, $pages, $state, $refuse ) = @_;
+  my ( $first, $last, $error ) = _pdf_range($pages);
+  return $refuse->($tool, $error) if defined $error;
+  my $too_many = 'Page range "'.$pages.'" exceeds maximum of '.$PDF_MAX_PAGES.' pages per request. Please use a smaller range.';
+  return $refuse->($tool, $too_many) if defined $last && $last - $first + 1 > $PDF_MAX_PAGES;
+  my $pdftotext = File::Which::which('pdftotext')
+    or return $refuse->($tool, 'The pages parameter needs pdftotext, which is not installed. Install poppler-utils '
+      .'(for example `apt-get install poppler-utils` or `brew install poppler`), or extract the text with a shell command.');
+  my $count = _pdf_page_count($p);
+  $last //= $count // $first + $PDF_MAX_PAGES - 1;
+  $last = $count if defined $count && $last > $count && $first <= $count;
+  return $refuse->($tool, $too_many) if $last - $first + 1 > $PDF_MAX_PAGES;
+  return $refuse->($tool, 'Page '.$first.' is beyond the end of the PDF, which has '.$count.' pages.')
+    if defined $count && $first > $count;
+  my ( $out, $err );
+  my $ok = eval { IPC::Run::run( [ $pdftotext, '-f', $first, '-l', $last, '-layout', "$p", '-' ], \undef, \$out, \$err ) };
+  unless ($ok) {
+    my $why = length( $err // '' ) ? $err : ( $@ || 'pdftotext failed' );
+    $why =~ s/\s+\z//;
+    return $tool->text_result('Failed to read the PDF pages: '.$why, 1);
+  }
+  my @text = split /\f/, decode( 'UTF-8', $out // '', FB_DEFAULT );
+  my $n = $first;
+  my $text = 'PDF pages '.$first.'-'.$last.' of '.$p.":\n\n".join( "\n\n", map { 'Page '.$n++.":\n".$_ } @text );
+  if ( my $tokens = _tokens_over($text) ) {
+    return $tool->text_result('PDF text ('.$tokens.' tokens) exceeds maximum allowed tokens ('.$MAX_READ_TOKENS
+      .'). Use a smaller page range.', 1);
+  }
+  $state->record( "$p", partial => 1 );
+  return $tool->text_result($text);
+}
+
 sub _read_pdf {
-  my ( $tool, $p, $state, $sees_images, $refuse ) = @_;
+  my ( $tool, $p, $state, $sees_images, $refuse, $in ) = @_;
+  my $pages = $in->{pages};
+  return _read_pdf_pages( $tool, $p, $pages, $state, $refuse ) if defined $pages && length $pages;
   return $refuse->($tool, _sees_text( 'PDF files', $p )) unless $sees_images->();
   my $size = -s $p;
   return $refuse->($tool, 'PDF file ('._size_text($size).') exceeds maximum allowed size ('._size_text($MAX_PDF_BYTES)
     .'). Use a shell command or script that can extract the text (such as pdftotext).') if $size > $MAX_PDF_BYTES;
+  my $count = _pdf_page_count($p);
+  return $refuse->($tool, 'This PDF has '.$count.' pages, which is too many to read at once. Use the pages parameter '
+    .'to read specific page ranges (e.g., pages: "1-5"). Maximum '.$PDF_MAX_PAGES.' pages per request.')
+    if defined $count && $count > $PDF_INLINE_PAGES;
   my $bytes = eval { $p->slurp_raw };
   return $tool->text_result("Error reading $p: $@", 1) if $@;
   $state->record( "$p", partial => 1 );

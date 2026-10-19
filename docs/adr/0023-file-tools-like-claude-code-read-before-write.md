@@ -105,7 +105,7 @@ any project.
 
 ### 3. read_file
 
-`read_file(path, offset, limit)`: `cat -n` form as above (tab separator, CR at line end
+`read_file(path, offset, limit, pages)`: `cat -n` form as above (tab separator, CR at line end
 dropped), at most 2000 lines unless `limit` is given, a line over 2000 characters cut with `...
 [truncated]`. When the default cut hides lines, a note in Claude Code's `[Truncated: PARTIAL view
 — P: showing lines 1-2000 of N total. Call read_file with offset=2001 limit=2000 for the next
@@ -193,15 +193,16 @@ every path outside (`Path escapes root`), in every mode, also `bypassPermissions
   sessions, where nothing could carry it anyway. Cost: after a new prompt the model reads the
   file again before editing it.
 - **Read before write in every layout**, not only the Claude one (§2).
-- **Files in the context are not seeded**, except the prompt builder's instructions file. Claude
-  Code counts a `CLAUDE.md` it injected whole as read; raider asks for a read first.
+- **Files in the prompt are seeded as read** (addendum below); nested `CLAUDE.md` files that a
+  tool result brings in are not.
 - **Size check on mtime and size, plus the hash for a whole read.** Claude Code compares the
   mtime (and the content for whole reads); raider also takes a changed size as a change.
-- **No token limit** (Claude Code: 25000 tokens): there is no tokenizer here; the 256 KB limit,
-  the 2000-line cut and the 2000-character line cut remain. The line cut is marked `...
-  [truncated]` (Claude Code documents the cut but its marker is not observable).
-- **No PDF `pages` parameter** (needs poppler); a PDF is sent whole up to 32 MB. No image
-  resizing: an image over 3.75 MB is refused.
+- **Token limit by estimate** (addendum below): 25000 tokens as Claude Code, counted as bytes
+  divided by four — there is no tokenizer here; the 256 KB limit, the 2000-line cut and the
+  2000-character line cut remain. The line cut is marked `... [truncated]` (Claude Code
+  documents the cut but its marker is not observable).
+- **PDF `pages` returns text, not page images** (addendum below). No image resizing: an image
+  over 3.75 MB is refused.
 - **Images and PDFs only for a model and wire that carry them**, else a refusal (§3); Claude Code
   always sends them. Which `/anthropic` shims drop images (AKI) is a private predicate of core; a
   public capability for "images in tool results" is a follow-up for the langertha board.
@@ -225,9 +226,54 @@ every path outside (`Path escapes root`), in every mode, also `bypassPermissions
   `bypassPermissions` reaches it.
 - Scenarios and tests that changed existing files without reading them read them first now
   (`t/scenarios/07`, `79`, `log-01`, `log-11`, `log-12`); new scenarios 110–118, tests t/190–192.
-- Follow-ups: seeding context files (CLAUDE.md) as read; a core capability for tool-result
-  images; PDF pages; sub-agents (stream A) share the application's read state unless they get
-  their own — to decide with ADR for sub-agents.
+- Follow-ups: a core capability for tool-result images; sub-agents (stream A) share the
+  application's read state unless they get their own — to decide with ADR for sub-agents.
+  (Seeding context files and PDF pages: addendum below.)
+
+## Addendum (k163): token limit, PDF pages, seeded files, one confinement
+
+**Token limit.** A `read_file` of text whose result is over 25000 tokens is refused with Claude
+Code's `File content (N tokens) exceeds maximum allowed tokens (25000). Use offset and limit
+parameters to read specific portions of the file, or search for specific content instead of
+reading the whole file.` (`isError`, no `tool_use_error` frame), whole file or part, and does not
+count as read. N is the UTF-8 byte length of the numbered text divided by four, rounded up:
+Claude Code estimates the same way when no tokenizer is at hand, and a tokenizer would be a
+dependency for a limit that only has to be about right. The 256 KB check for a whole read stays
+in front of it; since 25000 tokens are about 100 KB the token limit is what usually decides.
+No environment override (Claude Code has one); a decision for later if someone needs it.
+
+**PDF pages.** `read_file(path, pages)` with `pages` `"N"`, `"N-M"` or `"N-"` (1-based) at most 20
+pages per request; the formats, the `Invalid pages parameter: …` text and the `Page range … exceeds
+maximum of 20 pages per request. Please use a smaller range.` text are Claude Code's, framed as
+`tool_use_error`. Decision: the pages come back as **text from `pdftotext -layout`** (poppler),
+headed `PDF pages F-L of P:` and `Page N:` per page — Claude Code renders them to images with
+`pdftoppm`. Text works for every model, also one that cannot see images, needs one program and
+costs far fewer tokens; a scanned PDF without a text layer returns empty pages, for that the
+model uses `bash`. The result is subject to the token limit and counts as a partial read.
+Without `pdftotext` the call is refused saying so and naming `poppler-utils`; nothing falls back
+to sending the whole file. Programs are looked up on `PATH` at each call (`File::Which`) and run
+with `IPC::Run`; nothing poppler is a dependency of the dist. Without `pages`, a PDF over 10
+pages (counted by `pdfinfo`, when it is there) is refused with Claude Code's `This PDF has N
+pages, which is too many to read at once. Use the pages parameter …`; without `pdfinfo` there is
+no count and no refusal, the PDF is sent whole up to 32 MB as before.
+
+**Seeded as read.** `Application::begin_run` now records, after emptying the state, every
+instructions file of the prompt (`Context::instruction_items`: the `CLAUDE.md` hierarchy,
+`CLAUDE.local.md`, `AGENTS.md`) with the bytes on disk, as Claude Code counts a `CLAUDE.md` it
+injected as read. They count as whole reads: a later change on disk is still caught. A file with
+`@import`s is recorded by its own bytes (the prompt shows the expanded text; Claude Code marks
+such a view as partial, we do not care to). The prompt builder's own record (§2) stays. Not
+seeded: nested `CLAUDE.md` files handed out by the `NestedMemory` plugin, and everything for a
+subagent (its state is its own and empty, §2). Outside the Claude layout and in `--bare` the
+prompt carries no such files and nothing is seeded.
+
+**One confinement.** `FileTools` and `SearchTools` each carried a copy of the root,
+additional-directories and `confine` logic. `Langertha::Raider::PathConfine` is that logic once
+(`allows($real)`, `confined`, `real_extra_roots`); both tools build one over the same three
+arguments, so they cannot disagree. Behavior is unchanged, including the one difference the copies
+had: search tools take an additional directory only if it is a directory (`dirs_only`).
+
+Tests t/235–t/239, scenarios 165–169.
 
 ## Source
 

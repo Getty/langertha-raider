@@ -183,6 +183,13 @@ Revision history for Langertha-Raider
     - web_search takes allowed_domains and blocked_domains (subdomains
       included): the results are filtered, site: / -site: go into the query,
       both at once is an error.
+    - read_file: a read over 25000 tokens (bytes / 4) is refused as in
+      Claude Code; pages ("1-5", at most 20) reads PDF pages as text
+      through pdftotext (poppler, looked up on PATH; a PDF of more than 10
+      pages needs it). The CLAUDE.md / AGENTS.md files in the prompt count
+      as read, so they can be edited without a read_file first. FileTools
+      and SearchTools share one confinement (Langertha::Raider::PathConfine).
+      Tests t/235-t/239, scenarios 165-169; ADR 0023 addendum.
     - Tests: t/203-t/206, scenarios t/scenarios/130-135;
       Test::Raider::LocalHTTP serves web pages to scenarios (http:), and
       scenario requests check their last messages (tail:).

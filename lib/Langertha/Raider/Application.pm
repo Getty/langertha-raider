@@ -2109,8 +2109,9 @@ The record of the files read in the run in progress
 (L<Langertha::Raider::FileTools::ReadState>), which the file tools hold
 C<write_file>, C<edit_file> and C<multi_edit> against: an existing file must
 have been read in this run, and not changed on disk since (ADR 0023).
-L</begin_run> empties it. A surface that shows the model a file's content
-itself (the prompt builder) records it here.
+L</begin_run> empties it and then records the instructions files of the
+prompt (C<CLAUDE.md>, C<AGENTS.md>, ...) as read. A surface that shows the
+model a file's content itself (the prompt builder) records it here.
 
 =cut
 
@@ -2526,6 +2527,7 @@ sub begin_run {
   my $session = $o{session};
   $self->_todos([]) unless $self->task_tools;
   $self->file_read_state->clear;
+  $self->_seed_read_state;
   $self->_run({
     session  => $session,
     run      => $session ? $session->next_run : undef,
@@ -2534,6 +2536,18 @@ sub begin_run {
   });
   $self->event('run.started', engine => $self->engine_name, $self->has_model ? ( model => $self->model ) : ());
   $self->event('run.state', state => 'running');
+  return;
+}
+
+# The instructions files the context put into the prompt (CLAUDE.md, AGENTS.md,
+# ...) count as read, as in Claude Code: the model has seen them (ADR 0023).
+sub _seed_read_state {
+  my ( $self ) = @_;
+  my $state = $self->file_read_state;
+  for my $item ( $self->context->instruction_items ) {
+    my $bytes = eval { path( $item->{file} )->slurp_raw };
+    $state->record( $item->{file}, bytes => $bytes ) if defined $bytes;
+  }
   return;
 }
 

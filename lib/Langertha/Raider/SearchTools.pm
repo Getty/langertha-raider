@@ -9,6 +9,7 @@ use Encode ();
 use File::Which ();
 use IPC::Run ();
 use MCP::Server;
+use Langertha::Raider::PathConfine;
 use Path::Tiny;
 
 =synopsis
@@ -150,13 +151,22 @@ hider is in force C<grep> runs the Perl code, which applies it file by file.
 has _hide => ( is => 'rw', init_arg => undef );
 has _hidden => ( is => 'rw', default => 0, init_arg => undef );
 
-# The extra roots as real directories, read on every call.
-sub _real_extra_roots {
+# The roots and the confinement, one object shared with the file tools.
+has _confinement => (
+  is       => 'ro',
+  lazy     => 1,
+  builder  => '_build__confinement',
+  init_arg => undef,
+);
+
+sub _build__confinement {
   my ( $self ) = @_;
-  my $extra = $self->extra_roots;
-  my @extra = ref $extra eq 'CODE' ? $extra->() : @{ $extra };
-  @extra = @{ $extra[0] } if @extra == 1 && ref $extra[0] eq 'ARRAY';
-  return [ grep { defined && -d } map { realpath($_) } grep { defined } @extra ];
+  return Langertha::Raider::PathConfine->new(
+    root        => $self->real_root,
+    extra_roots => $self->extra_roots,
+    confine     => $self->confine,
+    dirs_only   => 1,
+  );
 }
 
 has real_root => (
@@ -255,15 +265,8 @@ sub _resolve {
   my $abs  = path($path)->is_absolute ? path($path) : path($root)->child($path);
   my $real = realpath("$abs");
   croak 'no such path: '.$path unless defined $real && -e $real;
-  croak 'path escapes root: '.$path
-    unless !$self->_confined || grep { $real eq $_ || index( $real, $_.'/' ) == 0 } $root, @{ $self->_real_extra_roots };
+  croak 'path escapes root: '.$path unless $self->_confinement->allows($real);
   return $real;
-}
-
-sub _confined {
-  my ( $self ) = @_;
-  my $c = $self->confine;
-  return ref $c eq 'CODE' ? ( $c->() ? 1 : 0 ) : ( $c ? 1 : 0 );
 }
 
 # $abs as the path the results show: relative below the root, else absolute

@@ -63,7 +63,7 @@ subtest 'stock set: exactly the mounted tools, with their parameters' => sub {
   my $app = app();
   is(tool_lines($app), [
     'list_files(path)',
-    'read_file(path, [limit], [offset])',
+    'read_file(path, [limit], [offset], [pages])',
     'write_file(path, content)',
     'edit_file(path, old_string, new_string, [replace_all])',
     'multi_edit(path, edits)',
