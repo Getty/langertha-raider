@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-10-19T07:15:14Z
+claimed_by: p2-worker
+class: standard
+completed: 2026-10-19T07:15:14Z
+created: 2026-10-19T06:13:31Z
+id: 158
+priority: medium
+started: 2026-10-19T06:14:04Z
+status: done
+tags:
+- claude-code-flow
+title: 'Permission follow-ups: ACP session/request_permission, /reload directories,
+  defaultMode auto'
+updated: 2026-10-19T07:15:14Z
+---
+
+Strom P2 (Folgepunkte aus #154). Plan: /home/getty/dev/perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md
+
+Teil 2 done: extra_roots als CodeRef (FileTools/SearchTools), Application reicht Coderef; t/170, Szenario 100, between: im Harness. ADR-Nachtrag folgt am Ende.
+
+Teil 3 done: Modus auto (5. Modusname, intern auf acceptEdits-Verhalten + Permissions::ReadOnlyBash-Allowlist); t/171, t/152, Szenario 101. ADR-Nachtrag am Ende.
+
+Teil 1 done: PermissionChannel (raider) + Hall::PermissionChannel (Unix-Socket pro ACP-Run, --permission-channel), ACP-Adapter request_permission, ACP::Client on_permission, Hall-Szenarien 109-113, t/172-174. ADR 0021 Nachtrag P2, Changes. Voller Lauf wird verifiziert.
+
+Punkte 1-4 fertig auf Branch worktree-p2-folgepunkte; offen: unbekanntes Tool erzeugt kein tool.result (vorbestehend, t/81 erwartet es)
+
+review: ACP request_permission, /reload dirs, auto mode, unknown-tool vor Gate
+
+Koordinator 2026-10-19: geprüft (1321 grün mit -j3, neue Tests rot gegen alten Code), zusammengefasst und gemerged. Offen: unbekanntes Tool ohne tool.result/Span; acp prompt ohne --allow; Hall-Temp-Dir pro ACP-Run im Binary prüfen (Strom B); t/202 wackelt unter -j4.
