@@ -43,13 +43,29 @@ each as one more text block wrapped in C<< <system-reminder> >>, the way
 L<Langertha::Raider::Plugin::NestedMemory> appends. It sits after
 NestedMemory and before the Events plugin, so C<tool.result> in the
 journal is the result as the model gets it. The hook runs are reported by
-the application (C<hook.ran>, C<hook.message>); a C<continue: false>
-cancels the run. A failed call (C<isError>) fires no hook:
-C<PostToolUseFailure> is not run.
+the application (C<hook.ran>, C<hook.message>) to L</on_event>; a
+C<continue: false> calls L</on_stop> (default: the run is cancelled). A
+failed call (C<isError>) fires no hook: C<PostToolUseFailure> is not run.
 
 =attr app
 
 The L<Langertha::Raider::Application>. Required; held weakly.
+
+=attr on_event
+
+Where the hook runs are reported, called as C<< ->($type, %payload) >>:
+the Events consumer of the raider (a subagent's journal). Default: the
+application's L<Langertha::Raider::Application/event>.
+
+=attr input
+
+Optional code ref whose pairs go into every hook input -- a subagent's
+C<agent_id>, C<agent_type> and C<permission_mode>.
+
+=attr on_stop
+
+Optional code ref called on a C<continue: false>; default
+L<Langertha::Raider::Application/cancel_run>.
 
 =cut
 
@@ -57,6 +73,24 @@ has app => (
   is       => 'ro',
   required => 1,
   weak_ref => 1,
+);
+
+has on_event => (
+  is        => 'ro',
+  isa       => 'CodeRef',
+  predicate => 'has_on_event',
+);
+
+has input => (
+  is        => 'ro',
+  isa       => 'CodeRef',
+  predicate => 'has_input',
+);
+
+has on_stop => (
+  is        => 'ro',
+  isa       => 'CodeRef',
+  predicate => 'has_on_stop',
 );
 
 async sub plugin_after_tool_call {
@@ -70,12 +104,13 @@ async sub plugin_after_tool_call {
   my $hooks = $app->hooks;
   if ($hooks && $hooks->has_hooks('PostToolUse') && !$result->{isError} && !$result->{cancelled}) {
     my $r = await $hooks->run_f( PostToolUse => $app->_hook_input(
+      ( $self->has_input ? $self->input->() : () ),
       tool_name     => $name,
       tool_input    => ref $input eq 'HASH' ? $input : {},
       tool_response => { content => $result->{content} // [] },
     ) );
-    $app->_report_hooks($r);
-    $app->cancel_run if $r->stopped;
+    $app->_report_hooks($r, $self->has_on_event ? $self->on_event : undef);
+    $app->_hook_stopped($self->has_on_stop ? $self->on_stop : undef) if $r->stopped;
     my $tag = $app->_hook_tag('PostToolUse', $name);
     push @blocks, map { $tag.' hook feedback: '.$_ } @{ $r->reasons } ? @{ $r->reasons } : '(no reason given)'
       if $r->blocked;

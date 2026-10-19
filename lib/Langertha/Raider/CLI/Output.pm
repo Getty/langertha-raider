@@ -167,8 +167,9 @@ the built-in table does not know); each skill with its state (C<listed>,
 or C<hidden> for C<disable-model-invocation>) and root, the shadowed skills
 and the broken skill files; each agent (ADR 0020) with its root, its tools
 in raider names (C<*> for all of the caller's), the disallowed ones, the
-model it would get or why it inherits, its declared skills and those that
-do not resolve (the agent tool would refuse it), the tool names
+model it would get or why it inherits, its declared skills (marked with
+the skilletor source of those found there) and those that do not resolve,
+each with the reason a resolver gives (the agent tool would refuse it), the tool names
 and frontmatter keys raider does not use, then the shadowed agents and the
 files in an agent root that are not agents; in the Claude layout the settings -- each file
 (read, not present, or its error), the permission rule counts and default
@@ -272,9 +273,11 @@ sub config_report {
         'tools '.( ref $ag->{tools} ? ( @{ $ag->{tools} } ? join(', ', @{ $ag->{tools} }) : 'none' ) : $ag->{tools} ),
         ( @{ $ag->{disallowed} } ? 'not '.join(', ', @{ $ag->{disallowed} }) : () ),
         'model '.( defined $m->{model} ? $m->{model} : 'inherit ('.$m->{reason}.')' ),
-        ( @{ $ag->{skills} } ? 'skills '.join(', ', @{ $ag->{skills} }) : () ),
+        ( @{ $ag->{skills} } ? 'skills '.join(', ',
+          map { defined $ag->{skill_via}{$_} ? $_.' ('.$ag->{skill_via}{$_}.')' : $_ } @{ $ag->{skills} }) : () ),
       ), "\n");
-      $self->emit('    ', $self->c(warn => 'unknown skills: '.join(', ', @{ $ag->{missing_skills} })
+      $self->emit('    ', $self->c(warn => 'unknown skills: '.join(', ',
+        map { defined $ag->{missing_reasons}{$_} ? $_.' ('.$ag->{missing_reasons}{$_}.')' : $_ } @{ $ag->{missing_skills} })
         .' (the agent tool refuses to start it)'), "\n") if @{ $ag->{missing_skills} // [] };
       $self->emit('    ', $self->c(warn => 'unknown tools: '.join(', ', @{ $ag->{unknown_tools} })), "\n")
         if @{ $ag->{unknown_tools} };

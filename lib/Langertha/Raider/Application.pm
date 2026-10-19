@@ -961,14 +961,27 @@ C</reload> builds it again.
 
     my $raider = Langertha::Raider->new( ..., _tool_hook => $app->tool_hook );
 
-The tool hook the main raider gets in the Claude layout (the C<_tool_hook>
-of L<Langertha::Raider>): the C<PreToolUse> hooks, before the inputSchema
+    # a sub-run (a subagent): its own input fields, events and stop
+    my $hook = $app->tool_hook(
+      input    => sub { ( agent_id => $id, agent_type => $name ) },
+      on_event => sub { my ( $type, %payload ) = @_; ... },
+      on_stop  => sub { $subagent->cancel },
+    );
+
+The tool hook every raider of the application gets in the Claude layout
+(the C<_tool_hook> of L<Langertha::Raider>): the C<PreToolUse> hooks, before the inputSchema
 check and L</tool_gate>. A deny (or exit 2) refuses the call with the
 hook's reason; C<updatedInput> replaces the arguments (translated back to
 raider's names); an allow or ask goes on to the gate, which weighs it
 against the rules and the mode (deny and ask rules always hold; allow only
 spares the mode's question; ask asks even where a rule allows). The
 C<additionalContext> is appended to the tool's result.
+
+A sub-run passes C<input>, a code ref whose pairs go into every hook input
+(a subagent's C<agent_id>, C<agent_type> and C<permission_mode>),
+C<on_event> for the C<hook.ran> and C<hook.message> events (default
+L</event>) and C<on_stop>, called on a C<continue: false> (default
+L</cancel_run>).
 
 =cut
 
@@ -988,13 +1001,16 @@ sub _build_hooks {
   return $self->hooks_class->from_context($self->context,
     loop       => $self->loop,
     if_matcher => sub { $app ? $app->permissions->rule_matches(@_) : undef },
+    # Subagents are briefed by raider itself (ADR 0020 section 6): the briefing
+    # plugin's briefing-preload must not load the skills a second time.
+    native_briefing => 1,
   );
 }
 
 sub tool_hook {
-  my ($self) = @_;
+  my ($self, %for) = @_;
   weaken(my $app = $self);
-  return sub { $app ? $app->_pre_tool_use_f($_[1]) : Future->done({}) };
+  return sub { $app ? $app->_pre_tool_use_f($_[1], %for) : Future->done({}) };
 }
 
 # The common fields of every hook input: the session (its journal is the
@@ -1018,20 +1034,22 @@ sub _await_hooks {
   return $f->get;
 }
 
-# PreToolUse for the canonical call of the raider (see tool_hook).
+# PreToolUse for the canonical call of the raider (see tool_hook); %for is
+# what tool_hook got: input, on_event, on_stop.
 sub _pre_tool_use_f {
-  my ($self, $call) = @_;
+  my ($self, $call, %for) = @_;
   my $hooks = $self->hooks;
   return Future->done({}) unless $hooks && $hooks->has_hooks('PreToolUse');
   weaken(my $app = $self);
   return $hooks->run_f( PreToolUse => $self->_hook_input(
+    ( $for{input} ? $for{input}->() : () ),
     tool_name  => $call->{name},
     tool_input => $call->{arguments},
   ), tool_source => $call->{source} )->then(sub {
     my ( $r ) = @_;
     return Future->done({}) unless $app;
-    $app->_report_hooks($r);
-    $app->cancel_run if $r->stopped;
+    $app->_report_hooks($r, $for{on_event});
+    $app->_hook_stopped($for{on_stop}) if $r->stopped;
     my $arguments = $r->updated_input;
     if (defined( my $context = $r->context )) {
       my $key = refaddr( $arguments // $call->{arguments} );
@@ -1064,14 +1082,25 @@ sub _hook_tag {
   return $event.':'.( Langertha::Raider::ToolNames->claude_name($tool) // $tool );
 }
 
+# A continue: false of a tool hook: the sub-run's on_stop, else the run is
+# cancelled.
+sub _hook_stopped {
+  my ($self, $on_stop) = @_;
+  return $on_stop->() if $on_stop;
+  return $self->cancel_run;
+}
+
 # Every hook of a result as hook.ran, its errors, systemMessages and a stop
 # as hook.message (ADR 0022). stdout and stderr go into the journal cut at
-# 2000 characters.
+# 2000 characters. To $emit (a sub-run's or the caller's stream), else to
+# event.
 sub _report_hooks {
-  my ($self, $r) = @_;
+  my ($self, $r, $emit) = @_;
+  weaken(my $app = $self);
+  $emit //= sub { $app->event(@_) if $app };
   my $cut = sub { my ( $s ) = @_; length $s > 2000 ? substr($s, 0, 2000).'... (cut)' : $s };
   for my $run (@{ $r->runs }) {
-    $self->event('hook.ran',
+    $emit->('hook.ran',
       hook_event => $run->{event},
       source     => $run->{source},
       command    => $run->{command},
@@ -1080,9 +1109,9 @@ sub _report_hooks {
       ( map { defined $run->{$_} && length $run->{$_} ? ( $_ => $cut->($run->{$_}) ) : () } qw( stdout stderr ) ),
     );
   }
-  $self->event('hook.message', hook_event => $r->event, kind => 'error', text => $_) for @{ $r->errors };
-  $self->event('hook.message', hook_event => $r->event, kind => 'system', text => $_) for @{ $r->system_messages };
-  $self->event('hook.message', hook_event => $r->event, kind => 'stopped',
+  $emit->('hook.message', hook_event => $r->event, kind => 'error', text => $_) for @{ $r->errors };
+  $emit->('hook.message', hook_event => $r->event, kind => 'system', text => $_) for @{ $r->system_messages };
+  $emit->('hook.message', hook_event => $r->event, kind => 'stopped',
     text => $r->stop_reason // 'a '.$r->event.' hook stopped the run') if $r->stopped;
   return;
 }
@@ -2031,17 +2060,20 @@ sub _raider_plugins {
 =method run_plugins
 
     my @plugins = $app->run_plugins(sub { my ( $type, %payload ) = @_; ... });
+    my @plugins = $app->run_plugins($on_event, input => sub { ... }, on_stop => sub { ... });
 
 The plugins every raider of the application runs with, as name + {args}
 pairs for L<Langertha::Raider/plugins>, with C<$on_event> as the consumer of
 L<Langertha::Raider::Plugin::Events>. The main raider's consumer is
 L</event>; a subagent passes its own, so its events go to its journal only.
-A surface's own plugins (the live trace) are not part of it.
+A surface's own plugins (the live trace) are not part of it. In the Claude
+layout L<Langertha::Raider::Plugin::ClaudeHooks> reports its hooks to
+C<$on_event> too, and gets C<input> and C<on_stop> as L</tool_hook> does.
 
 =cut
 
 sub run_plugins {
-  my ($self, $on_event) = @_;
+  my ($self, $on_event, %hook) = @_;
   # The rule-driven test engine (-e mock) matches the prompt word for word, so
   # it gets the prompt as typed, without the [situation] line and its clock.
   my $virtual = $self->engine_resolver->engine_class eq 'Langertha::Engine::Virtual';
@@ -2050,7 +2082,8 @@ sub run_plugins {
   # context (ClaudeHooks, PostToolUse) included.
   return ( ( $virtual ? () : '+Langertha::Raider::Plugin::Situation' ),
     '+Langertha::Raider::Plugin::NestedMemory', { context => $self->context },
-    ( $self->context->claude_layout ? ( '+Langertha::Raider::Plugin::ClaudeHooks', { app => $self } ) : () ),
+    ( $self->context->claude_layout
+      ? ( '+Langertha::Raider::Plugin::ClaudeHooks', { app => $self, on_event => $on_event, %hook } ) : () ),
     '+Langertha::Raider::Plugin::Events', { on_event => $on_event } );
 }
 

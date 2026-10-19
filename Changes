@@ -286,6 +286,16 @@ Revision history for Langertha-Raider
       an agent needs no approval unless an Agent(name) / Task(name) rule says
       so; a call without subagent_type counts as general-purpose. /reload
       re-reads agent files.
+    - A skill an agent declares that is not installed is read from the
+      sources of skilletor.json (Claude layout; new dependency Skilletor),
+      without installing it, a source fetched only when it has no cache yet;
+      a refused spawn and config explain give the reason per skill (e.g. a
+      template, which the Perl port does not render).
+    - Hooks and subagents (ADR 0020 section 7): SubagentStart (context in
+      front of the prompt) and SubagentStop (Stop-style continuation) fire
+      with agent_id and agent_type, a subagent's tool calls run PreToolUse
+      and PostToolUse, and the briefing plugin's briefing-preload is skipped
+      because raider briefs agents itself.
 
   [Permissions]
     - INCOMPATIBLE: every tool call of raider now passes a permission policy

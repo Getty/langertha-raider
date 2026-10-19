@@ -168,7 +168,9 @@ absent without a session — `cwd`, `permission_mode` (ADR 0021's mode names are
 `hook_event_name`, and per event `tool_name`/`tool_input`, `tool_response`, `prompt`,
 `source` and `model`, `stop_hook_active` and `last_assistant_message`. Not sent:
 `tool_use_id`, `prompt_id`, `effort`, `scratchpad_dir`, `mcp_server`, `duration_ms`,
-`background_tasks`, `session_crons`, `agent_id` / `agent_type` (no subagents yet).
+`background_tasks`, `session_crons`. `agent_id` / `agent_type` (and
+`agent_transcript_path` on `SubagentStop`) are sent around and inside a subagent run —
+ADR 0020 §7.
 
 ### 6. Events and display
 
@@ -186,10 +188,11 @@ When raider loads an agent's `briefing.skills` itself (stream A), the briefing p
 prompt twice, or deny a spawn raider briefs correctly, as it resolves skills through its own
 copy of the lookup. The runner's `native_briefing` skips hooks whose command is
 `briefing-preload` on `PreToolUse` for `Agent` and on `SubagentStart` (reported as
-skipped); briefing's `SessionStart` check still runs. Raider's own loading wins. Off until
-stream A sets it with its native loading. `SubagentStart`/`SubagentStop` are supported by
-the runner (matcher on `agent_type`, `additionalContext`, Stop-style decisions) but fired
-nowhere yet: stream A fires them around a subagent run, with `agent_id` / `agent_type`.
+skipped); briefing's `SessionStart` check still runs. Raider's own loading wins. The
+application's runner has it on, since raider briefs every agent itself (ADR 0020 §6).
+`SubagentStart`/`SubagentStop` are supported by the runner (matcher on `agent_type`,
+`additionalContext`, Stop-style decisions) and fired around a subagent run, with
+`agent_id` / `agent_type` — ADR 0020 §7.
 
 ### 8. Workspace trust
 
@@ -219,8 +222,7 @@ hooks (it is raider's own tool, not a Claude Code session).
   `IO::Async::Process` (fork, `setsid`, `exec`). No new dependency, nothing loaded by name;
   the packed binary still needs a check (stream B).
 - Follow-ups: `compact` for `SessionStart`; `PostToolUseFailure`; `tool_use_id` (the raider
-  has no stable tool call id at the hook yet); the subagent events and `native_briefing`
-  with stream A; the session store makes `.raider/` in a Claude-only project on the first
+  has no stable tool call id at the hook yet); the session store makes `.raider/` in a Claude-only project on the first
   saved session, so the next start reads it as a raider project and runs no hooks (nor the
   rest of the Claude layout) — a stream K question, noted on the card.
 

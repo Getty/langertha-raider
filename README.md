@@ -63,6 +63,9 @@ cpanm --installdeps .
 perl -Ilib bin/raider
 ```
 
+Note: `Skilletor` is a new dependency that is not on CPAN yet; it has to be released to
+CPAN before a raider release, and `cpanm --installdeps .` cannot fetch it until then.
+
 Or as a single-file Linux binary — no Perl needed (see [Binary](#binary-no-perl-needed)).
 
 Or via Docker — no Perl toolchain required (see [Docker](#docker)):

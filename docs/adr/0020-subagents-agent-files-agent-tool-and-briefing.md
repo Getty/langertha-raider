@@ -178,18 +178,80 @@ with the briefing plugin and under raider.
 - **Resolution.** A skill name is resolved through a chain of resolvers behind one
   interface (`resolve(name)` → name, directory, `SKILL.md`, or nothing): first the skill
   catalogue of the context (ADR 0019 §4 — every root and plugin, including skills that are
-  not model-invocable), then Skilletor (the sources declared in `skilletor.json`, read
-  straight from the source without installing — wired once the Skilletor dist is on main;
-  until then the chain has only the catalogue).
+  not model-invocable), then Skilletor
+  (`Langertha::Raider::SkillResolver::Skilletor`, the Perl dist `Skilletor`): a skill
+  that one of `~/.claude/skilletor.json`, the project's `.claude/skilletor.json` or
+  `.claude/skilletor.local.json` declares, read straight from its source — the `local`
+  directory or the shared cache `~/.claude/skilletor/cache/<hash>/` the skilletor CLI fills
+  too — without installing anything (`Skilletor->resolve_item`). The catalogue wins for a
+  name both know: an installed copy is what Claude Code would load.
+  - **Lazy.** Skilletor is asked only for a name the catalogue does not know, and only when
+    one of those files exists: a project without skilletor sees no lock, no cache, nothing
+    written under the home. One resolution serves every later name.
+  - **Fetch once** (`fetch => 'missing'`): a source without a cache is fetched (git, https
+    tarball) the first time one of its skills is needed, and served from the cache
+    afterwards, so a spawn does not touch the network each time; keeping the cache current
+    stays the skilletor CLI's job (`skilletor sync`).
+  - **Claude layout only.** `skilletor.json` is Claude Code configuration and lives in
+    `.claude/`; a native or raider project (and `--bare`) reads no `.claude/` at all
+    (ADR 0019), so its chain is the catalogue alone. Skilletor finds its files under
+    `$HOME/.claude`, as the skilletor CLI does — `$CLAUDE_CONFIG_DIR` is not consulted for
+    them.
+  - **Never fatal.** A templated skill (`.njk`, which the Perl port does not render), a
+    broken `skilletor.json`, a source that cannot be fetched or is not trusted yet: the
+    name does not resolve, and the resolver gives the reason (`why_unresolved`).
 - **Unknown skill: no spawn.** If any declared skill does not resolve, the `agent` call is
   an error result `briefing: agent 'NAME' references unknown skill(s): a, b` and no
   subagent starts — never a partial briefing (briefing's hard-fail policy): no child
-  request, no child session, no `agent.started`. `config explain` reports such agents up
-  front, as `briefing doctor` does (oversized briefings are not flagged there yet).
+  request, no child session, no `agent.started`. A name a resolver can say more about is
+  followed by its reason (`… unknown skill(s): a (skilletor: a@src is a template;
+  templates are not supported in Perl), b`); without reasons the text is briefing's word
+  for word. `config explain` reports such agents up front, as `briefing doctor` does,
+  with the reasons, and marks each declared skill found through skilletor with its source
+  (oversized briefings are not flagged there yet).
 - **Budget.** Above 64 KB of skill text the spawn goes ahead with an `agent.warning` event
   (`call`, `agent`, `message` = the briefing size note) before `agent.started`; the parent's
   journal records it.
 - The child's journal `message` is the briefed prompt — what the child was actually sent.
+
+### 7. Hooks around and inside a subagent (Claude layout, ADR 0022)
+
+- **Native briefing wins.** Raider briefs every agent itself (§6), so the hook runner runs
+  with `native_briefing` (ADR 0022 §7): hooks whose command is the briefing plugin's
+  `briefing-preload` are skipped — reported as `skipped` — on `PreToolUse` for `Agent` and
+  on `SubagentStart`. Running them too would put every skill body into the prompt a second
+  time, or deny a spawn raider briefs correctly, since the plugin resolves skills through
+  its own copy of the lookup. Only those hooks are skipped: every other `PreToolUse` hook
+  on `Agent`/`Task` runs through the generic tool path (ADR 0022 §4), and its
+  `updatedInput` — a rewritten `prompt`, another `subagent_type` — is what the spawn gets.
+  Briefing's `SessionStart` check still runs.
+- **`SubagentStart`** fires once the subagent's session exists and before its first
+  request — not for a spawn §6 refuses — with `agent_id` and `agent_type` (the agent's
+  name, which the matcher is tested against) besides the caller's session fields.
+  `agent_id` is the child session's id; without a session (a library run,
+  `--no-session`) it is `local-agent-<pid>-<address>`, unique while the subagent runs.
+  Its `additionalContext` goes **in front of the briefed prompt**, as a
+  `<system-reminder>` block worded like the main run's prompt context ("SubagentStart hook
+  additional context: …"), so the child sees it first and its journal `message` shows it.
+  `continue: false` fails the subagent before its first request ("a SubagentStart hook
+  stopped it: <reason>"; `agent.started` and a failed `agent.finished`, no prompt
+  journaled).
+- **`SubagentStop`** fires after the subagent's final answer, mirroring `Stop` of the main
+  run (ADR 0022 §4): input adds `agent_transcript_path` (the child journal),
+  `stop_hook_active`, `last_assistant_message`; a block (or `additionalContext`) sends
+  "SubagentStop hook feedback:\n<reasons>" back to the subagent as its next message and
+  it goes on, at most `stop_hook_limit` (8) times; the turns in between go into the child
+  journal. `continue: false` ends it without a continuation.
+- **The subagent's own tool calls** run `PreToolUse` (its raider gets the tool hook) and
+  `PostToolUse` like the caller's, with `agent_id`, `agent_type` and the subagent's
+  `permission_mode` in the input, as Claude Code sends them inside a subagent; a hook's
+  allow/ask is weighed by the subagent's gate. `continue: false` there cancels the
+  subagent, not the caller's run.
+- **Where the reports go.** `hook.ran`/`hook.message` of `SubagentStart` and
+  `SubagentStop` go to the caller's stream and journal, beside `agent.started` /
+  `agent.finished`; those of the subagent's own tool calls go to its journal only, like
+  its `permission.*` events — the person does not see a subagent's `systemMessage` live
+  yet (follow-up).
 
 ## Consequences
 
@@ -197,6 +259,9 @@ with the briefing plugin and under raider.
   prompts and golden tests grow by one entry.
 - Raider reads agent files written for Claude Code without a plugin and without Node; the
   repository's own `.claude/agents/raider-*.md` are the real test case.
+- `Skilletor` is a hard dependency (loaded with the context); resolving through it may run
+  `git` or fetch a tarball the first time a source is needed, which the standalone binary
+  has to carry.
 - A subagent costs a second conversation on the same engine; nothing limits how many
   subagents a run starts except `max_iterations` of the caller.
 - Not covered: background subagents, agent-scoped `mcpServers` and `hooks`, `maxTurns`,

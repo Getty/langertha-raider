@@ -91,6 +91,13 @@ The declared names that did not resolve, in order.
 
 True when L</missing> lists a name: the spawn is refused.
 
+=method missing_reason
+
+    my $why = $b->missing_reason('tpl');   # 'skilletor: ...' or undef
+
+Why a name of L</missing> did not resolve, when the resolver says
+(C<why_unresolved>, L<Langertha::Raider::SkillResolver/why_unresolved>).
+
 =attr blocks
 
 One C<< { name, dir, file } >> per resolved skill, in order.
@@ -114,6 +121,7 @@ has _resolved => (
 );
 
 sub missing { @{ $_[0]->_resolved->{missing} } }
+sub missing_reason { $_[0]->_resolved->{reasons}{ $_[1] } }
 sub blocks  { @{ $_[0]->_resolved->{blocks} } }
 sub text    { $_[0]->_resolved->{text} }
 sub size    { $_[0]->_resolved->{size} }
@@ -122,11 +130,14 @@ sub has_missing { scalar( () = $_[0]->missing ) ? 1 : 0 }
 
 sub _build__resolved {
   my ( $self ) = @_;
-  my ( @missing, @blocks, @texts );
+  my ( @missing, %reasons, @blocks, @texts );
+  my $resolver = $self->resolver;
   for my $name (@{ $self->skills }) {
-    my $skill = $self->resolver->resolve($name);
+    my $skill = $resolver->resolve($name);
     unless ($skill) {
       push @missing, $name;
+      my $why = $resolver->can('why_unresolved') ? $resolver->why_unresolved($name) : undef;
+      $reasons{$name} = $why if defined $why && length $why;
       next;
     }
     my $file = path($skill->{file});
@@ -139,6 +150,7 @@ sub _build__resolved {
   my $text = join "\n\n", @texts;
   return {
     missing => \@missing,
+    reasons => \%reasons,
     blocks  => \@blocks,
     text    => $text,
     size    => length Encode::encode('UTF-8', $text),
@@ -222,18 +234,22 @@ sub prompt {
 =method missing_note
 
     briefing: agent 'NAME' references unknown skill(s): a, b
+    briefing: agent 'NAME' references unknown skill(s): a (skilletor: a@src is a template; ...), b
 
 =method size_note
 
     briefing: agent 'NAME' is briefed with N kB of skill text (over 64 kB) — consider declaring fewer or smaller skills.
 
-The plugin's texts.
+The plugin's texts. A missing name the resolver gives a reason for
+(L</missing_reason>) is followed by it in parentheses; without reasons the
+note is the plugin's word for word.
 
 =cut
 
 sub missing_note {
   my ( $self ) = @_;
-  return 'briefing: agent \''.$self->agent.'\' references unknown skill(s): '.join( ', ', $self->missing );
+  return 'briefing: agent \''.$self->agent.'\' references unknown skill(s): '.join( ', ',
+    map { my $why = $self->missing_reason($_); defined $why ? $_.' ('.$why.')' : $_ } $self->missing );
 }
 
 sub size_note {

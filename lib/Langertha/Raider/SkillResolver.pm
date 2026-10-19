@@ -27,12 +27,15 @@ C<< { name, dir, file } >> or nothing. The first resolver that knows the
 name wins.
 
 The chain of an application is L<Langertha::Raider::Context/skill_resolver>,
-built from L<Langertha::Raider::Context/skill_resolvers>: today only the
-skill catalogue of the context
-(L<Langertha::Raider::SkillResolver::Catalog>). A resolver that reads the
-skills of the sources in F<skilletor.json> straight from the source,
-without installing them, joins as one more entry in that list once the
-Skilletor distribution is released -- nothing else changes.
+built from L<Langertha::Raider::Context/skill_resolvers>: the skill
+catalogue of the context (L<Langertha::Raider::SkillResolver::Catalog>),
+then -- in the Claude layout -- the skills of the sources in
+F<skilletor.json>, read straight from the source without installing them
+(L<Langertha::Raider::SkillResolver::Skilletor>).
+
+A resolver may also answer C<why_unresolved($name)> with a reason for a
+name it knows of but cannot serve (a template, a source that cannot be
+fetched); L</why_unresolved> asks them.
 
 =attr resolvers
 
@@ -65,6 +68,25 @@ sub resolve {
   return;
 }
 
+=method why_unresolved
+
+    my $reason = $resolver->why_unresolved('tpl');   # 'skilletor: ...' or undef
+
+The first reason a resolver of the chain gives for C<$name> not resolving
+(a resolver without a C<why_unresolved> method has none), or C<undef>.
+
+=cut
+
+sub why_unresolved {
+  my ( $self, $name ) = @_;
+  return unless defined $name && length $name;
+  for my $resolver (grep { $_->can('why_unresolved') } @{ $self->resolvers }) {
+    my $reason = $resolver->why_unresolved($name);
+    return $reason if defined $reason && length $reason;
+  }
+  return;
+}
+
 __PACKAGE__->meta->make_immutable;
 
 1;
@@ -74,6 +96,8 @@ __PACKAGE__->meta->make_immutable;
 =over
 
 =item * L<Langertha::Raider::SkillResolver::Catalog>
+
+=item * L<Langertha::Raider::SkillResolver::Skilletor>
 
 =item * L<Langertha::Raider::Briefing>
 

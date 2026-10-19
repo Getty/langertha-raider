@@ -5,6 +5,7 @@ use Moose;
 use namespace::autoclean;
 use Future;
 use Future::AsyncAwait;
+use JSON::MaybeXS;
 use MCP::Server;
 use Scalar::Util qw( blessed refaddr weaken );
 use Time::HiRes ();
@@ -104,6 +105,24 @@ C<tool.result> and C<todo.updated>, and C<run.finished>. The caller gets
 only C<agent.started> (C<call>, C<agent>, C<description>, C<session>,
 C<model>) and C<agent.finished> (C<call>, C<agent>, C<session>,
 C<status>).
+
+=item * B<Hooks> (Claude layout, ADR 0022, ADR 0020 E<sect>6). Before
+the run C<SubagentStart> fires (matcher on C<agent_type>) with
+C<agent_id> -- the subagent's session id, or C<local-agent-PID-ADDR> without
+a session -- and C<agent_type>, the agent's name; its
+C<additionalContext> goes in front of the briefed prompt as a
+C<< <system-reminder> >> block (L</sent_prompt>), and a C<continue: false>
+fails the run before its first request. After a final answer
+C<SubagentStop> fires as C<Stop> does for the main run
+(L<Langertha::Raider::Application/stop_hook_limit>): a block or
+C<additionalContext> sends C<SubagentStop hook feedback:> and the reasons
+back to the subagent as its next message, with C<stop_hook_active> true,
+and the run goes on. The reports of both go to the caller's stream
+(C<hook.ran>, C<hook.message>). The subagent's own tool calls run the
+C<PreToolUse> and C<PostToolUse> hooks as the caller's do, with
+C<agent_id>, C<agent_type> and its own C<permission_mode> in the input;
+those reports go to its journal, and a C<continue: false> there cancels the
+subagent only.
 
 =item * B<End.> A completed run answers with the subagent's text; a failed
 one with an error result giving the reason; a cancelled one -- the
@@ -291,6 +310,41 @@ What the subagent is asked: L</prompt> behind its briefing, or L</prompt>
 itself when the agent declares no skill.
 
 =cut
+
+has sent_prompt => (
+  is       => 'ro',
+  isa      => 'Str',
+  init_arg => undef,
+  writer   => '_set_sent_prompt',
+);
+
+=attr sent_prompt
+
+What the subagent was really sent once the run has started: the
+C<additionalContext> of C<SubagentStart> hooks in front of
+L</briefed_prompt>, or L</briefed_prompt> itself.
+
+=cut
+
+has agent_id => (
+  is       => 'ro',
+  isa      => 'Str',
+  init_arg => undef,
+  lazy     => 1,
+  builder  => '_build_agent_id',
+);
+
+=attr agent_id
+
+The C<agent_id> of the hook inputs: the subagent's session id, else
+C<local-agent-PID-ADDR>, unique while the subagent runs.
+
+=cut
+
+sub _build_agent_id {
+  my ( $self ) = @_;
+  return $self->session ? $self->session->id : 'local-agent-'.$$.'-'.refaddr($self);
+}
 
 has model_resolution => (
   is       => 'ro',
@@ -513,13 +567,82 @@ async sub run_f {
 
 async sub _raid_f {
   my ( $self ) = @_;
-  $self->_begin;
+  $self->_open_session;
+  my $start = await $self->_subagent_start_f;
+  $self->_begin($start);
+  die 'a SubagentStart hook stopped it'.( defined $start->stop_reason ? ': '.$start->stop_reason : '' )."\n"
+    if $start && $start->stopped;
   my $raider = $self->raider;
   for my $mcp ( @{ $self->_mcps } ) {
     await $mcp->initialize;
   }
   $raider->cancel if $self->cancel_requested;
-  return await $raider->raid_f( $self->briefed_prompt );
+  my $result = await $raider->raid_f( $self->sent_prompt );
+  return await $self->_after_answer_f($result);
+}
+
+# The pairs every hook input of this subagent carries besides the caller's
+# session fields (ADR 0022 section 5).
+sub _hook_fields {
+  my ( $self ) = @_;
+  return (
+    agent_id        => $self->agent_id,
+    agent_type      => $self->agent->{name},
+    permission_mode => $self->permissions->mode,
+  );
+}
+
+# SubagentStart (Claude layout): resolves to its Hooks::Result, or undef when
+# no hook is configured. Reported to the caller's stream.
+sub _subagent_start_f {
+  my ( $self ) = @_;
+  my $app   = $self->app;
+  my $hooks = $app->hooks;
+  return Future->done(undef) unless $hooks && $hooks->has_hooks('SubagentStart');
+  return $hooks->run_f( SubagentStart => $app->_hook_input( $self->_hook_fields ) )->then( sub {
+    my ( $r ) = @_;
+    $app->_report_hooks( $r, $self->on_caller_event );
+    return Future->done($r);
+  } );
+}
+
+# SubagentStop after a final answer, as the application's Stop hooks for the
+# main run: a block or additionalContext sends the feedback back as the next
+# message (stop_hook_active true), at most stop_hook_limit times; the turns
+# in between go into the subagent's journal. Resolves to the last result.
+async sub _after_answer_f {
+  my ( $self, $result ) = @_;
+  my $app   = $self->app;
+  my $hooks = $app ? $app->hooks : undef;
+  return $result unless $hooks;
+  my $active = 0;
+  for ( my $round = 0; ; $round++ ) {
+    return $result unless blessed $result && $result->can('is_final') && $result->is_final;
+    return $result if $self->cancel_requested;
+    return $result unless $hooks->has_hooks('SubagentStop');
+    my $r = await $hooks->run_f( SubagentStop => $app->_hook_input(
+      $self->_hook_fields,
+      ( $self->session ? ( agent_transcript_path => ''.$self->session->path ) : () ),
+      stop_hook_active       => $active ? JSON::MaybeXS->true : JSON::MaybeXS->false,
+      last_assistant_message => "$result",
+    ) );
+    $app->_report_hooks( $r, $self->on_caller_event );
+    return $result if $r->stopped;
+    my @feedback = ( $r->blocked ? ( @{ $r->reasons } ? @{ $r->reasons } : '(no reason given)' ) : () ),
+      ( defined $r->context ? $r->context : () );
+    return $result unless @feedback;
+    if ( $round >= $app->stop_hook_limit ) {
+      $self->on_caller_event->( 'hook.message', hook_event => 'SubagentStop', kind => 'error',
+        text => 'SubagentStop hooks kept agent \''.$self->agent->{name}.'\' going '.$app->stop_hook_limit
+          .' times in a row; it ends here' );
+      return $result;
+    }
+    my $feedback = "SubagentStop hook feedback:\n".join( "\n", @feedback );
+    $self->event( 'message', role => 'assistant', content => "$result" );
+    $self->event( 'message', role => 'user', content => $feedback, hook => 'SubagentStop' );
+    $active = 1;
+    $result = await $self->raider->raid_f($feedback);
+  }
 }
 
 =method approval_binding
@@ -569,7 +692,8 @@ sub event {
   return;
 }
 
-sub _begin {
+# The subagent's own session (when the caller has one) and its run id.
+sub _open_session {
   my ( $self ) = @_;
   my $app = $self->app;
   $self->_t0( Time::HiRes::time() );
@@ -590,6 +714,15 @@ sub _begin {
       $self->_report_journal_error( $self->caller_session, $@ );
     }
   }
+  return;
+}
+
+# agent.started and the start of the journal; $start is SubagentStart's
+# result (or undef): its context goes in front of the briefed prompt, its
+# stop leaves the prompt unsent.
+sub _begin {
+  my ( $self, $start ) = @_;
+  my $app = $self->app;
   my $model = eval { $self->engine->chat_model };
   $self->_model($model);
   $self->on_caller_event->( 'agent.warning', $self->_defined(
@@ -605,7 +738,12 @@ sub _begin {
     model       => $model,
   ) );
   $self->event( 'run.started', engine => $app->engine_name, defined $model ? ( model => $model ) : () );
-  $self->event( 'message', role => 'user', content => $self->briefed_prompt );
+  return if $start && $start->stopped;
+  my $context = $start ? $start->context : undef;
+  $self->_set_sent_prompt( join "\n\n",
+    ( defined $context ? "<system-reminder>\nSubagentStart hook additional context: ".$context."\n</system-reminder>" : () ),
+    $self->briefed_prompt );
+  $self->event( 'message', role => 'user', content => $self->sent_prompt );
   return;
 }
 
@@ -793,18 +931,24 @@ sub _build_raider {
   my ( $self ) = @_;
   my $app = $self->app;
   weaken( my $weak = $self );
+  my %hook = (
+    input   => sub { $weak ? $weak->_hook_fields : () },
+    on_stop => sub { $weak->cancel if $weak },
+  );
   return Langertha::Raider->new(
     _tool_gate                 => $app->tool_gate(
       policy   => $self->permissions,
       on_event => sub { $weak->event(@_) if $weak },
       binding  => sub { $weak ? $weak->approval_binding : () },
     ),
+    ( $app->context->claude_layout
+      ? ( _tool_hook => $app->tool_hook( %hook, on_event => sub { $weak->event(@_) if $weak } ) ) : () ),
     engine                     => $self->engine,
     mission                    => $self->mission,
     max_iterations             => $app->max_iterations,
     max_context_tokens         => $app->max_context_tokens,
     context_compress_threshold => $app->context_compress_threshold,
-    plugins                    => [ $app->run_plugins( sub { $weak->event(@_) if $weak } ) ],
+    plugins                    => [ $app->run_plugins( sub { $weak->event(@_) if $weak }, %hook ) ],
   );
 }
 

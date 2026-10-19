@@ -24,6 +24,7 @@ requires 'Net::Async::MCP', '0.004';
 requires 'Net::Async::WebSearch', '0.003';
 requires 'Path::Tiny';
 requires 'Schedule::Cron';
+requires 'Skilletor', '0.001';
 requires 'Term::ANSIColor';
 requires 'Time::HiRes';
 requires 'URI';

@@ -13,6 +13,7 @@ use Langertha::Raider::Context::Skills;
 use Langertha::Raider::Context::Agents;
 use Langertha::Raider::SkillResolver;
 use Langertha::Raider::SkillResolver::Catalog;
+use Langertha::Raider::SkillResolver::Skilletor;
 
 =head1 SYNOPSIS
 
@@ -157,6 +158,7 @@ sub skills_class   { 'Langertha::Raider::Context::Skills' }
 sub agents_class   { 'Langertha::Raider::Context::Agents' }
 sub skill_resolver_class   { 'Langertha::Raider::SkillResolver' }
 sub catalog_resolver_class { 'Langertha::Raider::SkillResolver::Catalog' }
+sub skilletor_resolver_class { 'Langertha::Raider::SkillResolver::Skilletor' }
 
 =attr home
 
@@ -436,10 +438,12 @@ E<sect>6): the chain of L</skill_resolvers>.
 
 The resolvers of L</skill_resolver>, first asked first: the skill
 catalogue (L<Langertha::Raider::SkillResolver::Catalog> over
-L</skill_catalog>, skills that are not model-invocable included). The
-Skilletor resolver (the sources of F<skilletor.json>, read without
-installing) becomes one more entry here once that distribution is
-released.
+L</skill_catalog>, skills that are not model-invocable included), then,
+only in the Claude layout, the skills the F<skilletor.json> files declare,
+read from their sources without installing
+(L<Langertha::Raider::SkillResolver::Skilletor>; a source is fetched only
+when it has no cache yet). A native or bare context has the catalogue
+alone: F<skilletor.json> is Claude Code configuration.
 
 =cut
 
@@ -459,6 +463,10 @@ sub skill_resolvers {
   my ( $self ) = @_;
   return (
     $self->catalog_resolver_class->new( catalog => $self->skill_catalog ),
+    ( $self->claude_layout && defined $self->home ? $self->skilletor_resolver_class->new(
+      home        => $self->home,
+      project_dir => $self->layout->project_dir->stringify,
+    ) : () ),
   );
 }
 
@@ -816,7 +824,8 @@ What C<config explain> shows of the context, plain data (JSON-safe):
       skill_problems  => [ { file, reason }, ... ],
       plugins         => [ { name, key, scope }, ... ],
       agents          => [ { name, source, file, tools, disallowed, model,
-                             skills, missing_skills, unknown_tools, ignored_keys }, ... ],
+                             skills, missing_skills, missing_reasons, skill_via,
+                             unknown_tools, ignored_keys }, ... ],
       shadowed_agents => [ { name, source, file, by }, ... ],
       agent_problems  => [ { file, reason }, ... ],
     }
@@ -826,6 +835,10 @@ and C<agent_problems> are L<Langertha::Raider::Context::Agents/report>;
 the arguments go there, for the model each agent would get. Each agent's
 C<missing_skills> lists the declared skills L</skill_resolver> does not
 resolve: the agent tool refuses to start that agent (ADR 0020 E<sect>6).
+C<missing_reasons> gives, per missing skill, the reason a resolver knows
+(L<Langertha::Raider::SkillResolver/why_unresolved>, e.g. a skilletor
+template); C<skill_via>, per declared skill resolved beyond the catalogue,
+where (C<skilletor:E<lt>sourceE<gt>>).
 
 =cut
 
@@ -861,11 +874,22 @@ sub report {
   };
 }
 
-# An agent of the report with its declared skills that do not resolve.
+# An agent of the report with its declared skills that do not resolve (and
+# why, where a resolver says), and where those beyond the catalogue resolved.
 sub _with_missing_skills {
   my ( $self, $agent ) = @_;
   my $resolver = $self->skill_resolver;
-  return { %$agent, missing_skills => [ grep { !$resolver->resolve($_) } @{ $agent->{skills} } ] };
+  my ( @missing, %reasons, %via );
+  for my $name (@{ $agent->{skills} }) {
+    if (my $skill = $resolver->resolve($name)) {
+      $via{$name} = $skill->{via} if defined $skill->{via};
+      next;
+    }
+    push @missing, $name;
+    my $why = $resolver->why_unresolved($name);
+    $reasons{$name} = $why if defined $why;
+  }
+  return { %$agent, missing_skills => \@missing, missing_reasons => \%reasons, skill_via => \%via };
 }
 
 sub _settings_report {
