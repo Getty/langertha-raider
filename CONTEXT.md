@@ -62,6 +62,15 @@ _Avoid_: mission (for the assembled whole).
 **Tool source / active tool set**: tools come from many sources; per run exactly one
 active set is assembled and used for prompt, catalogue and permission checks (ADR 0005).
 
+**Permission mode**: how a session treats tool calls no rule decides — `default` (asks
+before writing, running code, the network), `acceptEdits`, `plan` (read and plan only),
+`bypassPermissions` (ADR 0021). Set locally (flag, config, settings), never by a prompt.
+
+**Permission rule**: an allow, ask or deny entry in Claude Code syntax (`Bash(make:*)`,
+`Edit(src/**)`, `Read(./.env)`) from a config or settings file, or allowed for the session
+by the person. Deny before ask before allow, whatever the source. _Avoid_: permission (for
+the rule itself), grant.
+
 **Delegate**: an external agent with its own loop (Codex, Claude Code, a remote raider),
 driven through a narrow task contract (ADR 0006). _Avoid_: engine (for these).
 

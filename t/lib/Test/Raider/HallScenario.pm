@@ -470,8 +470,9 @@ sub run_hall_scenario {
     my $root = $self->{root};
     my $hall_conf = {
       raiders => {
-        Testie => { engine => 'mock', packs => [], mcp => [], isolated => 0 },
-        testie => { engine => 'mock', packs => [], mcp => [], isolated => 0 },
+        # The scenarios test the hall, not approvals (ADR 0021).
+        Testie => { engine => 'mock', packs => [], mcp => [], isolated => 0, permission_mode => 'bypassPermissions' },
+        testie => { engine => 'mock', packs => [], mcp => [], isolated => 0, permission_mode => 'bypassPermissions' },
       },
       acp     => { port => $self->{port}, host => '127.0.0.1' },
       %{ $spec->{hall} // {} },

@@ -47,7 +47,7 @@ sub spawn_raider {
     open STDOUT, '>', "$out"      or die $!;
     open STDERR, '>', "$err"      or die $!;
     exec $^X, '-I'.$repo->child('lib'), "$bin", '-r', $root, '-e', 'openai', '-k', 'test',
-      '-m', 'stub-model', '--no-trace', @args;
+      '-m', 'stub-model', '--no-trace', '--dangerously-skip-permissions', @args;
     die 'exec: '.$!;
   }
   return ( $pid, $out, $err );

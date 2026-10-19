@@ -181,6 +181,9 @@ C<-r>; C<grep> uses ripgrep when it is installed.
 the run, and C<ask_user> (L<Langertha::Raider::AskTools>), a question to
 the person at the REPL -- refused in a run nobody can answer.
 
+=item * C<exit_plan_mode> (L<Langertha::Raider::PlanTools>) once the run
+has been in the C<plan> permission mode (see L</PERMISSIONS>).
+
 =item * C<perl_eval>, C<perl_check>, C<perl_cpanm>
 (L<Langertha::Raider::PerlTools>) when granted: by C<--perl>, by C<perl:>
 in F<.raider.yml> (C<perl: false> denies them), or else when an active pack
@@ -196,6 +199,33 @@ L</RAIDER_HALL_SOCKET>).
 
 C<raider config explain> shows whether the Perl tools are mounted and why;
 C<--export-skill> writes the same tool list as a table.
+
+=head1 PERMISSIONS
+
+Every tool call passes a permission policy as in Claude Code (ADR 0021,
+L<Langertha::Raider::Permissions>). Without a matching rule the mode
+decides: C<default> runs reading tools and asks before writing, C<bash>,
+the network and messages; C<acceptEdits> also writes files inside C<-r> and
+the additional directories; C<plan> reads only, refuses changes even with an
+allow rule, and offers C<exit_plan_mode>; C<bypassPermissions> runs
+everything a deny rule does not name. The mode comes from
+C<--permission-mode> (or C<--dangerously-skip-permissions>), else
+C<permissions.default_mode> of F<.raider/config.yml> and
+F<~/.raider/config.yml>, else C<defaultMode> of the Claude settings, else
+C<default>.
+
+Rules in Claude Code syntax (C<Bash(npm run test:*)>, C<Edit(src/**)>,
+C<Read(./.env)>, C<WebFetch(domain:example.com)>, C<mcp__server__tool>)
+come from the Claude settings (in the Claude layout) and from
+C<permissions:> (C<allow>, C<ask>, C<deny>, C<default_mode>,
+C<additional_directories>) of the config files; deny before ask before
+allow, whatever the source.
+
+In the REPL a call that asks is put to you: yes once, yes for this session
+(the rule it adds is shown), or no with a reason the model gets. With
+nobody to ask -- a one-shot run, a machine output flag, the Hall, ACP --
+such a call is refused, and the model is told which rule or mode would
+allow it. C<raider config explain> and C</permissions> show the policy.
 
 =head1 OPTIONS
 
@@ -343,6 +373,17 @@ on first use.
 Offer the skills in C<DIR> (repeatable): every F<*/SKILL.md> and every
 F<*.md> in it. The prompt lists them by name and description; the model
 loads one with the C<skill> tool. Saved like C<--openai>.
+
+=opt --permission-mode MODE
+
+The permission mode of the run: C<default>, C<acceptEdits>, C<plan> or
+C<bypassPermissions> (see L</PERMISSIONS>). It wins over the mode of the
+config files and the Claude settings. Any other name is a usage error.
+
+=opt --dangerously-skip-permissions
+
+The same as C<--permission-mode bypassPermissions>: every tool call runs
+unless a deny rule names it. Not together with C<--permission-mode>.
 
 =opt --customize-prompt
 
@@ -545,7 +586,9 @@ never enter it.
 A run is recorded as C<run.started>, the input as C<message>, every
 C<tool.call> and C<tool.result> (with the whole result text, where the
 stream cuts it), the answer as C<message>, and C<run.finished> with how it
-ended -- also when it failed or was interrupted. A C</clear> in the REPL
+ended -- also when it failed or was interrupted. The permission policy's
+decisions are recorded as C<permission.asked>, C<permission.granted>,
+C<permission.denied> and C<permission.mode>. A C</clear> in the REPL
 is recorded as C<history.cleared>. While a raider writes a
 session it holds a lock on it; a second writer fails at once instead of
 waiting. A journal that cannot be written in the middle of a run (a full

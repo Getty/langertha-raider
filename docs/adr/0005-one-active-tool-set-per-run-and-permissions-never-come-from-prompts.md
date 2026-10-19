@@ -3,6 +3,8 @@
 - Status: accepted
 - Date: 2026-09-24
 - Tags: tools, policy, security
+- Complemented by: ADR 0021 (permission modes and rules: the policy, the question and the
+  approval in use)
 
 ## Context
 

@@ -22,6 +22,7 @@ use Langertha::Raider::Config;
 use Langertha::Raider::Config::Migrate;
 use Langertha::Raider::Context::Layout;
 use Langertha::Raider::Hall::CLI;
+use Langertha::Raider::Permissions;
 use Langertha::Raider::Provider::Binding;
 use Langertha::Raider::SessionStore;
 use Langertha::Raider::Skill;
@@ -166,6 +167,7 @@ sub binding_class { 'Langertha::Raider::Provider::Binding' }
 sub repl_class    { 'Langertha::Raider::CLI::REPL' }
 sub runner_class  { 'Langertha::Raider::CLI::Runner' }
 sub session_store_class { 'Langertha::Raider::SessionStore' }
+sub permissions_class { 'Langertha::Raider::Permissions' }
 sub sessions_class { 'Langertha::Raider::CLI::Sessions' }
 sub skill_class   { 'Langertha::Raider::Skill' }
 
@@ -271,6 +273,18 @@ Options:
       --no-detect          Do not activate packs by workspace detection
                            (--detect forces it on over detect: false)
       --customize-prompt   Launch the prompt-builder at startup
+      --permission-mode MODE
+                           default (ask before writing, running code,
+                           the network), acceptEdits (also write files in
+                           the project), plan (read only; exit_plan_mode
+                           to go on) or bypassPermissions (run everything
+                           a deny rule allows). Wins over default_mode of
+                           .raider/config.yml and defaultMode of the
+                           Claude settings. Without anyone to ask (a
+                           one-shot run, --json, Hall, ACP) a call that
+                           asks is refused
+      --dangerously-skip-permissions
+                           The same as --permission-mode bypassPermissions
       --claude             Read the Claude Code layout (CLAUDE.md memory,
                            .claude/settings*.json, Claude skills) also in
                            a raider project; saved as claude: true.
@@ -361,6 +375,8 @@ sub parse_options {
       'no-pack=s@'            => $opt{no_packs},
       'detect!'               => \$opt{detect},
       'customize-prompt'      => \$opt{customize_prompt},
+      'permission-mode=s'     => \$opt{permission_mode},
+      'dangerously-skip-permissions' => \$opt{skip_permissions},
       'claude'                => \$opt{profile_claude},
       'openai|codex'          => \$opt{profile_openai},
       'skills=s@'             => $opt{skill_dirs},
@@ -387,6 +403,18 @@ sub parse_options {
   if (@session_flags > 1) {
     $self->_warn(join(', ', map { $_->[1] } @session_flags).": only one of them at a time\n");
     return;
+  }
+
+  if (defined $opt{permission_mode}) {
+    unless ($self->permissions_class->is_mode($opt{permission_mode})) {
+      $self->_warn("--permission-mode: unknown mode '".$opt{permission_mode}."' (one of "
+        .join(', ', $self->permissions_class->modes).")\n");
+      return;
+    }
+    if ($opt{skip_permissions}) {
+      $self->_warn("--permission-mode, --dangerously-skip-permissions: only one of them at a time\n");
+      return;
+    }
   }
 
   my @machine = grep { $machine_flag{$_} } sort keys %MACHINE_FLAG;
@@ -441,7 +469,7 @@ L</err>, so stdout carries only the machine output.
 sub app_args {
   my ( $self, $opt ) = @_;
   my %args;
-  for my $key (qw( engine model root mission api_key trace perl detect max_iterations bare )) {
+  for my $key (qw( engine model root mission api_key trace perl detect max_iterations bare permission_mode skip_permissions )) {
     $args{$key} = $opt->{$key} if defined $opt->{$key};
   }
   $args{trace}          = 0                        if $opt->{machine} && !defined $opt->{trace};
@@ -583,7 +611,7 @@ sub run {
   # in the message, and so does an invalid project_tools of the home file.
   # A legacy file next to the new one is not loaded, and said so (ADR 0011).
   my $config = $self->config_class->new(root => $opt->{root} // Path::Tiny->cwd->stringify);
-  unless (eval { $config->data; $config->home_data; $config->project_tools; $config->providers; 1 }) {
+  unless (eval { $config->data; $config->home_data; $config->project_tools; $config->providers; $config->permissions; 1 }) {
     $self->_warn($self->output->error_text($@)."\n");
     return EXIT_CONFIG;
   }

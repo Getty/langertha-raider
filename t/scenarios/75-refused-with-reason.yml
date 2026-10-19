@@ -1,0 +1,14 @@
+title: refused with a reason, the model gets the reason and is told not to retry
+permission_mode: default
+approve: [ "no: write into tmp/ instead" ]
+prompt: Write a file.
+script:
+  - tool_calls:
+      - [ write_file, { path: a.txt, content: x } ]
+  - text: ok
+expect:
+  absent: [ a.txt ]
+  tools:
+    - { name: write_file, error: true, text: "denied: The user refused this call: write into tmp/ instead\\. Do not try the same call again; ask the user what they want or change your plan\\." }
+  events:
+    - { type: permission.denied, tool: write_file, by: user, reason: "The user refused this call: write into tmp/ instead. Do not try the same call again; ask the user what they want or change your plan." }

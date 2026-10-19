@@ -7,6 +7,7 @@ use IO::Async::Loop;
 use Future::AsyncAwait;
 use Net::Async::MCP;
 use MCP::Run::Bash;
+use Carp qw( croak );
 use Path::Tiny;
 use Scalar::Util qw( blessed refaddr weaken );
 use Time::HiRes ();
@@ -18,6 +19,8 @@ use Langertha::Raider::PerlTools qw( build_perl_tools_server );
 use Langertha::Raider::SearchTools;
 use Langertha::Raider::TodoTools;
 use Langertha::Raider::AskTools;
+use Langertha::Raider::PlanTools;
+use Langertha::Raider::Approval;
 use Langertha::Raider::Loadguard;
 use Langertha::Raider::SkillTools qw( build_skill_tools_server );
 use Langertha::Raider::Packs     qw( build_packs );
@@ -28,6 +31,7 @@ use Langertha::Raider::Detect;
 use Langertha::Raider::EngineResolver;
 use Langertha::Raider::Provider::Binding;
 use Langertha::Raider::ToolEffects;
+use Langertha::Raider::Permissions;
 use Langertha::Raider::SessionStore;
 use Langertha::Raider;
 
@@ -544,6 +548,289 @@ has on_ask_user => (
   predicate => 'has_on_ask_user',
 );
 
+=attr on_permission_request
+
+Optional code reference a surface sets when a person can approve tool calls
+during a run (the REPL does): called as C<< $on_permission_request->(\%request) >>
+for every call L</permissions> asks about, with C<tool>, C<source>,
+C<arguments>, C<reason> (why it asks) and C<rule> (the rule "yes, for this
+session" would allow, undef when none can name the call safely). It returns
+C<< { answer => 'once' } >>, C<< { answer => 'session' } >> or
+C<< { answer => 'no', reason => $why } >> (undef counts as no). "once" runs
+this exact call (an L<Langertha::Raider::Approval> bound to session, run,
+tool, arguments and policy revision); "session" adds C<rule> as a session
+rule; "no" refuses it, and the model gets the reason. Without it every such
+call is refused. Read for every call, so a surface may set it after the
+application is built.
+
+=cut
+
+has on_permission_request => (
+  is        => 'rw',
+  isa       => 'Maybe[CodeRef]',
+  predicate => 'has_on_permission_request',
+);
+
+=attr on_plan_review
+
+Optional code reference a surface sets when a person can review a plan:
+called as C<< $on_plan_review->($plan) >> when the model calls
+C<exit_plan_mode> in plan mode; returns C<< { approve => 1 } >> (the mode
+becomes C<default>) or C<< { approve => 0, feedback => $text } >>. Without
+it the model is told to give the plan as its final answer.
+
+=cut
+
+has on_plan_review => (
+  is        => 'rw',
+  isa       => 'Maybe[CodeRef]',
+  predicate => 'has_on_plan_review',
+);
+
+=attr permission_mode
+
+The permission mode chosen for this application (ADR 0021): C<default>,
+C<acceptEdits>, C<plan> or C<bypassPermissions>. It wins over
+C<permissions.default_mode> of the config files and C<defaultMode> of the
+Claude settings. Croaks on construction with any other name. The command
+line sets it with C<--permission-mode>.
+
+=cut
+
+has permission_mode => (
+  is        => 'ro',
+  isa       => 'Maybe[Str]',
+  predicate => 'has_permission_mode',
+);
+
+=attr skip_permissions
+
+True: the mode is C<bypassPermissions> -- every tool call runs unless a deny
+rule refuses it. The command line sets it with
+C<--dangerously-skip-permissions>. Not together with L</permission_mode>.
+
+=cut
+
+has skip_permissions => (
+  is      => 'ro',
+  isa     => 'Bool',
+  default => 0,
+);
+
+=attr permissions
+
+The L<Langertha::Raider::Permissions> of the application: the mode (from
+L</skip_permissions>, L</permission_mode>, C<permissions.default_mode> of
+F<.raider/config.yml> then F<~/.raider/config.yml>, C<defaultMode> of the
+Claude settings, else C<default>), the rules of the config files
+(L<Langertha::Raider::Config/permissions>) and, in the Claude layout, of the
+settings (L<Langertha::Raider::Context::Settings/permissions>), and their
+additional directories. Every tool call of the raider passes it (the gate
+of ADR 0005): a call it asks about runs only when a person approves it, and
+without anyone to ask it is refused with a reason that says how to allow it.
+
+=cut
+
+has permissions => (
+  is         => 'ro',
+  isa        => 'Langertha::Raider::Permissions',
+  lazy_build => 1,
+);
+
+sub permissions_class { 'Langertha::Raider::Permissions' }
+
+# The session rules a policy read again (reload_permissions) keeps.
+has _permissions_session_rules => (is => 'rw', isa => 'ArrayRef', writer => '_set_permissions_session_rules', init_arg => undef);
+
+sub _build_permissions {
+  my ($self) = @_;
+  my $settings = $self->context->settings;
+  my $cli = $self->skip_permissions
+    ? { value => 'bypassPermissions', source => $self->source_label('skip_permissions') }
+    : $self->has_permission_mode && defined $self->permission_mode
+      ? { value => $self->permission_mode, source => $self->source_label('permission_mode') }
+      : undef;
+  return $self->permissions_class->from_sources(
+    root     => $self->root,
+    cli_mode => $cli,
+    ( $self->_permissions_session_rules ? ( session_rules => $self->_permissions_session_rules ) : () ),
+    sources  => [ $self->config->permissions, ( $settings ? $settings->permissions : () ) ],
+  );
+}
+
+=method set_permission_mode
+
+    my $from = $app->set_permission_mode( 'acceptEdits', '/permissions' );
+
+Switches the mode of L</permissions> (croaks on an unknown mode) and emits
+C<permission.mode> with C<from>, C<to> and C<why>. Returns the previous
+mode.
+
+=cut
+
+sub set_permission_mode {
+  my ($self, $mode, $why) = @_;
+  my $from = $self->permissions->set_mode($mode, $why);
+  $self->_mode_set_at_runtime(1);
+  $self->event('permission.mode', from => $from, to => $mode, why => $why // 'session');
+  # Entering plan mode mounts exit_plan_mode for the next request.
+  if ($mode eq 'plan' && !$self->_plan_mode_seen) {
+    $self->_plan_mode_seen(1);
+    if    ($self->_has_raider)       { $self->reload_mission }
+    elsif ($self->_has_tool_servers) { $self->_remount_tool_servers }
+  }
+  return $from;
+}
+
+has _mode_set_at_runtime => (is => 'rw', isa => 'Bool', default => 0, init_arg => undef);
+
+=method reload_permissions
+
+    $app->reload_permissions;
+
+Reads the permission sources again (C</reload>): the rules, modes and
+additional directories of the config files and the Claude settings. The
+session rules stay, and so does a mode switched during the session
+(C</permissions mode>, C<exit_plan_mode>). The tools keep the additional
+directories they were mounted with.
+
+=cut
+
+sub reload_permissions {
+  my ($self) = @_;
+  return unless $self->has_permissions;
+  my $old = $self->permissions;
+  my $config = $self->config;
+  $config->$_ for qw( clear_file clear_uses_home clear_data clear_home_data );
+  $self->_set_permissions_session_rules($old->session_rules);
+  $self->clear_permissions;
+  my $new = $self->permissions;
+  $new->set_mode($old->mode, $old->mode_source) if $self->_mode_set_at_runtime;
+  return $new;
+}
+
+=method tool_gate
+
+    my $raider = Langertha::Raider->new( ..., _tool_gate => $app->tool_gate );
+
+The gate every raider of the application gets (the C<_tool_gate> of
+L<Langertha::Raider>, ADR 0005): L</permissions> decides each tool call.
+A raider built on the application's engine -- the prompt builder, later a
+sub-agent -- takes it too, so no tool call passes without it.
+
+=cut
+
+sub tool_gate {
+  my ($self) = @_;
+  weaken(my $app = $self);
+  return sub { $app ? $app->_permission_gate($_[1]) : { verdict => 'deny', reason => 'the application is gone' } };
+}
+
+# The tool gate of the raider (ADR 0005, ADR 0021): the policy decides; an
+# ask without anyone to approve it is refused with a reason that says how to
+# allow it. Emits permission.denied for every call that does not run.
+sub _permission_gate {
+  my ($self, $call) = @_;
+  my $verdict = $self->permissions->decide($call);
+  return $verdict if $verdict->{verdict} eq 'allow';
+  if ($verdict->{verdict} eq 'deny') {
+    $self->_permission_event('permission.denied', $call, $verdict, by => $verdict->{by});
+    return $verdict;
+  }
+  if (my $ask = $self->on_permission_request) {
+    return $self->_ask_permission($ask, $call, $verdict);
+  }
+  my $reason = $verdict->{reason}.'; nobody can approve it in this run. '.$self->_how_to_allow($call)
+    .' Do not retry the same call; go on without it or say what you need.';
+  $self->_permission_event('permission.denied', $call, $verdict, by => 'noninteractive', reason => $reason);
+  return { %$verdict, verdict => 'deny', by => 'noninteractive', reason => $reason };
+}
+
+# Puts a call the policy asks about to the person (on_permission_request):
+# once -> an approval of exactly this call; session -> the suggested rule as
+# a session rule; no -> refused with the person's reason.
+sub _ask_permission {
+  my ($self, $ask, $call, $verdict) = @_;
+  my $policy = $self->permissions;
+  my $rule   = $policy->suggest_rule($call);
+  $self->_permission_event('permission.asked', $call, $verdict, ( defined $rule ? ( suggested_rule => $rule ) : () ));
+  my $answer = $ask->({
+    tool      => $call->{name},
+    source    => $call->{source},
+    arguments => $call->{arguments},
+    reason    => $verdict->{reason},
+    rule      => $rule,
+  });
+  my $choice = ref $answer eq 'HASH' ? $answer->{answer} // 'no' : 'no';
+  if ($choice eq 'session' && defined $rule) {
+    $policy->add_session_rule($rule);
+    my $again = $policy->decide($call);
+    if ($again->{verdict} eq 'allow') {
+      $self->event('permission.granted', tool => $call->{name}, scope => 'session', rule => $rule, mode => $policy->mode);
+      return $again;
+    }
+    $choice = 'once';   # the rule does not cover the call after all: this call only
+  }
+  if ($choice eq 'once' || $choice eq 'session') {
+    my %binding  = $self->_approval_binding;
+    my $approval = Langertha::Raider::Approval->for_call(%binding, call => $call);
+    # The approval binds this exact call; held against it as it is about to run.
+    if ($approval->covers($self->_approval_binding, call => $call)) {
+      $self->event('permission.granted', tool => $call->{name}, scope => 'once', mode => $policy->mode);
+      return { verdict => 'allow', by => 'user', reason => 'approved once by the user', mode => $policy->mode };
+    }
+  }
+  my $why = ref $answer eq 'HASH' ? $answer->{reason} : undef;
+  my $text = 'The user refused this call'.( defined $why && length $why ? ': '.$why : '' )
+    .'. Do not try the same call again; ask the user what they want or change your plan.';
+  $self->_permission_event('permission.denied', $call, $verdict, by => 'user', reason => $text);
+  return { %$verdict, verdict => 'deny', by => 'user', reason => $text };
+}
+
+# Session, run and policy revision an approval is bound to. A run without a
+# session (a library run, --no-session) has a stable stand-in per
+# application, so Approval->for_call never lacks a field.
+sub _approval_binding {
+  my ($self) = @_;
+  my $run = $self->_run;
+  my $session = $run ? $run->{session} : undef;
+  return (
+    session_id      => $session ? $session->id : $self->_local_session_id,
+    run_id          => $run && defined $run->{run} ? $run->{run} : 'run',
+    policy_revision => $self->permissions->policy_revision,
+  );
+}
+
+has _local_session_id => (is => 'ro', isa => 'Str', lazy => 1, builder => '_build__local_session_id', init_arg => undef);
+
+sub _build__local_session_id { 'local-'.$$.'-'.refaddr($_[0]) }
+
+# How a person allows a call that asked: a rule (the suggested one) in a
+# config file, or a mode.
+sub _how_to_allow {
+  my ($self, $call) = @_;
+  my $rule = $self->permissions->suggest_rule($call);
+  my @files = ( '.raider/config.yml (permissions: allow:)',
+    ( $self->context->claude_layout ? '.claude/settings.json (permissions.allow)' : () ) );
+  return 'To allow it, add '.( defined $rule ? "a rule such as '".$rule."'" : 'an allow rule' )
+    .' to '.join(' or ', @files).', or run raider with --permission-mode '
+    .( ( $call->{name} // '' ) =~ /\A(?:write_file|edit_file)\z/ ? 'acceptEdits' : 'bypassPermissions' ).'.';
+}
+
+sub _permission_event {
+  my ($self, $type, $call, $verdict, %more) = @_;
+  $self->event($type,
+    tool => $call->{name},
+    ( defined $call->{source} ? ( tool_source => $call->{source} ) : () ),
+    mode => $verdict->{mode},
+    ( defined $verdict->{rule} ? ( rule => $verdict->{rule} ) : () ),
+    ( defined $verdict->{source} ? ( source => $verdict->{source} ) : () ),
+    reason => $verdict->{reason},
+    %more,
+  );
+  return;
+}
+
 =attr loadguard
 
 The L<Langertha::Raider::Loadguard> that gates C<bash>: a heavy command
@@ -988,6 +1275,11 @@ has _explicit => (
 
 sub BUILD {
   my ($self, $args) = @_;
+  croak 'Unknown permission mode '.$self->permission_mode.' (one of '.join(', ', $self->permissions_class->modes).')'
+    if $self->has_permission_mode && defined $self->permission_mode
+      && !$self->permissions_class->is_mode($self->permission_mode);
+  croak 'permission_mode and skip_permissions: only one of them'
+    if $self->skip_permissions && $self->has_permission_mode && defined $self->permission_mode;
   $self->_explicit->{$_} = 1 for grep { exists $args->{$_} } qw( engine model api_key perl );
 }
 
@@ -1092,7 +1384,58 @@ sub _build_tool_servers {
     ( $self->perl_tools_enabled ? $self->_perl_tool_server : () ),
     ( $self->_hall_tool_server // () ),
     ( $self->_skill_tool_server // () ),
+    ( $self->_plan_tool_wanted ? $self->_plan_tool_server : () ),
   ];
+}
+
+# exit_plan_mode (ADR 0021): mounted once the application has been in plan
+# mode, and kept mounted after (it then answers "not in plan mode").
+has _plan_mode_seen => (is => 'rw', isa => 'Bool', default => 0, init_arg => undef);
+has _plan_tool_server => (is => 'ro', lazy => 1, builder => '_build_plan_tool_server');
+
+sub _plan_tool_wanted {
+  my ($self) = @_;
+  $self->_plan_mode_seen(1) if $self->permissions->mode eq 'plan';
+  return $self->_plan_mode_seen;
+}
+
+sub _build_plan_tool_server {
+  my ($self) = @_;
+  weaken(my $app = $self);
+  return Langertha::Raider::PlanTools->new(
+    handler => sub { $app ? $app->_exit_plan_mode(@_) : ( 'the application is gone', 1 ) },
+  )->server;
+}
+
+# What exit_plan_mode answers: the plan put to the person (on_plan_review),
+# approved -> mode default; refused -> stays in plan with the feedback;
+# nobody to ask -> stays in plan, the plan is the final answer.
+sub _exit_plan_mode {
+  my ($self, $plan) = @_;
+  my $mode = $self->permissions->mode;
+  return ( 'exit_plan_mode: not in plan mode (the permission mode is '.$mode.'); go on with the work.', 1 )
+    unless $mode eq 'plan';
+  my $review = $self->on_plan_review;
+  return ( 'Nobody can approve the plan in this run. Stay in plan mode and give the plan as your final answer.', 0 )
+    unless $review;
+  $self->event('permission.asked', tool => 'exit_plan_mode', mode => $mode, reason => 'review of the plan');
+  my $answer = $review->($plan) // {};
+  if ($answer->{approve}) {
+    $self->set_permission_mode('default', 'exit_plan_mode');
+    return ( 'User approved the plan. You can now start editing files and running commands (permission mode: default).', 0 );
+  }
+  my $feedback = $answer->{feedback};
+  return ( 'The user did not approve the plan'.( defined $feedback && length $feedback ? ': '.$feedback : '' )
+    .'. Stay in plan mode: revise the plan and present it again with exit_plan_mode.', 0 );
+}
+
+# The hider of the search tools: hides the files a Read deny or ask rule
+# names, when there is one.
+sub _search_hider {
+  my ($self) = @_;
+  my $policy = $self->permissions;
+  return unless $policy->read_rules_active;
+  return sub { $policy->hides_read($_[0]) };
 }
 
 # The skill tool (ADR 0019 §4), when the context lists a skill.
@@ -1105,7 +1448,8 @@ sub _build_skill_tool_server {
 sub _build_stock_tool_servers {
   my ($self) = @_;
 
-  my $files = build_file_tools_server(root => $self->root);
+  my @extra = $self->permissions->additional_directory_paths;
+  my $files = build_file_tools_server(root => $self->root, extra_roots => \@extra);
 
   my $bash = MCP::Run::Bash->new(
     tool_name         => 'bash',
@@ -1119,7 +1463,11 @@ sub _build_stock_tool_servers {
   my $web = build_web_tools_server(loop => $self->loop);
 
   weaken(my $app = $self);
-  my $search = Langertha::Raider::SearchTools->new(root => $self->root)->server;
+  my $search = Langertha::Raider::SearchTools->new(
+    root        => $self->root,
+    extra_roots => \@extra,
+    hider       => sub { $app ? $app->_search_hider : undef },
+  )->server;
   my $todo   = Langertha::Raider::TodoTools->new(on_update => sub { $app->_todos_updated(@_) if $app })->server;
   my $ask    = Langertha::Raider::AskTools->new(
     answerer => sub { $app && $app->has_on_ask_user ? $app->on_ask_user : undef },
@@ -1230,6 +1578,7 @@ sub _build_raider {
   my ($self) = @_;
   my @plugins = $self->_raider_plugins;
   return Langertha::Raider->new(
+    _tool_gate                 => $self->tool_gate,
     engine                     => $self->_engine,
     mission                    => $self->mission,
     max_iterations             => $self->max_iterations,
@@ -1305,7 +1654,8 @@ one. An empty C<$text> runs nothing and returns nothing.
 
 # The ADR 0015 event types the journal records from the events of a run;
 # run.finished is written by end_run.
-my %JOURNAL_TYPE = map { $_ => 1 } qw( run.started message tool.call tool.result todo.updated );
+my %JOURNAL_TYPE = map { $_ => 1 } qw( run.started message tool.call tool.result todo.updated
+  permission.asked permission.granted permission.denied permission.mode );
 
 # The run in progress: { session, run, on_event, t0 }.
 has _run => (
@@ -1619,6 +1969,7 @@ the start (the default packs of Claude mode) is not decided again.
 sub reload_context {
   my ($self) = @_;
   $self->context->reload;
+  $self->reload_permissions;
   $self->_clear_skill_tool_server;
   return $self->context;
 }
@@ -1674,7 +2025,8 @@ L</explain_config>, L</perl_tools_grant>, L</detection_state>,
 L</mission_source> and the pack sources. The keys are C<engine>,
 C<model>, C<api_key>, C<engine_options>, C<engine_options packs>,
 C<pack_names>, C<no_pack_names>, C<perl>, C<detect>, C<no_detect>,
-C<bare>, C<mission>, C<claude> and C<cli_skill_sources>. A surface names its own
+C<bare>, C<mission>, C<claude>, C<cli_skill_sources>, C<permission_mode>
+and C<skip_permissions>. A surface names its own
 way of setting them in L</source_labels>; without, the label is the key.
 
 =method source_labels
@@ -1735,6 +2087,11 @@ keys raider does not use), every skill with its root and whether it is
 listed, the skills shadowed by an earlier one of the same name, broken
 skill files, and the enabled plugins. C<claude> is among C<values> when
 set: by L</claude>, C<claude:> or C<-o claude=>.
+
+C<permissions> is L<Langertha::Raider::Permissions/report> of
+L</permissions>: the mode and where it came from, mode names from files
+that were ignored, the valid rules per kind with their sources, the
+invalid rules and the additional directories.
 
 C<tools> lists the mounted tools, each with its C<name>, its C<source>
 (C<engine:N>) and C<effects>: what it can do, from a static built-in table
@@ -1862,6 +2219,7 @@ sub explain_config {
     skipped_packs => $self->packs->skipped_packs,
     perl_tools    => $self->perl_tools_grant,
     tools         => $self->_tool_effects_report,
+    permissions   => $self->permissions->report,
     ignored_instructions_files => [ $self->instructions->ignored_files ],
     %{ $self->context->report },
   };

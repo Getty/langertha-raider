@@ -99,6 +99,7 @@ sub run {
     engine         => $app->_engine,
     mission        => $self->_mission($file, $instructions->label),
     max_iterations => 20,
+    _tool_gate     => $app->tool_gate,
   );
 
   $out->say_meta('entering prompt-builder. /done to return, /cancel to discard.');

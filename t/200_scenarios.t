@@ -32,9 +32,22 @@ use Langertha::Raider::Loadguard;
 #            with $HOME at a fresh temporary directory and no
 #            $CLAUDE_CONFIG_DIR, so none sees the real ~/.raider or ~/.claude;
 #            %ENV is restored after each scenario. In the content of both,
-#            {{HOME}} and {{ROOT}} stand for the two directories.
+#            and in the strings of `script:`, {{HOME}} and {{ROOT}} stand for
+#            the two directories.
 #   app:     { argument => value }      more arguments for the application
 #            (e.g. bare: 1, claude: 1)
+#   permission_mode: the mode as --permission-mode would give it (ADR 0021).
+#            Without the key a scenario runs in bypassPermissions: scenarios
+#            test tools, not approvals, unless they say otherwise. `null`
+#            gives none, so the mode comes from the config files and the
+#            Claude settings (else default). Without `approve:` nobody approves
+#            anything: a call the policy asks about is refused, as in a
+#            one-shot run.
+#   approve: [ once | session | no | 'no: reason', ... ]  the person approving
+#            tool calls, one answer per question in order (as the REPL's 1/2/3);
+#            when the list runs out the answer is no
+#   review:  [ yes | no | 'no: feedback', ... ]  the person reviewing plans of
+#            exit_plan_mode, in order (without the key nobody reviews)
 #   prompt:  the user prompt (or `prompts:`, a list run one after the other on
 #            the same raider, so the conversation carries over)
 #   script:  the model's answers, one per request:
@@ -49,6 +62,9 @@ use Langertha::Raider::Loadguard;
 #     events:      [ { type => ..., fields } ] events of the application, in order; each
 #                  is matched (as a subset) by the next event of its type
 #     questions:   [ { question => ..., options => [...] } ] what ask_user put to the person
+#     permissions: [ { tool, rule, reason, ... } ] the calls the person was asked to approve,
+#                  each matched as a subset (rule: what "for this session" would add)
+#     plans:       [ text, ... ] the plans put to the person
 #     todos:       [ { content, status } ] the task list at the end
 #     tools:       one entry per tool call, in order:
 #                    name:   the tool
@@ -81,16 +97,40 @@ for my $file (@files) {
       my $t = time - $s->{age}{$path};
       utime $t, $t, "$root/$path";
     }
-    my ( @events, @questions, @gate, $proc_dir );
+    my ( @events, @questions, @gate, $proc_dir, @asked, @plans );
     if ( my $proc = $s->{proc} ) {
       $proc_dir = fake_proc(%$proc);    # kept for the whole scenario
       push @gate, loadguard => Langertha::Raider::Loadguard->new( proc_dir => "$proc_dir", env => $s->{env} // {} );
     }
     my @answers = @{ $s->{ask} // [] };
+    my @approve = @{ $s->{approve} // [] };
+    my @review  = @{ $s->{review} // [] };
+    my $answer_of = sub {
+      my ( $a ) = @_;
+      return { answer => 'no' } unless defined $a;
+      return { answer => 'no', reason => $1 } if $a =~ /\Ano:\s*(.*)\z/s;
+      return { answer => $a };
+    };
+    my $deep_fill;
+    $deep_fill = sub {
+      my ( $v ) = @_;
+      return ref $v eq 'HASH' ? { map { $_ => $deep_fill->( $v->{$_} ) } keys %$v }
+           : ref $v eq 'ARRAY' ? [ map { $deep_fill->($_) } @$v ]
+           : defined $v && !ref $v ? $fill->($v)
+           : $v;
+    };
     my $app = mock_app(
-      root => "$root", script => $s->{script} // [], @gate, %{ $s->{app} // {} },
+      root => "$root", script => $deep_fill->( $s->{script} // [] ), @gate,
+      permission_mode => exists $s->{permission_mode} ? $s->{permission_mode} : 'bypassPermissions',
+      %{ $s->{app} // {} },
       on_event => sub { my ( $type, %p ) = @_; push @events, { type => $type, %p } },
       $s->{ask} ? ( on_ask_user => sub { push @questions, { question => $_[0], options => $_[1] }; shift @answers } ) : (),
+      $s->{approve} ? ( on_permission_request => sub { push @asked, $_[0]; $answer_of->( shift @approve ) } ) : (),
+      $s->{review} ? ( on_plan_review => sub {
+        push @plans, $_[0];
+        my $r = shift(@review) // 'no';
+        return $r =~ /\A(?:yes|y)\z/ ? { approve => 1 } : { approve => 0, $r =~ /\Ano:\s*(.*)\z/s ? ( feedback => $1 ) : () };
+      } ) : (),
     );
     my @prompts = $s->{prompts} ? @{ $s->{prompts} } : ( $s->{prompt} // 'go' );
     my $answer;
@@ -126,6 +166,11 @@ for my $file (@files) {
       }
     }
     is( \@questions, $expect->{questions}, 'questions put to the person' ) if $expect->{questions};
+    if ( my $want = $expect->{permissions} ) {
+      is( scalar @asked, scalar @$want, 'number of approvals asked for' );
+      like( $asked[$_], $want->[$_], "approval $_ asked for" ) for 0 .. $#$want;
+    }
+    is( \@plans, $expect->{plans}, 'plans put to the person' ) if $expect->{plans};
     is( [ map { +{ content => $_->{content}, status => $_->{status} } } @{ $app->todos } ], $expect->{todos}, 'the task list' )
       if $expect->{todos};
 

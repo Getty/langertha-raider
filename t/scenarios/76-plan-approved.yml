@@ -1,0 +1,26 @@
+title: in plan mode the model presents its plan with exit_plan_mode; approved, the mode is default and the work can start
+permission_mode: plan
+review: [ yes ]
+approve: [ once ]
+prompt: Add a file.
+script:
+  - tool_calls:
+      - [ write_file, { path: a.txt, content: "a\n" } ]
+  - tool_calls:
+      - [ exit_plan_mode, { plan: "1. write a.txt" } ]
+  - tool_calls:
+      - [ write_file, { path: a.txt, content: "a\n" } ]
+      - [ exit_plan_mode, { plan: "again" } ]
+  - text: done
+expect:
+  files: { a.txt: "a\n" }
+  plans: [ "1. write a.txt" ]
+  permissions:
+    - { tool: write_file }
+  tools:
+    - { name: write_file, error: true, text: "plan mode: write_file changes files" }
+    - { name: exit_plan_mode, text: "User approved the plan\\. You can now start editing files and running commands" }
+    - { name: write_file }
+    - { name: exit_plan_mode, error: true, text: "not in plan mode \\(the permission mode is default\\)" }
+  events:
+    - { type: permission.mode, from: plan, to: default, why: exit_plan_mode }

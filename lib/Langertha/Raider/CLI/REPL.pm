@@ -5,6 +5,8 @@ use Moose;
 use namespace::autoclean;
 use Config;
 use Encode qw( decode encode FB_QUIET );
+use JSON::MaybeXS ();
+use List::Util qw( first );
 use POSIX ();
 use Path::Tiny;
 use Scalar::Util qw( weaken );
@@ -65,8 +67,10 @@ C<STDIN>.
 =attr can_ask
 
 Whether a person answers the model's questions (the C<ask_user> tool,
-L</ask_user>). Defaults to whether L</in> is a terminal; without one the
-tool refuses and the model decides itself.
+L</ask_user>), approves tool calls (L</permission_request>) and reviews
+plans (L</plan_review>). Defaults to whether L</in> is a terminal; without
+one the tool refuses and the model decides itself, and a call the
+permission policy asks about is refused.
 
 =attr active_profiles
 
@@ -292,6 +296,8 @@ sub run {
   if ( $self->can_ask ) {
     weaken( my $repl = $self );
     $self->app->on_ask_user( sub { $repl ? $repl->ask_user(@_) : undef } );
+    $self->app->on_permission_request( sub { $repl ? $repl->permission_request(@_) : undef } );
+    $self->app->on_plan_review( sub { $repl ? $repl->plan_review(@_) : undef } );
   }
 
   my $rl = -t $in ? $self->_terminal_reader : {
@@ -390,6 +396,101 @@ sub ask_user {
   return unless length $line;
   return $options->[ $line - 1 ] if $line =~ /\A\d+\z/ && $line >= 1 && $line <= @$options;
   return $line;
+}
+
+=method permission_request
+
+    my $answer = $repl->permission_request({ tool => 'bash', arguments => { command => 'make' },
+      reason => '...', rule => 'Bash(make)' });
+
+Puts a tool call the permission policy asks about to the person (ADR
+0021): the tool and what it would do (the command, the path, the URL), why
+it asks, then the choices -- C<1> yes, once; C<2> yes, for this session,
+naming the rule that is added (only when there is one); C<3> no. C<y> and
+C<n> work too. A "no" asks for an optional reason, which the model gets.
+Returns C<< { answer => 'once' | 'session' | 'no', reason => ... } >>; a
+closed input is a "no". The REPL registers this as the application's
+L<on_permission_request|Langertha::Raider::Application/on_permission_request>
+when it can ask -- for every raider of the application, the prompt builder's
+too.
+
+=cut
+
+sub permission_request {
+  my ( $self, $req ) = @_;
+  my $out  = $self->output;
+  my $in   = $self->in;
+  my $rule = $req->{rule};
+  $out->emit( $out->c( title => '? allow '.$req->{tool}.': ' ), $self->call_summary($req), "\n" );
+  $out->emit( $out->c( meta => '  ('.$req->{reason}.')' ), "\n" ) if defined $req->{reason};
+  $out->emit( $out->c( meta => '  1) yes, once' ), "\n" );
+  $out->emit( $out->c( meta => '  2) yes, for this session: '.$rule ), "\n" ) if defined $rule;
+  $out->emit( $out->c( meta => '  3) no, and tell the model why' ), "\n" );
+  while (1) {
+    $out->emit( $out->c( meta => 'choice> ' ) );
+    my $line = <$in>;
+    return { answer => 'no' } unless defined $line;
+    $line =~ s/^\s+|\s+\z//g;
+    return { answer => 'once' } if $line =~ /\A(?:1|y|yes)\z/i;
+    return { answer => 'session' } if defined $rule && $line eq '2';
+    if ( $line =~ /\A(?:3|n|no)\z/i ) {
+      $out->emit( $out->c( meta => 'reason (optional)> ' ) );
+      my $why = <$in>;
+      $why = '' unless defined $why;
+      $why =~ s/^\s+|\s+\z//g;
+      return { answer => 'no', ( length $why ? ( reason => $why ) : () ) };
+    }
+  }
+}
+
+=method call_summary
+
+    my $text = $repl->call_summary({ tool => 'bash', arguments => { command => 'ls' } });   # 'ls'
+
+What a call would do, in one line for the question: the command of
+C<bash>, the C<path> of a file tool, the C<url> of C<web_fetch>, the
+C<query> of C<web_search>, else the arguments as JSON -- cut at 200
+characters.
+
+=cut
+
+sub call_summary {
+  my ( $self, $req ) = @_;
+  my $args = ref $req->{arguments} eq 'HASH' ? $req->{arguments} : {};
+  my $text = first { defined && !ref } map { $args->{$_} } qw( command path url query );
+  $text //= JSON::MaybeXS->new( canonical => 1, allow_nonref => 1 )->encode($args);
+  $text = substr( $text, 0, 200 ).'...' if length $text > 200;
+  return $text;
+}
+
+=method plan_review
+
+    my $answer = $repl->plan_review($plan);   # { approve => 1 } or { approve => 0, feedback => ... }
+
+Shows the plan the model presents with C<exit_plan_mode> and asks whether
+to accept it: C<y> accepts (the permission mode becomes C<default>),
+anything else asks for feedback, which the model gets. A closed input
+does not accept. Registered as
+L<on_plan_review|Langertha::Raider::Application/on_plan_review> when the
+REPL can ask.
+
+=cut
+
+sub plan_review {
+  my ( $self, $plan ) = @_;
+  my $out = $self->output;
+  my $in  = $self->in;
+  $out->emit( $out->c( title => '? the plan:' ), "\n", $plan // '', "\n" );
+  $out->emit( $out->c( meta => 'accept the plan? [y/n]> ' ) );
+  my $line = <$in>;
+  return { approve => 0 } unless defined $line;
+  $line =~ s/^\s+|\s+\z//g;
+  return { approve => 1 } if $line =~ /\A(?:y|yes|1)\z/i;
+  $out->emit( $out->c( meta => 'what should change? (optional)> ' ) );
+  my $feedback = <$in>;
+  $feedback = '' unless defined $feedback;
+  $feedback =~ s/^\s+|\s+\z//g;
+  return { approve => 0, ( length $feedback ? ( feedback => $feedback ) : () ) };
 }
 
 =method run_prompt

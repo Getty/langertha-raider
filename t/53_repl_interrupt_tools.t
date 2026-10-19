@@ -66,7 +66,7 @@ sub repl_in_tool {
     open STDOUT, '>', "$out"                or die $!;
     open STDERR, '>', path($root)->child('err')->stringify or die $!;
     exec $^X, '-I'.$repo->child('lib'), "$bin", '-r', $root, '-e', 'openai', '-k', 'test',
-      '-m', 'stub-model', '-o', 'url='.$url, '--no-trace', '-i', @flags;
+      '-m', 'stub-model', '-o', 'url='.$url, '--no-trace', '--dangerously-skip-permissions', '-i', @flags;
     die 'exec: '.$!;
   }
   close $r;
@@ -149,7 +149,7 @@ subtest 'Ctrl-C while the model answers abandons the request' => sub {
     open STDOUT, '>', "$out"                or die $!;
     open STDERR, '>', path($root)->child('err')->stringify or die $!;
     exec $^X, '-I'.$repo->child('lib'), "$bin", '-r', $root, '-e', 'openai', '-k', 'test',
-      '-m', 'stub-model', '-o', 'url='.$url, '--no-trace', '-i';
+      '-m', 'stub-model', '-o', 'url='.$url, '--no-trace', '--dangerously-skip-permissions', '-i';
     die 'exec: '.$!;
   }
   close $r;

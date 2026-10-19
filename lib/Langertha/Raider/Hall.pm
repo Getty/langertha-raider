@@ -111,6 +111,14 @@ C<preferred_lib_target> sets the hall's L</lib_target>. C<longhouse: true>
 adds F<longhouse/lib> of the hall root to every raider's C<PERL5LIB> as
 well.
 
+C<permission_mode> on a raider entry (C<default>, C<acceptEdits>,
+C<plan>, C<bypassPermissions>; ADR 0021) is passed as C<--permission-mode>.
+A hall raider has nobody to ask: a tool call its mode or rules ask about is
+refused with the reason. Without the key the raider takes the mode from
+its project (C<permissions.default_mode> of F<.raider/config.yml>, the
+Claude settings), else C<default> -- which refuses writing, C<bash> and the
+network unless a rule allows them.
+
 C<engine> on a raider entry is optional. Without it the hall passes no
 C<--engine> and the spawned raider decides itself: the engine from its
 F<.raider.yml> first, then autodetection from the API keys in the
@@ -1153,6 +1161,8 @@ sub _spawn_raider {
   push @cmd, '--engine', $engine if $engine;
   push @cmd, '--model', $model if $model;
   push @cmd, '--pack', $_ for @packs;
+  push @cmd, '--permission-mode', $raider_config->{permission_mode}
+    if defined $raider_config->{permission_mode} && length $raider_config->{permission_mode};
   push @cmd, '-o', 'preferred_lib_target='.$lib_target;
   push @cmd, '--root', $self->root->stringify;
   # A bound run resumes its binding's session; an unbound one gets a

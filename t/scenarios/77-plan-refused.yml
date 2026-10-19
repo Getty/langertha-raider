@@ -1,0 +1,16 @@
+title: a plan the person does not accept keeps plan mode, and the model gets the feedback
+permission_mode: plan
+review: [ "no: smaller steps please" ]
+prompt: Add a file.
+script:
+  - tool_calls:
+      - [ exit_plan_mode, { plan: "1. rewrite everything" } ]
+  - tool_calls:
+      - [ write_file, { path: a.txt, content: x } ]
+  - text: revised plan
+expect:
+  absent: [ a.txt ]
+  plans: [ "1. rewrite everything" ]
+  tools:
+    - { name: exit_plan_mode, text: "The user did not approve the plan: smaller steps please\\. Stay in plan mode" }
+    - { name: write_file, error: true, text: "plan mode" }

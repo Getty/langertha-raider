@@ -44,7 +44,8 @@ winning:
 =over
 
 =item C<top> -- every top-level key whose value is not a hash (plus
-C<skills>, C<detect>, C<project_tools> and C<providers>, which may be one)
+C<skills>, C<detect>, C<project_tools>, C<providers> and C<permissions>,
+which may be one)
 
 =item C<default> -- the C<default:> section
 
@@ -79,6 +80,8 @@ C<project_tools> is not layered at all: only the top level of the home
 file grants tools to projects (L</project_tools>). Neither is C<providers>:
 only the top level of the home file holds provider bindings
 (L</providers>).
+C<permissions> is read on its own too (L</permissions>): the rules of both
+files are concatenated with their source, never replaced.
 
 The project writers never touch the home file (L</update_home> is the only
 one; C<raider provider add> calls it). When the home file is the file in
@@ -94,7 +97,7 @@ overwrite it.
 =cut
 
 # Keys that configure raider itself and never reach the engine constructor.
-my %APP_KEY = map { $_ => 1 } qw( claude detect engine no_detect packs perl preferred_lib_target project_tools providers skills );
+my %APP_KEY = map { $_ => 1 } qw( claude detect engine no_detect packs permissions perl preferred_lib_target project_tools providers skills );
 
 my %PROFILE_KEYWORD = (
   claude => 'claude',
@@ -334,7 +337,8 @@ sub file_exists { -f $_[0]->file ? 1 : 0 }
 # is an engine section.
 sub _may_be_mapping {
   my ( $self, $key ) = @_;
-  return $key eq 'skills' || $key eq 'detect' || $key eq 'project_tools' || $key eq 'providers';
+  return $key eq 'skills' || $key eq 'detect' || $key eq 'project_tools' || $key eq 'providers'
+    || $key eq 'permissions';
 }
 
 sub _is_section {
@@ -445,6 +449,12 @@ sub _resolve_file {
         my $top = $name eq $prefix.'top';
         push @ignored, $self->_ignored_providers($name, $top)
           unless $top && ( length $prefix || $self->_is_home_file );
+        next;
+      }
+      if ($key eq 'permissions') {
+        # Read on its own (permissions), from the top level of both files.
+        push @ignored, { key => $name.'.permissions', reason => 'read only at the top level of a config file' }
+          unless $name eq $prefix.'top';
         next;
       }
       if ($key eq 'engine' && $name ne $prefix.'top' && $name ne $prefix.'default') {
@@ -623,7 +633,7 @@ sub engine_options {
     $config->is_app_key('perl');   # 1
 
 True for the keys that configure raider itself (C<claude>, C<detect>, C<engine>,
-C<no_detect>, C<packs>, C<perl>, C<preferred_lib_target>, C<project_tools>,
+C<no_detect>, C<packs>, C<permissions>, C<perl>, C<preferred_lib_target>, C<project_tools>,
 C<providers>, C<skills>) and never reach the engine constructor.
 
 =cut
@@ -914,6 +924,77 @@ sub providers {
   return {} unless defined $raw;
   croak 'Cannot use '.$file.': providers: must be a mapping of alias to binding' unless ref $raw eq 'HASH';
   return $raw;
+}
+
+=method permissions
+
+    my $p = $config->permissions;
+
+The C<permissions:> of the home file and the project file (ADR 0021), in the
+shape of L<Langertha::Raider::Context::Settings/permissions>:
+
+    {
+      allow => [ { rule => 'Bash(make test)', source => '.raider/config.yml' }, ... ],
+      ask   => [ ... ],
+      deny  => [ ... ],
+      default_mode           => { value => 'acceptEdits', source => ... } | undef,
+      additional_directories => [ { path => '../docs', source => ... }, ... ],
+    }
+
+    permissions:
+      allow: [ "Bash(make test)", "Edit(lib/**)" ]
+      deny:  [ "Read(./.env)" ]
+      default_mode: acceptEdits
+      additional_directories: [ ../docs ]
+
+The rules are strings in Claude Code syntax
+(L<Langertha::Raider::Permissions::Rule>); a single string counts as a list
+of one. Both files' lists are concatenated, home first, with the source of
+every entry (C<~/.raider/config.yml> or L</label>); C<default_mode> of the
+project file wins over the home file's. Only the top level is read; a
+C<permissions:> inside a section is reported by L</explain>. Rules and modes
+are not checked here -- the policy reports the invalid ones. Croaks when
+C<permissions:> is not a mapping, has a key other than these five, or a list
+holds anything but non-empty strings.
+
+=cut
+
+sub _home_rule_label { '~/'.$_[0]->home_class->dir_name.'/config.yml' }
+
+sub permissions {
+  my ( $self ) = @_;
+  my %out = ( allow => [], ask => [], deny => [], default_mode => undef, additional_directories => [] );
+  my @files = (
+    ( $self->uses_home ? [ $self->home_data, $self->_home_rule_label ] : () ),
+    [ $self->data, $self->label ],
+  );
+  for my $file (@files) {
+    my ( $data, $label ) = @$file;
+    my $perms = $data->{permissions};
+    next unless defined $perms;
+    my $fail = sub { croak 'Invalid permissions setting in '.$label.': '.$_[0] };
+    $fail->('permissions: must be a mapping') unless ref $perms eq 'HASH';
+    for my $key (sort keys %$perms) {
+      next if exists $out{$key};
+      my %hint = ( defaultMode => 'default_mode', additionalDirectories => 'additional_directories' );
+      $fail->('permissions.'.$key.': unknown key'.( $hint{$key} ? ' (use '.$hint{$key}.')' : '' ));
+    }
+    for my $kind (qw( allow ask deny additional_directories )) {
+      my $list = $perms->{$kind};
+      next unless defined $list;
+      $list = [ $list ] unless ref $list;
+      $fail->('permissions.'.$kind.': must be a list of strings') unless ref $list eq 'ARRAY';
+      for my $item (@$list) {
+        $fail->('permissions.'.$kind.': must be a list of strings') if ref $item || !length($item // '');
+        push @{ $out{$kind} }, { ( $kind eq 'additional_directories' ? 'path' : 'rule' ) => $item, source => $label };
+      }
+    }
+    if (defined( my $mode = $perms->{default_mode} )) {
+      $fail->('permissions.default_mode: must be a mode name') if ref $mode;
+      $out{default_mode} = { value => $mode, source => $label };
+    }
+  }
+  return \%out;
 }
 
 =method normalize_skill_spec

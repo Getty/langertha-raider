@@ -172,6 +172,11 @@ Options:
       --openai / --codex   Load AGENTS.md
       --skills DIR         Offer DIR's skills (*/SKILL.md or *.md; repeatable)
       --customize-prompt   Launch the prompt-builder at startup
+      --permission-mode MODE
+                           default, acceptEdits, plan or bypassPermissions
+                           (see Permissions below)
+      --dangerously-skip-permissions
+                           The same as --permission-mode bypassPermissions
       --export-skill [PATH]        Write a "how to use raider" markdown doc, exit
       --export-claude-skill [PATH] Write a Claude Code SKILL.md, exit
       --version            Print raider's and Langertha's version, exit
@@ -191,6 +196,8 @@ REPL slash commands:
 | `/skill [PATH]`        | Export the plain-markdown how-to-use doc            |
 | `/skill-claude [PATH]` | Export a Claude Code `SKILL.md` with frontmatter    |
 | `/config`              | Show each setting and where it came from            |
+| `/permissions`         | Permission mode, rules with their sources, session rules |
+| `/permissions mode M`  | Switch the permission mode                          |
 | `/model [NAME]`        | Show or save the model for the next run             |
 | `/model list [FILTER]` | List models reported by the active engine           |
 | `/packs`               | List available packs and whether they are active    |
@@ -518,10 +525,43 @@ text, [message_thread_id])` (bound to the chat of a Telegram mission, where only
 
 `raider config explain` says whether the Perl tools are mounted and why;
 `--export-skill` writes the current tool list as a table. You can add MCP tools
-from Perl (see [Using the engine from Perl](#using-the-engine-from-perl)). A
-fine-grained permission/policy layer over these tools is on the
-[roadmap](#roadmap--planned); today the file-tool confinement above is the only
-boundary.
+from Perl (see [Using the engine from Perl](#using-the-engine-from-perl)).
+
+### Permissions
+
+Every tool call passes a permission policy, as in Claude Code (ADR 0021). The
+**mode** decides what runs without a rule:
+
+- `default` — reading runs; writing files, `bash`, the network and messages ask.
+- `acceptEdits` — also writes and edits files in the project and the additional
+  directories; `bash` still asks.
+- `plan` — read and plan only: writing, `bash` and messages are refused, even with an
+  allow rule, until the model presents its plan with `exit_plan_mode` and you accept it.
+- `bypassPermissions` — everything runs, except what a deny rule names (Claude Code
+  skips deny rules here; raider does not).
+
+The mode is `--permission-mode MODE` (or `--dangerously-skip-permissions`), else
+`permissions.default_mode` of the config files, else `defaultMode` of the Claude
+settings, else `default`. **Rules** in Claude Code syntax come from the Claude
+settings and from `.raider/config.yml` / `~/.raider/config.yml`:
+
+```yaml
+permissions:
+  allow: [ "Bash(npm run test:*)", "Edit(src/**)" ]
+  ask:   [ "WebFetch" ]
+  deny:  [ "Read(./.env)", "Bash(git push:*)" ]
+  default_mode: acceptEdits
+  additional_directories: [ ../docs ]
+```
+
+Deny wins over ask over allow, whatever file a rule is in. An allow rule covers a shell
+command only when every part of it (`&&`, `;`, `|`, ...) is covered and it has no `$(...)`
+or redirection into a file; `glob` and `grep` leave out files a `Read` deny rule names.
+In the REPL a call that asks is put to you: yes once, yes for this session (the rule it
+adds is shown), or no with a reason for the model. **With nobody to ask — a one-shot
+run, `--json`, the Hall, ACP — such a call is refused**, and the model is told which
+rule or mode would allow it. `raider config explain` and `/permissions` show the mode,
+the rules and their sources.
 
 ### Perl-native tools
 
@@ -585,8 +625,8 @@ raider reads a project the way it was set up (ADR 0019):
   nested `CLAUDE.md` below the working directory the first time a tool touches that
   subtree. `~/.claude/settings.json`, `.claude/settings.json` and
   `.claude/settings.local.json` are merged: `env` is applied to the tools,
-  `enabledPlugins` selects plugin skills, `permissions` and `hooks` are read (not
-  enforced yet).
+  `enabledPlugins` selects plugin skills, `permissions` apply (see
+  [Permissions](#permissions)), `hooks` are read (not run yet).
   There is no raider persona in this mode: the instructions are a neutral base
   text plus the memory, and no pack is on by default (`--pack` still works).
 - **neither** — raider-native, as before.
@@ -831,8 +871,9 @@ vocabulary live in [`CONTEXT.md`](CONTEXT.md); it lands in small vertical slices
 - **Permissions & policy** (ADR 0005) — one active tool set with real capability
   grants, `raider policy check` / `raider tools explain`, approvals tied to the
   exact call, a "headless never allows all" rule, and a home-service `project_tools`
-  mapping. *Today: filesystem tools confined to `--root`; `bash` starts there but is
-  unrestricted.*
+  mapping. *Today: permission modes and rules like Claude Code, approvals of the
+  exact call in the REPL (ADR 0021), filesystem tools confined to `--root` and the
+  additional directories.*
 - **Provider discovery** (ADR 0007) — `raider --provider host.tld` and
   `raider provider add` on top of the declarative `.well-known/langertha.json`
   manifest, with a local credential binding and alias. *Today: `raider provider

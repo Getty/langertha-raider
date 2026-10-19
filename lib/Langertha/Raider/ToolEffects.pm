@@ -50,6 +50,10 @@ C<raider_ask_user>: it puts a question to a person.
 
 C<skill> is C<read>: it returns a skill file from the local skill directories.
 
+C<exit_plan_mode> has no effect class: it hands a plan to the person and
+may switch the permission mode of the run (ADR 0021), which changes nothing
+outside it.
+
 =cut
 
 my %EFFECTS = (
@@ -63,6 +67,7 @@ my %EFFECTS = (
   # run state
   todo_write             => [],
   ask_user               => [qw( message )],
+  exit_plan_mode         => [],
   # skills
   skill                  => [qw( read )],
   # shell

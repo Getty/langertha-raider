@@ -21,8 +21,15 @@ Revision history for Langertha-Raider
       scenarios cover write_file, read_file/edit_file, bash, a path leaving the
       root and an unknown tool, plus list_files, a failed edit, schema-invalid
       arguments, a failing bash command and a conversation across two prompts
-      (`prompts:`, `requests:` in the scenario format). The approval scenario
-      is skipped until policy/executor exist.
+      (`prompts:`, `requests:` in the scenario format).
+    - Permission scenarios (t/scenarios/11, 60 to 81): each mode, deny before
+      allow, Bash prefixes and chains, Edit and Read globs with ../, WebFetch
+      domains, home config and settings layers, default modes, the REPL's
+      once / session / no, plan mode with exit_plan_mode, additional
+      directories and hidden search results. The scenario format gained
+      `permission_mode:` (default bypassPermissions: the tool scenarios test
+      tools, not approvals), `approve:`, `review:` and the expectations
+      `permissions:` and `plans:`. Unit tests t/150 to t/154.
     - Scenarios for glob, grep, todo_write, ask_user and the loadguard gate
       (t/scenarios/12 to 22); the format gained `age:`, `proc:` (a fake /proc,
       Test::Raider::FakeProc -- the tests never create load), `env:`, `ask:`
@@ -133,8 +140,9 @@ Revision history for Langertha-Raider
     - The Claude settings are read too (~/.claude/settings.json,
       .claude/settings.json, .claude/settings.local.json): their env is set
       for the tools and their subprocesses, enabledPlugins picks the
-      installed Claude Code plugins whose skills are offered; permissions and
-      hooks are only read and shown, not applied yet. A broken settings file
+      installed Claude Code plugins whose skills are offered; their
+      permissions apply (see [Permissions]); hooks are only read and shown,
+      not run yet. A broken settings file
       is reported, never fatal; config explain lists the files, rule counts,
       env names (never values), hook events and unused keys.
     - Changed: --claude is now the switch for the Claude layout (also in a
@@ -180,6 +188,64 @@ Revision history for Langertha-Raider
       only once a matching file is touched. Both are announced in a
       second system-reminder block of that tool result. In the Claude layout
       the skill tool is always mounted.
+
+  [Permissions]
+    - INCOMPATIBLE: every tool call of raider now passes a permission policy
+      (ADR 0021), and in the default mode a run nobody can approve -- a
+      one-shot `raider "..."`, --json and the --stream-* flags, a Hall
+      raider, ACP -- refuses writing files, bash, the network and messages
+      unless a rule allows them. The model gets the reason, the rule that
+      would allow the call and where to put it. Remedy: allow rules in
+      .raider/config.yml (`permissions: { allow: [...] }`) or
+      .claude/settings.json, `permissions.default_mode` /
+      `defaultMode`, --permission-mode acceptEdits|bypassPermissions or
+      --dangerously-skip-permissions, or `permission_mode` on a hall raider.
+      Langertha::Raider used as a library is unchanged: without a gate every
+      call runs.
+    - Permission modes like Claude Code: default (reading runs; writing,
+      code, network and messages ask), acceptEdits (also writes inside the
+      project and the additional directories), plan (read only; writing,
+      bash and messages are refused until the plan is accepted) and
+      bypassPermissions (everything runs -- except what a deny rule names,
+      unlike Claude Code). New options --permission-mode MODE and
+      --dangerously-skip-permissions. The mode comes from the flag, else
+      permissions.default_mode of .raider/config.yml / ~/.raider/config.yml,
+      else defaultMode of the Claude settings, else default.
+    - Permission rules in Claude Code syntax from the Claude settings and
+      from the new `permissions:` key of .raider/config.yml and
+      ~/.raider/config.yml (allow, ask, deny, default_mode,
+      additional_directories): Tool, Bash(cmd), Bash(prefix:*), Bash with *
+      globs, Read(path) / Edit(path) with gitignore-style globs (//abs, ~/,
+      relative to the project), WebFetch(domain:host), Agent(name),
+      Skill(name), mcp__server[__tool]. Deny before ask before allow across
+      all sources. An allow rule covers a shell command only when every part
+      of it (&&, ||, ;, |, newlines) is covered and it has no substitution or
+      redirection into a file; ../ and symbolic links do not get around a
+      path rule. Invalid rules are ignored and shown.
+    - The REPL asks before a call the policy asks about: yes once (an
+      approval of exactly that call), yes for this session (the rule it
+      adds is shown first) or no with an optional reason for the model.
+      The prompt builder asks the same way. /permissions shows the mode,
+      every rule with its source and the session rules; /permissions mode
+      NAME switches the mode. /reload reads the rules again and keeps the
+      session's.
+    - Plan mode: the new exit_plan_mode tool (after Claude Code's
+      ExitPlanMode) presents the plan; accepted in the REPL the mode becomes
+      default, refused the model gets the feedback, and with nobody to ask
+      it gives the plan as its answer.
+    - Additional directories (additionalDirectories / additional_directories)
+      can be read, searched and, as the mode allows, written by the file and
+      search tools. build_file_tools_server takes `extra_roots`.
+    - glob and grep leave out the files a Read deny or ask rule names and say
+      how many ("N paths hidden by permission rules"); a search inside such
+      a directory is refused.
+    - Events permission.asked, permission.granted, permission.denied and
+      permission.mode, recorded in the session journal and in --stream-json.
+      config explain has a permissions section (mode and source, rules per
+      kind and source, invalid rules and mode names, additional
+      directories).
+    - Hall: a raider entry may set permission_mode, passed as
+      --permission-mode.
 
   [CLI and REPL]
     - bin/raider is a thin wrapper around internal

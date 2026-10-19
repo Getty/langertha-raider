@@ -199,6 +199,8 @@ and raider warns about the other.
 | `/skill [PATH]`          | Export plain-markdown how-to-use doc                 |
 | `/skill-claude [PATH]`   | Export Claude Code SKILL.md with YAML frontmatter    |
 | `/config`                | Show each setting and where it came from             |
+| `/permissions`           | Permission mode, rules and session rules             |
+| `/permissions mode MODE` | Switch the permission mode                           |
 | `/model [NAME]`          | Save NAME as model to the config file (next start)   |
 | `/model list [FILTER]`   | List the engine's models                             |
 | `/packs`                 | List the packs and which are active                  |

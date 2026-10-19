@@ -161,7 +161,8 @@ legacy F<.raider.md> beside F<.raider/instructions.md>); the layout mode
 each memory file with its scope and imports; each pack with its state, the
 kind of place it was found in (C<project>, C<home>, C<shipped>, C<env>)
 and why it is on or off; the pack directories that were skipped, and why; the perl tools grant; and
-each mounted tool with its source and effect classes (C<unknown> for a tool
+each mounted tool with its source and effect classes; the permission policy
+(L</permissions_report>) (C<unknown> for a tool
 the built-in table does not know); each skill with its state (C<listed>,
 or C<hidden> for C<disable-model-invocation>) and root, the shadowed skills
 and the broken skill files; in the Claude layout the settings -- each file
@@ -239,6 +240,7 @@ sub config_report {
         $self->c(meta => !$fx ? 'unknown' : @$fx ? join(', ', @$fx) : 'none')));
     }
   }
+  $self->permissions_report($report->{permissions}) if $report->{permissions};
   if (my $skills = $report->{skills}) {
     $self->emit($self->c(meta => 'skills: '), $self->c(meta => '(listed in the prompt, loaded by the skill tool)'), "\n")
       if @$skills || @{ $report->{shadowed_skills} // [] } || @{ $report->{skill_problems} // [] };
@@ -308,6 +310,47 @@ sub config_report {
         @{ $t->{granted_by} } ? 'granted by '.join(', ', @{ $t->{granted_by} }) : 'not granted',
         $self->c(meta => '('.join('; ', @about).')')));
     }
+  }
+  return;
+}
+
+=method permissions_report
+
+    $out->permissions_report( $app->permissions->report );
+
+Prints the permission policy (L<Langertha::Raider::Permissions/report>):
+the mode and where it came from, ignored mode names, per kind the number of
+rules by source (with C<rules =E<gt> 1> each rule), the invalid rules and
+the additional directories. Part of L</config_report>; the REPL's
+C</permissions> prints it with every rule.
+
+=cut
+
+sub permissions_report {
+  my ( $self, $p, %o ) = @_;
+  $self->emit($self->c(meta => 'permissions: '), 'mode ', $self->c(title => $p->{mode}),
+    $self->c(meta => ' (from '.$p->{mode_source}.')'), "\n");
+  for my $m (@{ $p->{ignored_modes} }) {
+    $self->emit('  ', $self->c(warn => 'ignored mode '.$m->{value}.' ('.$m->{source}.'): '.$m->{reason}), "\n");
+  }
+  for my $kind (qw( deny ask allow )) {
+    my $rules = $p->{rules}{$kind};
+    if ($o{rules}) {
+      $self->emit(sprintf("  %s %s  %s\n", $self->c(title => sprintf('%-6s', $kind)), $_->{rule},
+        $self->c(meta => '('.$_->{source}.')'))) for @$rules;
+      next;
+    }
+    next unless @$rules;
+    my ( %count, @order );
+    for my $r (@$rules) { push @order, $r->{source} unless $count{ $r->{source} }++ }
+    $self->emit(sprintf("  %s %d  %s\n", $self->c(title => sprintf('%-6s', $kind)), scalar @$rules,
+      $self->c(meta => '('.join(', ', map { $_.' '.$count{$_} } @order).')')));
+  }
+  for my $r (@{ $p->{invalid_rules} }) {
+    $self->emit('  ', $self->c(warn => 'ignored '.$r->{kind}.' rule '.$r->{rule}.' ('.$r->{source}.'): '.$r->{error}), "\n");
+  }
+  for my $d (@{ $p->{additional_directories} }) {
+    $self->emit('  ', $self->c(meta => 'additional directory '), $d->{path}, $self->c(meta => ' ('.$d->{source}.')'), "\n");
   }
   return;
 }

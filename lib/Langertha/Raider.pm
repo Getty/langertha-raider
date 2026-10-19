@@ -747,7 +747,9 @@ has _tools_dirty => (
 # or { verdict => 'ask', reason => ... }. Without a gate every call runs.
 # Read-only and constructor-only on purpose: nothing a raid carries -- model
 # output, a plugin, a manifest -- sets or changes it (ADR 0005: permissions
-# never come from prompts). Internal (ADR 0017); no policy format yet.
+# never come from prompts). Internal (ADR 0017). The application sets it from
+# its Langertha::Raider::Permissions (ADR 0021); the gate may block while it
+# asks a person, and answers ask only when nobody can be asked.
 has _tool_gate => (
   is => 'ro',
   isa => 'CodeRef',
@@ -2180,16 +2182,18 @@ sub _gate_tool_call {
   return $verdict;
 }
 
-# The error result for a call the gate did not allow. ask is refused like
-# deny for now: no surface can ask for an approval yet (k121, provisional
-# until the approval step lands).
+# The error result for a call the gate did not allow. A gate that can ask
+# a person does so itself and answers allow or deny (the application,
+# ADR 0021); an ask that reaches the raider found nobody to approve it, and
+# is refused like deny.
 sub _gate_refused_tool_result {
   my ( $self, $name, $verdict ) = @_;
   my $reason = $verdict->{reason};
   my $has_reason = defined $reason && length $reason;
   my $text = $verdict->{verdict} eq 'ask'
     ? "Tool call '".$name."' was not run: it needs approval"
-      .( $has_reason ? ' ('.$reason.')' : '' ).', and this raid has no way to ask for it.'
+      .( $has_reason ? ' ('.$reason.')' : '' ).', and nobody can approve it in this raid.'
+      .' Do not retry the same call; go on without it or say what you need.'
     : $has_reason
       ? "Tool call '".$name."' was denied: ".$reason
       : "Tool call '".$name."' was denied by policy.";

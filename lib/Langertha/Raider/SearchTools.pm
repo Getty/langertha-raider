@@ -97,6 +97,46 @@ has max_file_size => (
   default => 10 * 1024 * 1024,
 );
 
+has extra_roots => (
+  is      => 'ro',
+  isa     => 'ArrayRef[Str]',
+  default => sub { [] },
+);
+
+=attr extra_roots
+
+More directories a C<path> may name besides L</root> (the additional
+directories of ADR 0021). Results inside them are shown as absolute paths.
+One that does not exist is left out.
+
+=cut
+
+has hider => (
+  is  => 'ro',
+  isa => 'CodeRef',
+);
+
+=attr hider
+
+Called without arguments at the start of every call. Returns undef, or code
+that is called with the real absolute path of each file a call would list
+or search and returns true for a file to leave out -- the application hides
+the files a permission rule refuses or asks about reading (ADR 0021). The
+result then ends with C<(N paths hidden by permission rules)>. While a
+hider is in force C<grep> runs the Perl code, which applies it file by file.
+
+=cut
+
+has _hide => ( is => 'rw', init_arg => undef );
+has _hidden => ( is => 'rw', default => 0, init_arg => undef );
+
+has _real_extra_roots => ( is => 'ro', lazy => 1, builder => '_build__real_extra_roots', init_arg => undef );
+
+sub _build__real_extra_roots {
+  my ( $self ) = @_;
+  return [ grep { defined && -d } map { realpath($_) } @{ $self->extra_roots } ];
+}
+
 has real_root => (
   is       => 'ro',
   lazy     => 1,
@@ -193,16 +233,35 @@ sub _resolve {
   my $abs  = path($path)->is_absolute ? path($path) : path($root)->child($path);
   my $real = realpath("$abs");
   croak 'no such path: '.$path unless defined $real && -e $real;
-  croak 'path escapes root: '.$path unless $real eq $root || index( $real, $root.'/' ) == 0;
+  croak 'path escapes root: '.$path
+    unless grep { $real eq $_ || index( $real, $_.'/' ) == 0 } $root, @{ $self->_real_extra_roots };
   return $real;
 }
 
-# $abs below the root, as the path the results show.
+# $abs as the path the results show: relative below the root, else absolute
+# (an additional directory).
 sub _shown {
   my ( $self, $abs ) = @_;
   my $root = $self->real_root;
   return '.' if $abs eq $root;
+  return $abs unless index( $abs, $root.'/' ) == 0;
   return substr( $abs, length($root) + 1 );
+}
+
+# Starts a call: the hider in force for it, no file hidden yet.
+sub _begin_call {
+  my ( $self ) = @_;
+  $self->_hide( $self->hider ? $self->hider->() : undef );
+  $self->_hidden(0);
+  return;
+}
+
+# The text of a call with the note on hidden files.
+sub _with_hidden {
+  my ( $self, $text ) = @_;
+  my $n = $self->_hidden;
+  return $text unless $n;
+  return $text."\n\n(".$n.' path'.( $n == 1 ? '' : 's' ).' hidden by permission rules)';
 }
 
 # The message of a croak, without " at FILE line N."
@@ -315,7 +374,13 @@ sub _candidates {
     return [ [ $dir, $st[9] ] ];
   }
   my $skip = length($dir) + 1;
-  return [ grep { !$filter || $filter->( substr( $_->[0], $skip ) ) } @{ $self->_walk($dir) } ];
+  my @files = grep { !$filter || $filter->( substr( $_->[0], $skip ) ) } @{ $self->_walk($dir) };
+  if ( my $hide = $self->_hide ) {
+    my $before = @files;
+    @files = grep { !$hide->( $_->[0] ) } @files;
+    $self->_hidden( $self->_hidden + $before - @files );
+  }
+  return \@files;
 }
 
 # Newest first, ties by path.
@@ -333,11 +398,18 @@ matches C<pattern>, one per line, newest modification time first, as paths
 relative to L</root>. At most L</default_limit> are listed; the text says
 so when there are more. Croaks on a missing pattern, a pattern that
 leaves the search directory, and a C<path> that does not exist, is not a
-directory or leaves the root.
+directory or leaves the root (and the L</extra_roots>). Files the
+L</hider> hides are not listed; the text then ends with how many.
 
 =cut
 
 sub glob {
+  my ( $self, $in ) = @_;
+  $self->_begin_call;
+  return $self->_with_hidden( $self->_glob($in) );
+}
+
+sub _glob {
   my ( $self, $in ) = @_;
   my $glob = $self->_glob_pattern( $in->{pattern} );
   my $dir  = $self->_resolve( $in->{path} );
@@ -410,16 +482,23 @@ other separated by C<-->. C<head_limit> (default L</default_limit>, C<0>
 for no limit) and C<offset> cut the lines of the output, and the text says
 when it was cut. Lines over 2000 characters are shortened. Croaks on an
 invalid option or pattern and a C<path> that does not exist or leaves the
-root; a search without a match returns C<No matches found>.
+root; a search without a match returns C<No matches found>. Files the
+L</hider> hides are not searched; the text then ends with how many.
 
 =cut
 
 sub grep {
   my ( $self, $in ) = @_;
+  $self->_begin_call;
+  return $self->_with_hidden( $self->_grep($in) );
+}
+
+sub _grep {
+  my ( $self, $in ) = @_;
   my $o   = $self->_grep_options($in);
   my $dir = $self->_resolve( $in->{path} );
   my @lines =
-    $self->rg && !( $o->{type} && defined $o->{glob} )
+    $self->rg && !( $o->{type} && defined $o->{glob} ) && !$self->_hide
     ? $self->_grep_rg( $o, $dir )
     : $self->_grep_perl( $o, $dir );
   return 'No matches found' unless @lines;
@@ -447,7 +526,7 @@ sub _files_by_mtime {
   my ( $self, @paths ) = @_;
   my $root = $self->real_root;
   return map { $self->_shown( $_->[0] ) } $self->_by_mtime(
-    map { my $abs = $root.'/'.$_; [ $abs, ( stat $abs )[9] // 0 ] } @paths
+    map { my $abs = m{\A/} ? $_ : $root.'/'.$_; [ $abs, ( stat $abs )[9] // 0 ] } @paths
   );
 }
 

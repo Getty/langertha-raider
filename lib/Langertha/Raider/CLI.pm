@@ -169,6 +169,8 @@ sub source_labels {
     mission                => '-M',
     claude                 => '--claude',
     cli_skill_sources      => '--openai/--skills',
+    permission_mode        => '--permission-mode',
+    skip_permissions       => '--dangerously-skip-permissions',
   };
 }
 

@@ -31,7 +31,7 @@ close $probe;
 
 my $root = Path::Tiny->tempdir;
 $root->child('.raider-hall.yml')->spew_utf8( YAML::PP->new->dump_string({
-  raiders => { Testie => { engine => 'mock', packs => [], mcp => [], isolated => 0 } },
+  raiders => { Testie => { engine => 'mock', packs => [], mcp => [], isolated => 0, permission_mode => 'acceptEdits' } },
   acp     => { port => $port, host => '127.0.0.1' },
 }));
 $root->child('rules.yml')->spew_utf8(<<'YAML');

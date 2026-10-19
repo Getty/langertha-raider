@@ -20,14 +20,17 @@ C<edit_file(path, old_string, new_string)>, confined to one directory.
 =func build_file_tools_server
 
     my $server = Langertha::Raider::FileTools::build_file_tools_server(
-        root => '/some/dir',  # optional confinement root
+        root        => '/some/dir',     # optional confinement root
+        extra_roots => [ '/other/dir' ], # optional: more directories allowed
     );
 
 Returns an L<MCP::Server> instance with the tools C<list_files>, C<read_file>,
 C<write_file>, and C<edit_file> registered. When C<root> is set, all path
-arguments are confined to that directory. Existing paths and nearest existing
-parents are resolved with C<realpath>, so symlinks cannot be used to escape the
-root.
+arguments are confined to that directory and the C<extra_roots> (the
+additional directories of ADR 0021); relative paths are read against
+C<root>. Existing paths and nearest existing parents are resolved with
+C<realpath>, so symlinks cannot be used to escape them. An extra root that
+does not exist is left out.
 
 =cut
 
@@ -37,11 +40,13 @@ sub build_file_tools_server {
   my $root_realpath = $root ? realpath($root) : undef;
   die "Root does not exist: $root\n" if $root && !defined $root_realpath;
   my $real_root = $root ? path($root_realpath)->absolute : undef;
+  my @real_roots = $real_root ? ( $real_root,
+    map { path($_)->absolute } grep { defined } map { realpath($_) } @{ $args{extra_roots} // [] } ) : ();
 
   my $assert_in_root = sub {
     my ($p) = @_;
     return unless $real_root;
-    die "Path escapes root: $p\n" unless $real_root->subsumes($p);
+    die "Path escapes root: $p\n" unless grep { $_->subsumes($p) } @real_roots;
     return;
   };
 

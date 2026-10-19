@@ -20,7 +20,9 @@ B<Internal module.> Its interface may change without notice.
 
 The slash commands of the F<raider> REPL (C</help>, C</clear>, C</metrics>,
 C</stats>, C</reload>, C</prompt>, C</skill>, C</skill-claude>, C</config>,
-C</model>, C</packs>, C</pack>). Each command C</name> is the method
+C</permissions>, C</model>, C</packs>, C</pack>). C</permissions> prints the
+permission mode with its source and every rule with its source, session
+rules included (ADR 0021); C</permissions mode MODE> switches the mode. Each command C</name> is the method
 C<cmd_name> (dashes become underscores) and gets the rest of the line as
 its argument. Leaving the REPL (C</quit>) is the REPL's business.
 
@@ -93,6 +95,8 @@ sub cmd_help {
     '  /skill [PATH]         export plain-markdown skill doc',
     '  /skill-claude [PATH]  export Claude Code SKILL.md with frontmatter',
     '  /config               show each setting and where it came from',
+    '  /permissions          show the permission mode, rules and session rules',
+    '  /permissions mode M   switch the mode: default, acceptEdits, plan, bypassPermissions',
     '  /model [NAME]         set+save model to the config file',
     '  /model list [FILTER]  list available models (optionally filtered)',
     '  /packs                list all available packs and their state',
@@ -158,6 +162,25 @@ sub cmd_reload {
   $self->output->say_meta('context reloaded: layout '.$context->mode.', '
     .scalar(@memory).' instruction file'.( @memory == 1 ? '' : 's').', '
     .scalar(@skills).' listed skill'.( @skills == 1 ? '' : 's'));
+  return;
+}
+
+sub cmd_permissions {
+  my ($self, $arg) = @_;
+  my $app = $self->app;
+  my $out = $self->output;
+  $arg //= '';
+  if ($arg =~ /\Amode(?:\s+(\S+))?\s*\z/) {
+    my $mode = $1;
+    my @modes = $app->permissions_class->modes;
+    return $out->say_error('usage: /permissions mode MODE ('.join(', ', @modes).')')
+      unless defined $mode && $app->permissions_class->is_mode($mode);
+    my $from = $app->set_permission_mode($mode, '/permissions');
+    $out->say_meta('permission mode: '.$from.' -> '.$mode);
+    return;
+  }
+  return $out->say_error('usage: /permissions [mode MODE]') if length $arg;
+  $out->permissions_report($app->permissions->report, rules => 1);
   return;
 }
 
