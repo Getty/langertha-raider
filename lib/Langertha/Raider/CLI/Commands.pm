@@ -89,7 +89,7 @@ sub cmd_help {
     '  /help                 show this help',
     '  /clear                reset conversation history',
     '  /metrics              show cumulative raid metrics',
-    '  /stats                show token usage (when trace is on)',
+    '  /stats                show token usage per model (cache included)',
     '  /reload               reload instructions, memory, settings and skills; re-detect packs',
     '  /prompt               launch the prompt-builder (edits the instructions file)',
     '  /skill [PATH]         export plain-markdown skill doc',
@@ -133,14 +133,20 @@ sub cmd_metrics {
 
 sub cmd_stats {
   my ($self) = @_;
-  my $s = $self->app->token_stats;
-  return $self->output->say_meta('stats unavailable (trace is off — start without --no-trace).')
-    unless $s;
-  $self->output->say_meta(sprintf(
-    'llm calls: %d | tokens in: %d | out: %d | total: %d',
-    $s->{calls}, $s->{prompt}, $s->{completion}, $s->{total},
-  ));
+  my $u = $self->app->usage_stats;
+  return $self->output->say_meta('no model calls yet.') unless $u->{calls};
+  my $out = $self->output;
+  $out->say_meta($self->_usage_line('total', $u));
+  my $models = $u->{models};
+  $out->say_meta($self->_usage_line('  '.$_, $models->{$_})) for sort keys %$models;
   return;
+}
+
+# "NAME: 1200 in / 80 out (cache 1000 read, 0 written) | 3 calls" (ADR 0026).
+sub _usage_line {
+  my ( $self, $name, $u ) = @_;
+  return sprintf('%s: %d in / %d out (cache %d read, %d written) | %d calls',
+    $name, @$u{qw( input_tokens output_tokens cache_read_tokens cache_write_tokens calls )});
 }
 
 sub cmd_reload {

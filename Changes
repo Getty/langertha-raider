@@ -183,6 +183,12 @@ Revision history for Langertha-Raider
     - web_search takes allowed_domains and blocked_domains (subdomains
       included): the results are filtered, site: / -site: go into the query,
       both at once is an error.
+    - Token statistics like Claude Code's /cost: every model call of every
+      raider (the main one, subagents) and web_fetch's prompt is a
+      model.usage event (input, output, cache read/write tokens, model);
+      the application keeps them per model. /stats shows the total and one
+      line per model (also with --no-trace), the metrics of a run gain
+      "usage". Tests t/240-t/244, scenarios 170-174; ADR 0026 addendum.
     - read_file: a read over 25000 tokens (bytes / 4) is refused as in
       Claude Code; pages ("1-5", at most 20) reads PDF pages as text
       through pdftotext (poppler, looked up on PATH; a PDF of more than 10

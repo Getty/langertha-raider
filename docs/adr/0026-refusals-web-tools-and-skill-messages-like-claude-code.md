@@ -200,11 +200,43 @@ no example), and nothing is searched.
 
 ## Follow-ups
 
-- `model.usage` in the raider's metrics and in `/stats` (Trace plugin).
+- ~~`model.usage` in the raider's metrics and in `/stats`~~ — done, see the addendum.
 - The skill message after compaction *between* raids: Claude Code re-attaches invoked
   skills after a compaction; raider's summary may shorten them.
-- A hook's deny (PreToolUse) is still worded by the raider ("Tool call 'X' was denied:
-  PreToolUse hook: …"); Claude Code hands the hook's reason through as it stands.
+- ~~A hook's deny (PreToolUse) is still worded by the raider~~ Done in karr #163 (ADR 0022
+  addendum). Also done there: "unknown tool X" for a tool that is not (or no longer, after
+  `/reload` or a mode change) offered is now `<tool_use_error>Error: No such tool available:
+  X</tool_use_error>`, with ` Tool names are case-sensitive: call Y instead.` when a tool Y
+  differs only in case (both from the local session logs). Claude Code's logs also show
+  harness-specific sentences ("Bash is disabled for this session", "… is not among the tools
+  available here") that raider does not reproduce.
+
+## Addendum: the token ledger (karr #163)
+
+Claude Code's `/cost` and `/stats` show input, output and cache tokens per model, counting
+every call a session makes. Raider now does the same.
+
+- **One ledger on the application**, not in the Trace plugin. The Trace plugin is the
+  REPL's live display and absent with `--no-trace`, one-shot and Hall runs; it also sees
+  only the main raider. `Application->note_usage` / `usage_stats` keep, per model,
+  `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens` and `calls`,
+  cumulative over the application's life (`/clear` does not reset it: the tokens are spent).
+- **Fed by `model.usage` events.** `Plugin::Events` reports one per model call of every
+  raider (`purpose` `chat`; `cache_*` only when the provider reports them), `web_fetch`
+  keeps its own (`purpose` `web_fetch`). `run_plugins` wraps the event consumer, so the
+  main raider and every subagent (whose events otherwise reach only their own journal)
+  reach the ledger the same way; `web_fetch` calls `note_usage` itself. Subagent calls are
+  thus included without the subagent code knowing.
+- **Cache counts are part of `input_tokens`** as `Langertha::Usage` reports them (the
+  event carries what the engine said); they are shown beside the input, never added.
+- **Where it shows.** `/stats` prints the total and one line per model. The metrics of a
+  completed run (`run_prompt`'s `metrics`, `run.finished`, `--json`) gain `usage` (the
+  ledger, with `models`) — additive, no version change (ADR 0013). `model.usage` is now
+  also in `--stream-json`.
+- Not counted: the compaction summary call (`compression_engine`) is made inside the
+  raider without a plugin hook; a resumed session starts with an empty ledger (its journal
+  holds the events to rebuild it from).
+- Tests: t/240–t/244; scenarios 170–174.
 
 ## Source
 

@@ -1996,6 +1996,15 @@ has _live_subagents => (
   default  => sub { {} },
 );
 
+# The token ledger (ADR 0026): model => { input_tokens, output_tokens,
+# cache_read_tokens, cache_write_tokens, calls }.
+my @USAGE_FIELDS = qw( input_tokens output_tokens cache_read_tokens cache_write_tokens );
+has _usage => (
+  is       => 'ro',
+  init_arg => undef,
+  default  => sub { {} },
+);
+
 # The id of the last tool.call of the main run (c1, c2, ...): the agent
 # call that is running, since tool calls run one after another.
 has _current_call => (
@@ -2015,12 +2024,16 @@ sub _web_fetch_answer_f {
     my ($response) = @_;
     if ($app && blessed $response && $response->can('has_usage') && $response->has_usage) {
       my $usage = $response->usage;
-      $app->event('model.usage',
+      my %usage = (
         purpose       => 'web_fetch',
         model         => ( $response->can('model') && defined $response->model ? $response->model : $engine->chat_model ),
         input_tokens  => $usage->input_tokens,
         output_tokens => $usage->output_tokens,
+        defined $usage->cached_tokens      ? ( cache_read_tokens  => $usage->cached_tokens )      : (),
+        defined $usage->cache_write_tokens ? ( cache_write_tokens => $usage->cache_write_tokens ) : (),
       );
+      $app->note_usage(%usage);
+      $app->event('model.usage', %usage);
     }
     return Future->done("$response");
   });
@@ -2304,6 +2317,50 @@ sub _raider_plugins {
   return $self->run_plugins(sub { $app->event(@_) if $app });
 }
 
+=method note_usage
+
+    $app->note_usage(model => 'claude-haiku-4-5', input_tokens => 1200,
+      output_tokens => 80, cache_read_tokens => 1000);
+
+Adds one model call to the token ledger of the application (ADR 0026):
+cumulative, per model, over every raider of it -- the main one, its
+subagents and a tool's own model calls. C<cache_read_tokens> and
+C<cache_write_tokens> are part of C<input_tokens> as the engine reports
+them. The C<model.usage> events of every raider's
+L<Langertha::Raider::Plugin::Events> and of C<web_fetch> reach it; a
+surface does not need to call it.
+
+=cut
+
+sub note_usage {
+  my ( $self, %p ) = @_;
+  my $model = defined $p{model} && length $p{model} ? $p{model} : 'unknown';
+  my $m = $self->_usage->{$model} //= { map { $_ => 0 } @USAGE_FIELDS, 'calls' };
+  $m->{$_} += $p{$_} // 0 for @USAGE_FIELDS;
+  $m->{calls}++;
+  return;
+}
+
+=method usage_stats
+
+    my $u = $app->usage_stats;
+    # { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+    #   calls, models => { $model => { same keys } } }
+
+The token ledger (L</note_usage>) as a copy: the totals and the same counts
+per model; zeros and no C<models> before the first model call. This is what
+C</stats> shows and the C<usage> of the metrics of a run.
+
+=cut
+
+sub usage_stats {
+  my ($self) = @_;
+  my %models = map { $_ => { %{ $self->_usage->{$_} } } } keys %{ $self->_usage };
+  my %total = map { $_ => 0 } @USAGE_FIELDS, 'calls';
+  for my $m (values %models) { $total{$_} += $m->{$_} for keys %total }
+  return { %total, models => \%models };
+}
+
 =method run_plugins
 
     my @plugins = $app->run_plugins(sub { my ( $type, %payload ) = @_; ... });
@@ -2321,6 +2378,13 @@ C<$on_event> too, and gets C<input> and C<on_stop> as L</tool_hook> does.
 
 sub run_plugins {
   my ($self, $on_event, %hook) = @_;
+  # Every raider's model calls reach the ledger, whoever consumes the events.
+  my $consumer = $on_event;
+  weaken(my $app = $self);
+  $on_event = sub {
+    $app->note_usage(@_[1 .. $#_]) if $app && $_[0] eq 'model.usage';
+    return $consumer->(@_);
+  };
   # The rule-driven test engine (-e mock) matches the prompt word for word, so
   # it gets the prompt as typed, without the [situation] line and its clock.
   my $virtual = $self->engine_resolver->engine_class eq 'Langertha::Engine::Virtual';
@@ -2507,7 +2571,7 @@ sub run_prompt {
     return { %{ $self->end_run('cancelled') }, result => $result };
   }
   $self->event('message', role => 'assistant', content => "$result");
-  my $metrics = $self->raider->metrics;
+  my $metrics = { %{ $self->raider->metrics }, usage => $self->usage_stats };
   my $end = $self->end_run(completed => metrics => $metrics);
   return { %$end, result => $result, response => "$result", metrics => $metrics };
 }

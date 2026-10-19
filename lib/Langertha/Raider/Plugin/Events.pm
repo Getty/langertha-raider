@@ -6,6 +6,7 @@ use Moose;
 use namespace::autoclean;
 use Future::AsyncAwait;
 use JSON::MaybeXS ();
+use Langertha::Usage;
 
 extends 'Langertha::Plugin';
 
@@ -49,6 +50,11 @@ C<content> (the whole text).
 C<tool.result> of a call whose result hands the raid a user message (the
 body of a skill, L<Langertha::Raider/TOOL RESULTS THAT ADD MESSAGES>).
 
+=item C<model.usage> -- after every model call of the raid that reports
+tokens: C<purpose> (C<chat>), C<model>, C<input_tokens>, C<output_tokens> and,
+when the provider reports them, C<cache_read_tokens> and
+C<cache_write_tokens> (both part of C<input_tokens>; ADR 0026).
+
 =back
 
 =cut
@@ -65,6 +71,27 @@ async sub plugin_before_raid {
   my ( $self, $messages ) = @_;
   $self->_calls(0);
   return $messages;
+}
+
+# The tokens of every model call of the raid (ADR 0026). Not reported when
+# the response carries no usage.
+async sub plugin_after_llm_response {
+  my ( $self, $data, $iteration ) = @_;
+  my $usage = Langertha::Usage->from_raw($data);
+  if ($usage) {
+    my $raider = $self->raider;
+    my $model = ref $data eq 'HASH' && defined $data->{model} && length $data->{model} ? $data->{model}
+      : $raider && $raider->engine->can('chat_model') ? $raider->engine->chat_model : undef;
+    $self->on_event->('model.usage',
+      purpose       => 'chat',
+      defined $model ? ( model => $model ) : (),
+      input_tokens  => $usage->input_tokens,
+      output_tokens => $usage->output_tokens,
+      defined $usage->cached_tokens      ? ( cache_read_tokens  => $usage->cached_tokens )      : (),
+      defined $usage->cache_write_tokens ? ( cache_write_tokens => $usage->cache_write_tokens ) : (),
+    );
+  }
+  return $data;
 }
 
 async sub plugin_before_tool_call {

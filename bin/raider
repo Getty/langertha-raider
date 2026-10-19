@@ -500,7 +500,11 @@ is reserved for when it can.
 =item C<response> -- the agent's final answer (C<completed> only).
 
 =item C<metrics> -- the raider's cumulative metrics: C<raids>,
-C<iterations>, C<tool_calls>, C<time_ms> (C<completed> only).
+C<iterations>, C<tool_calls>, C<time_ms>, and C<usage> -- the token counts of
+every model call so far, subagents and C<web_fetch> prompts included:
+C<input_tokens>, C<output_tokens>, C<cache_read_tokens>, C<cache_write_tokens>
+(both cache counts are part of the input), C<calls>, and the same per model
+under C<models> (C<completed> only; ADR 0026).
 
 =item C<error> -- the error message (C<failed> only).
 

@@ -204,7 +204,7 @@ REPL slash commands:
 | `/help`                | Command list                                        |
 | `/clear`               | Reset conversation history and token counters       |
 | `/metrics`             | Cumulative raid metrics                             |
-| `/stats`               | Tokens in / out / total (when trace is on)          |
+| `/stats`               | Tokens in / out / cache per model, subcalls included |
 | `/reload`              | Re-read instructions, memory, settings, skills; re-detect packs |
 | `/prompt`              | Launch the prompt-builder (edits the instructions)  |
 | `/skill [PATH]`        | Export the plain-markdown how-to-use doc            |

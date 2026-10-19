@@ -98,6 +98,8 @@ our @EXPORT_OK = qw( run_scenario_files );
 #     request_count: how many model requests were made in all
 #     events:      [ { type => ..., fields } ] events of the application, in order; each
 #                  is matched (as a subset) by the next event of its type
+#     usage:       { input_tokens, output_tokens, calls, ... } the token ledger
+#                  (Application->usage_stats) at the end, matched as a subset
 #     questions:   [ { question => ..., options => [...] } ] what ask_user put to the person
 #     permissions: [ { tool, rule, reason, ... } ] the calls the person was asked to approve,
 #                  each matched as a subset (rule: what "for this session" would add)
@@ -255,6 +257,7 @@ sub run_scenario_file {
         ok( $e, "event $w->{type}" ) && like( $e, $w, "event $w->{type}: fields" );
       }
     }
+    like( $app->usage_stats, $expect->{usage}, 'token ledger (usage_stats)' ) if $expect->{usage};
     is( \@questions, $expect->{questions}, 'questions put to the person' ) if $expect->{questions};
     if ( my $want = $expect->{permissions} ) {
       is( scalar @asked, scalar @$want, 'number of approvals asked for' );
