@@ -1436,7 +1436,10 @@ L</config>. Its clients lead the engine's C<mcp_servers>; L</raid_f> starts
 them (in parallel, never failing) before the first raid; the permission
 gate knows them as foreign servers. Each start that ends emits
 C<mcp.server> (C<name>, C<scope>, C<transport>, C<status> C<connected> or
-C<failed>, C<reason>, C<tools>, the number of tools). Stopped by
+C<failed>, C<reason>, C<tools>, the number of tools); so does each start
+(C<starting>) and stop (C<stopped>), and C<mcp.tools_changed> (C<name>,
+C<scope>) a server's C<tools/list_changed>. Inside a run they are in the
+session journal. Stopped by
 L</shutdown_mcp>.
 
 =method shutdown_mcp
@@ -1476,10 +1479,15 @@ sub _new_mcp {
     loop      => $self->loop,
     %more,
     # A server announced new tools: the next iteration gathers them again.
-    on_tools_changed => sub { $app->_raider->_tools_dirty(1) if $app && $app->_has_raider },
+    on_tools_changed => sub {
+      my ( $server ) = @_;
+      return unless $app;
+      $app->_raider->_tools_dirty(1) if $app->_has_raider;
+      $app->event('mcp.tools_changed', name => $server->name, scope => $server->spec->{scope});
+    },
     on_status => sub {
       my ( $server ) = @_;
-      return unless $app && $server->status =~ /\A(?:connected|failed)\z/;
+      return unless $app && $server->status =~ /\A(?:starting|connected|failed|stopped)\z/;
       $app->event('mcp.server', name => $server->name, scope => $server->spec->{scope},
         transport => $server->transport, status => $server->status, reason => $server->reason,
         tools => scalar( () = $server->tool_names ));
@@ -3394,7 +3402,7 @@ one. An empty C<$text> runs nothing and returns nothing.
 # run.finished is written by end_run.
 my %JOURNAL_TYPE = map { $_ => 1 } qw( run.started message tool.call tool.result todo.updated
   permission.asked permission.granted permission.denied permission.mode hook.ran hook.message
-  model.usage agent.started agent.finished agent.warning );
+  model.usage agent.started agent.finished agent.warning mcp.server mcp.tools_changed );
 
 =method is_journal_type
 
@@ -3405,7 +3413,8 @@ C<run.started>, C<message>, C<tool.call>, C<tool.result>, C<todo.updated>,
 the C<permission.*> events (ADR 0021), C<hook.ran> and C<hook.message> (ADR
 0022), C<agent.started> and C<agent.finished> of the subagents it starts and
 C<agent.warning> about them (ADR 0020), C<model.usage> of a tool's own
-model call (C<web_fetch>'s prompt, ADR 0026). C<run.finished> is written by
+model call (C<web_fetch>'s prompt, ADR 0026), C<mcp.server> and
+C<mcp.tools_changed> of the configured MCP servers (ADR 0029). C<run.finished> is written by
 L</end_run>.
 
 =cut

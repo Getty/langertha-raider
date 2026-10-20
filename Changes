@@ -356,7 +356,10 @@ Revision history for Langertha-Raider
       (Claude Code's ListMcpResourcesTool / ReadMcpResourceTool) are
       mounted when servers are configured, and @server:scheme://path in a
       prompt attaches the resource.
-    - Tests t/280-t/282, scenarios 210-214; the test server has a rich mode
+    - The session journal records mcp.server (starting, connected, failed,
+      stopped, with reason and tool count) and the new mcp.tools_changed;
+      a stop outside a run reaches only the event stream.
+    - Tests t/280-t/283, scenarios 210-214; the test server has a rich mode
       (prompts, resources, a tool that changes the tool list).
 
   [Status]

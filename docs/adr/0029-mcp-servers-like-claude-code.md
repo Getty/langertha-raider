@@ -326,8 +326,8 @@ against it. That is a ticket on the p5-net-async-mcp board, not a change raider 
   awaited at the start of `Application->raid_f`), each bounded by `MCP_TIMEOUT`; one that fails, hangs or exits is
   `failed` with the reason (`exited with code 3 (stderr: …)`, `did not start within 30 s
   (MCP_TIMEOUT)`, …) and never aborts the run. Each start that ends emits `mcp.server`
-  (name, scope, transport, status, reason, tools) to `on_event` — not into the journal yet:
-  its event list is being changed by the parallel stream A2 (follow-up).
+  (name, scope, transport, status, reason, tools) to `on_event` and, since Addendum 1 §7, the
+  session journal.
 - **Mounting**: the servers' clients **lead** the engine's `mcp_servers`, ahead of raider's
   own servers, so their `engine:N` stay the same whatever raider remounts
   (`_remount_tool_servers` keeps them in front); `MCP->source_servers` maps those `engine:N`
@@ -386,8 +386,7 @@ against it. That is a ticket on the p5-net-async-mcp board, not a change raider 
   connection; the others are stopped (and waited for), new ones start with the next raid. The
   front of the engine's `mcp_servers` and the policy's `source_servers` are changed in place.
 - **`mcp.server` events** reach `on_event` (and with `--stream-json` the event stream, as any
-  event of a run, ADR 0013), but not the session journal: its list of journal types is being
-  changed by the parallel stream A2. Follow-up once both are merged.
+  event of a run, ADR 0013) and the session journal (Addendum 1 §7).
 
 ## Not supported
 
@@ -414,7 +413,7 @@ resuming streams of streamable HTTP, sampling / elicitation / roots requests fro
 - Follow-ups: for `Net::Async::MCP` (its repository): fall back to the `initialize`
   handshake for servers before 2026-07-28, `Mcp-Session-Id` and the negotiated
   `MCP-Protocol-Version` in the HTTP transport, `env`/`cwd` and stderr in the stdio
-  transport — then raider could use it again. Raider: `mcp.server` into the journal;
+  transport — then raider could use it again. Raider:
   ADR 0004's trust replaces Claude Code's trust record as the decision once it exists.
 
 ## Source
@@ -553,3 +552,20 @@ Both Claude Code ways, since the documentation names both:
   `/name` command body, and subagents (they get only the tools their agent file allows, and
   `Subagent.pm` is not touched here).
 - Resource lists are cached per server and dropped on `resources/list_changed`.
+
+### 7. Journal events
+
+`mcp.server` and the new `mcp.tools_changed` are journal types (`%JOURNAL_TYPE`, as A2 added
+`agent.*`), so a session shows when a server came up and why it did not.
+
+- `mcp.server` now fires on every status that matters: `starting`, `connected`, `failed`,
+  `stopped` (fields as before: name, scope, transport, status, reason, tools). One type with a
+  `status` field, not one type per state: the existing event and its consumers stay as they are,
+  and a reader filters on one type to follow a server.
+- `mcp.tools_changed` (name, scope) when a server announced `tools/list_changed`, at the
+  moment of the announcement (the refresh runs in the background; no tool count then).
+- The journal only takes events of a run in progress (`Application->event`). Servers start in
+  the first raid, so `starting`/`connected`/`failed` land in that run; `stopped` at
+  `shutdown_mcp` or `/reload` outside a run reaches `on_event` only. Writing it with `record`
+  into some session was not chosen: the application has no single "current" session outside a
+  run.
