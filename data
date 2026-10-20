@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-10-20T22:06:43Z
+claimed_by: a3-worktrees
+class: standard
+created: 2026-10-20T20:32:21Z
+id: 168
+priority: high
+started: 2026-10-20T20:33:53Z
+status: review
+tags:
+- claude-code-flow
+title: Worktree isolation for subagents and enter_worktree/exit_worktree like Claude
+  Code
+updated: 2026-10-20T22:06:43Z
+---
+
+Strom A3: ADR 0027 §7 (Spezifikation steht) + EnterWorktree/ExitWorktree-Tools. Plan: /home/getty/dev/perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md
+
+ADR 0031 geschrieben (Worktree-Modul, Subagent-Isolation nach 0027 §7, working root, enter_worktree/exit_worktree, Aufräumen bei /clear und Sitzungsende). Abweichung vom Brief: Basis bleibt worktree.baseRef=fresh (origin/HEAD, sonst HEAD) wie Claude Code und ADR 0027 §7 — 'vom aktuellen HEAD' ist baseRef head (und greift hier ohnehin, da das Repo kein origin/HEAD hat). Effektklasse write für beide Tools laut Brief.
+
+Slice 1 (Worktree.pm + Subagent-Isolation, t/290, t/291) fertig, WIP-committed. Slice 2 (working root, enter_worktree/exit_worktree, Aufräumen) und Szenario-Harness git:true + Szenarien 220–223 laufen. Offene Folgepunkte aus Slice 1: Hintergrund-Shell eines isolierten Agenten kann das Entfernen seines Worktrees überleben; Agenten-Report zeigt isolation nicht; ADR 0017-Nachtrag könnte ::Worktree als intern listen.
+
+Fertig auf Branch a3-worktrees: ein Commit e6425be auf lokalem main f78565c (M2 und M3 enthalten). ADR 0032 (0031 von M3 belegt; Verweise umgestellt, 0025 und 0027 nachgetragen, CONTEXT.md um Working root ergänzt). Suite: Files=229, Tests=1991, PASS (3 Live-Tests geskippt). Folgepunkte siehe nächste Notiz.
+
+Folgepunkte: (1) ACP und Hall räumen Worktrees bei Sitzungsende oder neuer Unterhaltung nicht auf. (2) Ein per Signal beendeter Einmal-Lauf lässt seinen Worktree liegen. (3) Eine Hintergrund-Shell eines isolierten Agenten kann das Entfernen seines Worktrees überleben. (4) Wiedereintritt in den Worktree beim Fortsetzen einer Sitzung fehlt (Journal-Events vorhanden). (5) Keine Prüfung von bash-Befehlen auf git-Umleitungen in den Haupt-Checkout. (6) Agenten-Report zeigt isolation nicht. (7) ADR 0017-Nachtrag: Worktree und WorktreeTools als intern listen. (8) Binary ruft jetzt git zur Laufzeit auf (nichts Neues zu packen). (9) Detached HEAD eines betretenen Worktrees erscheint als Branch HEAD.
