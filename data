@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-10-20T21:13:01Z
+claimed_by: m2-worker
+class: standard
+completed: 2026-10-20T21:13:01Z
+created: 2026-10-19T13:29:07Z
+id: 167
+priority: medium
+started: 2026-10-19T13:30:03Z
+status: done
+tags:
+- claude-code-flow
+title: 'MCP follow-ups: .mcp.json from parent directories, list_changed, resources
+  and prompts, output limit, journal events'
+updated: 2026-10-20T21:13:01Z
+---
+
+Strom M2: Folgepunkte aus #164.
+
+2026-10-19 13:38 Teil 2 fertig: tools/list_changed (Server->_refresh_tools, Application markiert Tools dirty), MAX_MCP_OUTPUT_TOKENS (25000, Kuerzung mit Hinweis, Fehlertext Mitte), t/281. Weiter mit Teil 3.
+
+2026-10-19 14:04 Teil 3 fertig (M2 Punkte 1-3): Prompts als /mcp__server__prompt, Resources-Tools list_mcp_resources/read_mcp_resource + @server:uri, ADR 0029 Addendum 1, Changes, t/280-282, Szenarien 210-214; Suite 210 Dateien/1811 Tests gruen, 3 skipped (live). NICHT gemacht: Punkt 4 (Journal-Events), 5 (verify-binary). Karte bleibt in-progress, da 4/5 offen.
+
+Punkte 1-3 committed: 492b20b (Branch worktree-m2-mcp-folgen). Punkte 4/5 offen.
+
+Punkt 5 erledigt: verify-binary Schritt 8 (MCP stdio gepackt, verify: OK), Commit folgt. Punkt 4 wartet auf Meldung A2 auf main.
+
+Punkt 4 erledigt: mcp.server (starting/connected/failed/stopped) und mcp.tools_changed im Journal (ADR 0029 Addendum 1 §7), t/283, Szenarien 180-188 angepasst. Ein stopped ausserhalb eines Runs erreicht nur on_event. Suite 218 Dateien/1896 Tests gruen. Rebase auf main (A2) ok.
+
+M2 komplett (Punkte 1-5), Branch worktree-m2-mcp-folgen
