@@ -25,6 +25,7 @@ expect:
     - { name: mcp__t__fail, error: true, text: "\\APreToolUse:mcp__t__fail hook error: no failing on purpose\\z" }
     - { name: mcp__t__with_dot, text: "\\Adotted\\z" }
   events:
+    - { type: mcp.server, name: t, status: starting }
     - { type: mcp.server, name: t, scope: user, status: connected }
     - { type: hook.ran, hook_event: PreToolUse, outcome: block, exit: 2 }
     - { type: hook.ran, hook_event: PreToolUse, outcome: success, exit: 0 }

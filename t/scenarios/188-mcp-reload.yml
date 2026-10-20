@@ -33,5 +33,8 @@ expect:
     - { name: mcp__second__with_dot, text: "\\Adotted\\z" }
     - { name: mcp__first__with_dot, error: true, text: "No such tool available" }
   events:
+    - { type: mcp.server, name: first, status: starting }
     - { type: mcp.server, name: first, status: connected }
+    - { type: mcp.server, name: first, status: stopped }
+    - { type: mcp.server, name: second, status: starting }
     - { type: mcp.server, name: second, status: connected }

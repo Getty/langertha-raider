@@ -27,5 +27,6 @@ expect:
     - { name: mcp__t__meta, text: "\\Ameta\\z" }
   request_count: 2
   events:
+    - { type: mcp.server, name: t, status: starting }
     - { type: mcp.server, name: t, scope: raider-home, transport: stdio, status: connected, tools: 6 }
     - { type: tool.call, name: mcp__t__echo_env }

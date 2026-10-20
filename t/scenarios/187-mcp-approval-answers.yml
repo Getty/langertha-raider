@@ -21,4 +21,5 @@ expect:
     - { name: mcp__yes__with_dot, text: "\\Adotted\\z" }
     - { name: mcp__no__with_dot, error: true, text: "No such tool available" }
   events:
+    - { type: mcp.server, name: "yes", status: starting }
     - { type: mcp.server, name: "yes", scope: project, status: connected }
