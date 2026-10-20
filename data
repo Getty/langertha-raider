@@ -1,0 +1,34 @@
+---
+claimed_at: 2026-10-20T20:31:55Z
+claimed_by: strom-a2
+class: standard
+completed: 2026-10-20T20:31:53Z
+created: 2026-10-19T08:46:07Z
+id: 161
+priority: high
+started: 2026-10-19T08:46:36Z
+status: done
+tags:
+- claude-code-flow
+title: 'Subagent parity with Claude Code: background agents, send_message, Explore/Plan
+  types, agentId and usage, worktree isolation, nesting'
+updated: 2026-10-20T20:31:55Z
+---
+
+Strom A2: Agent-Abweichungen aus #156. Plan: /home/getty/dev/perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md
+
+Strom A2 gestartet (Worktree .claude/worktrees/strom-a2, Branch worktree-strom-a2 von main 4528dd3).
+
+2026-10-19 Plan + ADR 0027 (WIP d0242fa): Hintergrund-Agenten mit <task-notification>, send_message (laufend: inject; beendet: Fortsetzen aus Historie/Kind-Session), Explore/Plan (read-only, ohne CLAUDE.md, one-shot), agentId/usage-Trailer, isolation worktree (.claude|.raider/worktrees/agent-ID, baseRef fresh/head), Tiefe 3 (CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH), parallele agent-Aufrufe + Limit 20 (CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS). Gemeinsames Register Tasks mit D abgestimmt (Koordinator): TaskStop bleibt kill_shell, nimmt nach D-Merge Agent-IDs. Worker 1 (Kern) in strom-a2, Worker 2 (Explore/Plan, Tiefe) in strom-a2-builtins.
+
+2026-10-19 Explore/Plan (one_shot, memory=0, read-only disallowed), compile_mission memory=>0, max_agent_depth Default 3 + CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH (Claude-Layout), t/215 grün — WIP d8b7655 (enthält auch Zwischenstand Kern). Bekannte Abweichung: verschachtelte CLAUDE.md kann Explore über Tool-Ergebnisse erreichen; perl_eval/perl_cpanm bleiben Explore/Plan erlaubt wie bash.
+
+2026-10-19 §9 fertig: Langertha::Raider async_tools (Handler -> Future statt blockierendem MCP-Code), aufeinanderfolgende agent-Aufrufe einer Runde parallel (Ergebnisse in Aufrufreihenfolge), max_concurrent_agents 20 / CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS, t/216; Suite 165/1481 grün. WIP zusammengefasst (Sicherung Tag a2-pre-squash), Rebase auf main mit D (f069836) läuft: 14 Konflikte, Worker löst. Folgepunkte: plugin_before/after_tool_call bekommt in raider ein Kontext-Argument (Aufruf-ID) — Core-PluginHost sollte das auch tun (Langertha-Karte); on_permission_request blockiert synchron den Loop (friert parallele Agenten während einer Rückfrage ein); Trace-Plugin-Zeilen paralleler Aufrufe ohne Aufruf-ID; SearchTools::_glob warnt uninitialized bei fehlender Wurzel. t/53 auf Branch einzeln ~1/10 rot (main 10/10) — Untersuchung nach Rebase.
+
+2026-10-19 Aufgabe 2 fertig: kill_shell/bash_output nehmen Agent-IDs/Namen (Tasks-Register in BashTools), Hintergrund-Shells im Register mit task-notification (genau einmal), Läufe warten nur auf Agenten, erster Ctrl-C verschont bash-Befehle von Hintergrund-Agenten (perl_eval/cpanm nicht), Konverter: SendMessage ausgelassen mit Notiz, Tiefe>3, Explore/Plan bleiben; t/217; t/53 war Test-Wettlauf (auch auf main möglich), Test korrigiert, 20/20. Suite 180/1600 grün. Worktree-Isolation (ADR 0027 §7) auf Koordinator-Wunsch Folge-Strom. Jetzt: zusammengefasst + Rebase auf D2 b22ccb2 (4 Konflikte), Subagenten-Task-Hooks, usage mit Ds Ledger abgleichen. Sicherungs-Tags a2-pre-squash, a2-pre-squash2.
+
+2026-10-19 Rebase auf main 0568217 (D2, #166, C Slash-Befehle, MCP-Strom); zusammengefasst zu 3e0fe25 (Sicherungen a2-pre-squash/2/3). Entscheidungen in ADR 0027: Hintergrund-Agent kopiert Lauf-Regeln (allowed-tools) beim Start; /clear,/reset,/new stoppen Hintergrund-Agenten der alten Unterhaltung still, Shells laufen weiter; Task-Hooks feuern in Subagenten; subagent_tokens aus model.usage (kein zweiter Zählweg). Szenarien 140-150. Suite 214/1861: 2 rot = Subagent mit MCP-Tools (MCP::View nicht loop-fähig, doppelte Freigabe) — Worker behebt. Folgepunkt: erbender Agent nimmt Sitzungsmodell statt model: eines /command.
+
+Strom A2 fertig: Branch worktree-strom-a2 (.claude/worktrees/strom-a2) auf main 0568217, Commits 3e0fe25 + a4d6154. ADR 0027 (+ Nachträge 0022/0024/0025). Umgesetzt: Tasks-Register (agent_N/bash_N) + <task-notification> (im Raid vor nächster Anfrage, REPL im Leerlauf als neuer Turn bzw. vor getippter Zeile, -p wartet auf Hintergrund-Agenten); agent mit run_in_background/model/name, agentId/usage-Trailer; send_message (laufend: zustellen, beendet: im Hintergrund fortsetzen, auch aus Kind-Session nach --continue); Explore/Plan (read-only, ohne CLAUDE.md, one-shot); max_agent_depth 3 + CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH; parallele agent-Aufrufe über Langertha::Raider async_tools, max_concurrent_agents 20 + CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS; kill_shell/bash_output für Agent-IDs/Namen; Shell-Ende-Benachrichtigung (Ds Folgepunkt); Task-Hooks in Subagenten; Hintergrund-Agent mit eigener Kopie der Lauf-Regeln; /clear stoppt Hintergrund-Agenten. Tests t/210-217, Szenarien 140-150. Suite 214 Dateien/1862 Tests PASS (3 Live-Skips), t/53 einzeln stabil (alter Fehler war Test-Wettlauf, Test korrigiert). Offen/Folge: Worktree-Isolation (ADR 0027 §7, eigener Strom); Plugin-Kontext-Argument auch in Core-PluginHost (Langertha); on_permission_request blockiert Loop synchron; Trace-Zeilen paralleler Aufrufe ohne ID; erbender Agent nimmt Sitzungsmodell statt /command-model:; perl_eval/cpanm-Kinder von Hintergrund-Agenten sterben beim ersten Ctrl-C; Konverter spielt SendMessage nicht ab; SearchTools::_glob uninitialized-Warnung bei fehlender Wurzel. dzil build nicht gelaufen.
+
+Koordinator 2026-10-20: geprüft (1862 grün; t/210–217 gegen alten Code rot bzw. t/213 hängt), gemerged (a4d6154). Worktree-Isolation -> Folge-Strom.
