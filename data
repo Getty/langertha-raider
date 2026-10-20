@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-10-20T21:45:31Z
+claimed_by: m3-worker
+class: standard
+completed: 2026-10-20T21:45:31Z
+created: 2026-10-20T20:32:23Z
+id: 169
+priority: medium
+started: 2026-10-20T20:33:41Z
+status: done
+tags:
+- claude-code-flow
+title: Monitor, cron and wakeup tools like Claude Code on the tasks register
+updated: 2026-10-20T21:45:31Z
+---
+
+Strom M3: Monitor (Ereignisstrom aus einem Kommando, jede Zeile eine Benachrichtigung, Timeout), CronCreate/CronDelete/CronList (Sitzungsjobs), ScheduleWakeup-artige Wiederaufnahme, alles über das Tasks-Register aus #161 (task-notification). Plan: /home/getty/dev/perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md
+
+Branch worktree-m3-monitor-cron (rebased auf f71ade1, 7 WIP-Commits). Monitor, CronCreate/Delete/List (nur REPL), ADR 0031, t/300-305, Szenarien 230-236. Suite 224 Dateien/1941 Tests gruen. Kein ScheduleWakeup (nur fuer /loop, Erinnerung = one-shot cron_create). Cron nicht durable (Hall besitzt durable cron). Folgepunkte: /loop+Wakeup, Cron-Restore bei Resume, ws-Quelle fuer monitor, /tasks-Ansicht, session_crons in Hook-Input; kein Test mit echtem Terminal (Gnu-Callback-Pfad).
