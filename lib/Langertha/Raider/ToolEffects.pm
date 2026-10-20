@@ -75,6 +75,9 @@ C<plan>; the permission gate asks the person before it runs (ADR 0025).
 C<task_create>, C<task_update>, C<task_list> and C<task_get> keep the task
 list of the conversation, like C<todo_write>; no effect outside it.
 
+C<enter_worktree> and C<exit_worktree> are C<write> (ADR 0032 E<sect>4): the
+one makes a checkout and a branch, the other may delete both.
+
 C<agent> has no class of its own (ADR 0020): it starts a subagent, whose
 tool calls carry their effects in the subagent's journal. Neither has
 C<send_message> (ADR 0027 E<sect>5): it only drives a subagent, whose calls
@@ -91,6 +94,8 @@ my %EFFECTS = (
   write_file             => [qw( write )],
   edit_file              => [qw( write )],
   multi_edit             => [qw( write )],
+  enter_worktree         => [qw( write )],
+  exit_worktree          => [qw( write )],
   # run state
   todo_write             => [],
   task_create            => [],

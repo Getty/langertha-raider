@@ -44,6 +44,8 @@ use Langertha::Raider::ToolNames;
 use Langertha::Raider::SessionStore;
 use Langertha::Raider::Subagent;
 use Langertha::Raider::Tasks;
+use Langertha::Raider::Worktree;
+use Langertha::Raider::WorktreeTools;
 use Langertha::Raider::Result;
 use Langertha::Raider;
 
@@ -77,7 +79,9 @@ C<monitor> (L<Langertha::Raider::BashTools>), the cron tools in the REPL
 (L<Langertha::Raider::PerlTools>) when granted, the Hall tools when
 spawned by a Hall, the C<agent> and C<send_message> tools
 (L<Langertha::Raider::AgentTools>, whose calls run as
-L<Langertha::Raider::Subagent>) below L</max_agent_depth> -- and builds the
+L<Langertha::Raider::Subagent>) below L</max_agent_depth>, C<enter_worktree>
+and C<exit_worktree> (L<Langertha::Raider::WorktreeTools>, which move the
+L</working_root>) -- and builds the
 L<Langertha::Raider> that runs the raids. It keeps the registry of its
 subagents and background work and their notifications (L</tasks>, ADR
 0027). It opens, creates and replays the sessions of the project
@@ -344,6 +348,11 @@ E<sect>6) the mission is only C<$instructions>, the skill listing when
 C<@tool_servers> has the C<skill> tool, and the tool description: no
 Claude memory, no F<AGENTS.md>, no packs.
 
+C<< working_directory => $dir >> names C<$dir> in the C<Working
+directory:> line of the tool description instead of L</working_root> -- a subagent
+in a worktree of its own (ADR 0032 E<sect>2), whose mission is otherwise
+compiled for the caller's context.
+
 =cut
 
 sub compile_mission {
@@ -356,7 +365,7 @@ sub compile_mission {
     ( $memory
       ? ( grep { !defined $skills || $_ ne $skills } $self->context->prompt_items )
       : ( $has_skill && defined $listing ? $listing : () ) ),
-    $self->_tools_text($servers) );
+    $self->_tools_text($servers, $opt{working_directory}) );
 
   my @pack_texts = $memory ? $self->packs->skill_texts : ();
   push @items, "Active packs:\n\n".join("\n\n", @pack_texts)."\n" if @pack_texts;
@@ -395,9 +404,9 @@ alone under C<bare>.
 # this raider (ADR 0005) -- the same servers the catalogue comes from; -M
 # never replaces it (ADR 0014). A subagent passes its own servers.
 sub _tools_text {
-  my ($self, $servers) = @_;
+  my ($self, $servers, $working_directory) = @_;
   my @tools = map { @{ $_->tools } } @{ $servers // $self->_tool_servers };
-  return 'Working directory: '.$self->root."\n\n"
+  return 'Working directory: '.( $working_directory // $self->working_root )."\n\n"
     ."Tools (MCP):\n"
     .join('', map { '  - '.$self->_tool_signature($_)."\n" } @tools);
 }
@@ -534,6 +543,8 @@ sub _instructions_label {
 Working directory for tool operations. Defaults to the current process cwd.
 File tools are confined to this directory, including realpath checks for
 symlink escapes; bash commands inherit it as their default working directory.
+While the session works in a worktree the tools work in L</working_root>
+instead.
 
 =cut
 
@@ -542,6 +553,67 @@ has root => (
   isa     => 'Str',
   default => sub { Path::Tiny->cwd->stringify },
 );
+
+=attr working_root
+
+Where the session works right now (ADR 0032 E<sect>3): the directory the
+file, search and shell tools (and the Perl tools when they are mounted)
+work in, the root of L</permissions>, the C<cwd> of every hook input and
+the C<Working directory:> line of the next mission compiled. It starts as
+L</root>; C<enter_worktree> moves it into a git worktree -- the same
+subdirectory of it when L</root> is a subdirectory of the repository --
+and C<exit_worktree>, a new conversation and the end of the session
+(L</close_worktree_session>) move it back. Everything else stays at
+L</root>: the context and layout, configuration and settings,
+instructions and skills, the session store and its journals, the
+directory hook processes run in and C<CLAUDE_PROJECT_DIR>.
+
+A tool call already running finishes where it started; the next one works
+in the new working root. Subagents spawned meanwhile start in it
+(L<Langertha::Raider::Subagent/caller_root>); an isolated one branches
+from its C<HEAD> under C<head>, its worktree still under the main
+checkout's top.
+
+=method worktree_session
+
+    my $wt = $app->worktree_session;
+    # { path, branch, top, root, created => 1, base => '...', session => $session } or undef
+
+The worktree C<enter_worktree> moved the session into, while it works
+there: C<path> and C<branch> (undef for a detached C<HEAD>), C<top> (the
+main checkout), C<root> (the L</working_root>), C<created> (made by this
+session, so it may be removed; else entered by C<path> and only ever
+left), C<base> (the commit a created one branched from) and C<session>
+(the session it was entered in, which its C<worktree.exited> goes to).
+
+=cut
+
+has working_root => (
+  is       => 'ro',
+  isa      => 'Str',
+  init_arg => undef,
+  lazy     => 1,
+  default  => sub { $_[0]->root },
+  writer   => '_set_working_root',
+);
+
+has worktree_session => (
+  is       => 'ro',
+  isa      => 'Maybe[HashRef]',
+  init_arg => undef,
+  writer   => '_set_worktree_session',
+);
+
+# The mission names the working root: compiled again before the next run
+# once it moved (ADR 0032 §3).
+has _mission_stale => (is => 'rw', isa => 'Bool', default => 0, init_arg => undef);
+
+# The default names of enter_worktree: session-N, counted per application.
+has _worktree_counter => (is => 'rw', isa => 'Int', default => 0, init_arg => undef);
+
+# The servers of the root-bound tools for the working root while it is not
+# the root: { root => DIR, files => S, search => S, perl => S }.
+has _working_servers => (is => 'ro', isa => 'HashRef', init_arg => undef, default => sub { {} });
 
 =attr allowed_commands
 
@@ -682,6 +754,82 @@ sub _build_agent_models {
   return ref $models eq 'HASH' ? { %$models } : {};
 }
 
+=method worktree_base_ref
+
+    my $mode = $app->worktree_base_ref;   # 'fresh' or 'head'
+
+Where a new worktree branches from (ADR 0032 E<sect>2): C<worktree.baseRef>
+of the Claude settings in the Claude layout
+(L<Langertha::Raider::Context::Settings/worktree_base_ref>), else
+C<worktree_base_ref> of the configuration. C<head> is the C<HEAD> of the
+caller's working root; C<fresh> -- the default, and what any other value
+counts as -- is C<origin/HEAD> when it resolves, else that C<HEAD>
+(L<Langertha::Raider::Worktree/base_ref>).
+
+=method worktrees_dir
+
+    my $dir = $app->worktrees_dir($top);   # /repo/.claude/worktrees
+
+The directory under the main checkout C<$top> that raider's worktrees live
+in (ADR 0032 E<sect>2): F<.claude/worktrees> in the Claude layout, else
+F<.raider/worktrees>.
+
+=cut
+
+sub worktree_base_ref {
+  my ($self) = @_;
+  my $value;
+  if ($self->context->claude_layout) {
+    my $settings = $self->context->settings;
+    my $entry = $settings ? $settings->worktree_base_ref : undef;
+    $value = $entry ? $entry->{value} : undef;
+  }
+  else {
+    $value = $self->_load_yml_options->{worktree_base_ref};
+  }
+  return defined $value && !ref $value && $value eq 'head' ? 'head' : 'fresh';
+}
+
+sub worktrees_dir {
+  my ($self, $top) = @_;
+  return path($top)->child( $self->context->claude_layout ? '.claude' : '.raider', 'worktrees' )->stringify;
+}
+
+=method note_meta
+
+    $app->note_meta('agent agent_1 left its worktree /repo/.raider/worktrees/agent-1 on branch worktree-agent-1');
+
+Queues a line for the person, outside any run: a surface shows it as a
+meta line (L</take_meta_notes>). An isolated subagent cancelled without a
+notification names its kept worktree this way (ADR 0032 E<sect>2).
+
+=method take_meta_notes
+
+    say_meta($_) for $app->take_meta_notes;
+
+Takes the lines L</note_meta> queued, oldest first.
+
+=cut
+
+has _meta_notes => (is => 'ro', isa => 'ArrayRef', init_arg => undef, default => sub { [] });
+
+sub note_meta {
+  my ($self, $text) = @_;
+  push @{ $self->_meta_notes }, $text;
+  return;
+}
+
+sub take_meta_notes { splice @{ $_[0]->_meta_notes } }
+
+=attr leaving
+
+True once L</stop_background> ran: the person is leaving raider, and the
+notifications of the subagents that end now reach nobody.
+
+=cut
+
+has leaving => (is => 'ro', isa => 'Bool', init_arg => undef, default => 0, writer => '_set_leaving');
+
 =attr on_event
 
 Optional code reference called as C<< $on_event->($type, %payload) >> for
@@ -812,6 +960,9 @@ settings (L<Langertha::Raider::Context::Settings/permissions>), and their
 additional directories. Every tool call of the raider passes it (the gate
 of ADR 0005): a call it asks about runs only when a person approves it, and
 without anyone to ask it is refused with a reason that says how to allow it.
+Its root is the L</working_root>, and while that is a worktree it refuses
+edits into the main checkout
+(L<Langertha::Raider::Permissions/worktree_isolation>, ADR 0032 E<sect>3).
 
 =cut
 
@@ -834,8 +985,10 @@ sub _build_permissions {
     : $self->has_permission_mode && defined $self->permission_mode
       ? { value => $self->permission_mode, source => $self->source_label('permission_mode') }
       : undef;
+  my $wt = $self->worktree_session;
   return $self->permissions_class->from_sources(
-    root     => $self->root,
+    root     => $self->working_root,
+    ( $wt ? ( worktree_isolation => { top => $wt->{top}, worktree => $wt->{path} } ) : () ),
     cli_mode => $cli,
     ( $self->_permissions_session_rules ? ( session_rules => $self->_permissions_session_rules ) : () ),
     sources  => [ $self->config->permissions, ( $settings ? $settings->permissions : () ) ],
@@ -925,6 +1078,12 @@ share. C<unattended> is asked at every such call: a reason (a background
 subagent, ADR 0027 E<sect>3) means nobody is asked, and the call is refused
 as in a run nobody can approve, with that reason.
 
+Before any rule or mode, a policy with
+L<Langertha::Raider::Permissions/worktree_isolation> refuses edits into the
+main checkout (ADR 0032 E<sect>3): the result is
+L<Langertha::Raider::Permissions/main_checkout_refusal>'s text as it
+stands, with C<permission.denied> (C<by> C<worktree>).
+
 =cut
 
 sub tool_gate {
@@ -941,7 +1100,19 @@ sub tool_gate {
 sub _permission_gate {
   my ($self, $call, %for) = @_;
   my $policy = $for{policy} // $self->permissions;
+  # A run in a worktree does not edit the main checkout (ADR 0032 §3): before any rule or mode.
+  if (defined(my $refusal = $policy->main_checkout_refusal($call))) {
+    my $verdict = { verdict => 'deny', by => 'worktree', reason => $refusal, mode => $policy->mode };
+    $self->_permission_event(\%for, 'permission.denied', $call, $verdict, by => 'worktree');
+    return { %$verdict, message => $refusal };
+  }
   my $verdict = $self->_with_hook_decision($call, $policy->decide($call));
+  # A worktree outside raider's own directories: always asked, only
+  # bypassPermissions skips it (ADR 0032 §4).
+  if ($verdict->{verdict} ne 'deny' && $policy->mode ne 'bypassPermissions'
+      && defined( my $question = $self->_worktree_path_question($call, $policy) )) {
+    $verdict = { verdict => 'ask', by => 'worktree', reason => $question, mode => $policy->mode, once_only => 1 };
+  }
   return $verdict if $verdict->{verdict} eq 'allow';
   if ($verdict->{verdict} eq 'deny') {
     $self->_permission_event(\%for, 'permission.denied', $call, $verdict, by => $verdict->{by});
@@ -952,8 +1123,11 @@ sub _permission_gate {
     return $self->_ask_permission($ask, $call, $verdict, \%for);
   }
   # A hook that asks is not lifted by a rule; there is nothing to configure.
+  # Neither is the question about a worktree, which only bypassPermissions skips.
+  my $by = $verdict->{by} // '';
   my $reason = $verdict->{reason}.'; nobody can approve it'.( defined $unattended ? ': '.$unattended : ' in this run' ).'. '
-    .( ( $verdict->{by} // '' ) eq 'hook' ? '' : $self->_how_to_allow($call, $policy).' ' )
+    .( $by eq 'hook' ? '' : $by eq 'worktree' ? 'Only --permission-mode bypassPermissions skips this question. '
+      : $self->_how_to_allow($call, $policy).' ' )
     .'Do not retry the same call; go on without it or say what you need.';
   $self->_permission_event(\%for, 'permission.denied', $call, $verdict, by => 'noninteractive', reason => $reason);
   return { %$verdict, verdict => 'deny', by => 'noninteractive', reason => $reason,
@@ -991,7 +1165,8 @@ sub _ask_permission {
   my ($self, $ask, $call, $verdict, $for) = @_;
   $for //= {};
   my $policy = $for->{policy} // $self->permissions;
-  my $rule   = $policy->suggest_rule($call);
+  # A question no rule can answer (once_only) offers no rule for the session.
+  my $rule   = $verdict->{once_only} ? undef : $policy->suggest_rule($call);
   $self->_permission_event($for, 'permission.asked', $call, $verdict, ( defined $rule ? ( suggested_rule => $rule ) : () ));
   my $answer = $ask->({
     tool      => $call->{name},
@@ -1173,6 +1348,7 @@ sub _hook_input {
     session_id      => $session ? $session->id : $self->_local_session_id,
     ( $session ? ( transcript_path => ''.$session->path ) : () ),
     permission_mode => $self->permissions->mode,
+    cwd             => $self->working_root,
     %more,
   };
 }
@@ -1282,8 +1458,9 @@ The conversation starts over: the next run fires C<SessionStart> again
 with source C<clear>, and the task list (L</todos>) is empty. The
 background subagents of the conversation are stopped without a
 notification and the notifications that wait for it are dropped (ADR
-0027); background shells go on and still notify (ADR 0024). C</clear>,
-C</reset> and C</new> call it.
+0027); background shells go on and still notify (ADR 0024). A worktree
+session ends (L</close_worktree_session> with C<clear>, ADR 0032
+E<sect>5). C</clear>, C</reset> and C</new> call it.
 
 =cut
 
@@ -1294,6 +1471,7 @@ sub note_history_cleared {
   $self->_todo_tools->clear_tasks;
   $self->_todos([]);
   $self->_stop_conversation_agents;
+  $self->close_worktree_session('clear');
   return;
 }
 
@@ -2360,6 +2538,7 @@ sub _build_tool_servers {
     ( $self->_skill_tool_server // () ),
     $self->_enter_plan_tool_server,
     ( $self->_agent_tool_server // () ),
+    $self->_worktree_tool_server,
     ( $self->_plan_tool_wanted ? $self->_plan_tool_server : () ),
     ( @{ $self->configured_mcp->clients } ? $self->_mcp_resources->tool_server : () ),
   ];
@@ -2449,11 +2628,338 @@ sub _exit_plan_mode {
   return ( $self->_rejected_text($answer->{feedback}), 1 );
 }
 
-# The hider of the search tools: hides the files a Read deny or ask rule
-# names, when there is one.
-sub _search_hider {
+#### The working root: enter_worktree and exit_worktree (ADR 0032 §3-§6)
+
+=method worktree_class
+
+The class that does the git work of C<enter_worktree> and
+C<exit_worktree>: L<Langertha::Raider::Worktree>.
+
+=method worktree_tools_class
+
+The class with the two tools' texts and schemas:
+L<Langertha::Raider::WorktreeTools>.
+
+=cut
+
+sub worktree_class       { 'Langertha::Raider::Worktree' }
+sub worktree_tools_class { 'Langertha::Raider::WorktreeTools' }
+
+has _worktree_git => (is => 'ro', init_arg => undef, lazy => 1, default => sub { $_[0]->worktree_class->new });
+
+# enter_worktree and exit_worktree (ADR 0032 §4): tools of the main run only,
+# mounted next to agent; a subagent never gets them.
+has _worktree_tool_server => (is => 'ro', init_arg => undef, lazy => 1, builder => '_build_worktree_tool_server');
+
+sub _build_worktree_tool_server {
   my ($self) = @_;
-  my $policy = $self->permissions;
+  weaken(my $app = $self);
+  my $claude = $self->context->claude_layout;
+  return $self->worktree_tools_class->new(
+    enter_handler => sub { $app ? $app->_enter_worktree(@_) : ( 'the application is gone', 1 ) },
+    exit_handler  => sub { $app ? $app->_exit_worktree(@_) : ( 'the application is gone', 1 ) },
+    worktrees_dir => $claude ? '.claude/worktrees/' : '.raider/worktrees/',
+    base_setting  => $claude ? 'worktree.baseRef' : 'worktree_base_ref',
+  )->server;
+}
+
+# The two directories below the main checkout $top that hold the worktrees
+# of raider and Claude Code: a path inside one needs no question (ADR 0032 §4).
+sub _own_worktree_dirs {
+  my ($self, $top) = @_;
+  return map { path($top)->child($_, 'worktrees')->stringify } qw( .claude .raider );
+}
+
+# A path argument as an absolute path: relative to the root, the real path
+# when it exists.
+sub _worktree_abs_path {
+  my ($self, $path) = @_;
+  my $abs = path($path)->absolute($self->root);
+  my $real = eval { $abs->realpath };
+  return defined $real ? "$real" : "$abs";
+}
+
+# The question the gate puts before enter_worktree with a path outside the
+# worktree directories of raider and Claude Code; nothing for any other call.
+sub _worktree_path_question {
+  my ($self, $call, $policy) = @_;
+  return unless ( $call->{name} // '' ) eq 'enter_worktree' && $policy->is_builtin_call($call);
+  my $in = ref $call->{arguments} eq 'HASH' ? $call->{arguments} : {};
+  my $path = $in->{path};
+  return unless defined $path && !ref $path && length $path && !defined $in->{name};
+  my $top = $self->_worktree_git->repository_top($self->root);
+  return if $top->{error};   # the tool itself says why it cannot
+  my $abs = $self->_worktree_abs_path($path);
+  my @dirs = $self->_own_worktree_dirs($top->{top});
+  return if grep { index($abs, $_.'/') == 0 } @dirs;
+  return 'enter_worktree would move the session into '.$abs.', which is outside '
+    .join(' and ', map { $_.'/' } @dirs).'; the user is asked every time';
+}
+
+# The working root and the policy move to $root; with $wt (the worktree
+# session) the policy refuses edits into the main checkout, without it it is
+# back at the root. The mission is compiled again before the next run.
+sub _move_working_root {
+  my ($self, $root, $wt) = @_;
+  $self->_set_worktree_session($wt);
+  $self->_set_working_root($root);
+  %{ $self->_working_servers } = ();
+  $self->permissions->move_to(root => $root,
+    $wt ? ( worktree_isolation => { top => $wt->{top}, worktree => $wt->{path} } ) : ());
+  $self->_mission_stale(1);
+  return;
+}
+
+# The same subdirectory of the worktree at $path as the root is of its
+# working tree: made in a worktree this session created ($make), else the
+# worktree's top when an entered one does not have it.
+sub _root_in_worktree {
+  my ($self, $path, $make) = @_;
+  my $git = $self->_worktree_git;
+  my $tree = $git->toplevel($self->root);
+  return $path if $tree->{error};
+  my $sub = path($self->root)->realpath->relative($tree->{top})->stringify;
+  return $path if $sub eq '.' || $sub =~ m{\A\.\.(?:/|\z)};
+  my $dir = path($path)->child($sub);
+  $dir->mkpath if $make && !-d $dir;
+  return -d $dir ? $dir->stringify : $path;
+}
+
+# worktree.entered / worktree.exited (ADR 0032 §6): into the run in
+# progress, else into the session the worktree was entered in.
+sub _worktree_event {
+  my ($self, $wt, $type, %payload) = @_;
+  $self->caller_event($wt->{session}, $type, path => $wt->{path}, branch => $wt->{branch}, %payload);
+  return;
+}
+
+sub _entered_text {
+  my ($self, $wt) = @_;
+  return "Entered worktree at \x{201C}".$wt->{path}."\x{201D} on branch \x{201C}".( $wt->{branch} // 'HEAD' )."\x{201D}."
+    .' The session is now working in the worktree. Use exit_worktree to leave mid-session; '
+    .( $wt->{created}
+      ? 'when the session ends it is removed if unchanged and kept otherwise.'
+      : 'it was entered by path, so it stays on disk when the session ends.' );
+}
+
+# What enter_worktree answers once the gate let it run (ADR 0032 §4).
+sub _enter_worktree {
+  my ($self, $in) = @_;
+  my $git = $self->_worktree_git;
+  my $top = $git->repository_top($self->root);
+  return ( 'enter_worktree needs a git repository; '.$self->root.' is not inside one.', 1 ) if $top->{error};
+  return defined $in->{path} ? $self->_enter_worktree_path($in->{path}, $top->{top})
+    : $self->_enter_worktree_name($in->{name}, $top->{top});
+}
+
+sub _enter_worktree_name {
+  my ($self, $name, $top) = @_;
+  my $git = $self->_worktree_git;
+  if (my $wt = $self->worktree_session) {
+    return ( 'Already working in the worktree '.$wt->{path}
+      .'; pass path to switch to another one, or exit_worktree first.', 1 );
+  }
+  my $dir = path($self->worktrees_dir($top));
+  $name //= $self->_next_worktree_name($dir, $top);
+  my $path = $dir->child($name)->stringify;
+  my $branch = 'worktree-'.$name;
+  return ( 'Worktree '.$name.' exists; pass path to enter it.', 1 )
+    if -e $path || $git->branch_exists($top, $branch);
+  my $base = $git->base_ref($self->working_root, $self->worktree_base_ref);
+  return ( 'enter_worktree: '.$base->{error}, 1 ) if $base->{error};
+  my $tree = $git->toplevel($self->working_root);
+  return ( 'enter_worktree: '.$tree->{error}, 1 ) if $tree->{error};
+  my $made = $git->create(source => $tree->{top}, path => $path, branch => $branch, base => $base->{commit});
+  return ( 'enter_worktree: '.$made->{error}, 1 ) if $made->{error};
+  my $wt = {
+    path    => $made->{path},
+    branch  => $branch,
+    top     => $top,
+    base    => $base->{commit},
+    created => 1,
+    session => $self->has_run ? $self->_run->{session} : undef,
+  };
+  $wt->{root} = $self->_root_in_worktree($wt->{path}, 1);
+  $self->_move_working_root($wt->{root}, $wt);
+  $self->_worktree_event($wt, 'worktree.entered', created => JSON::MaybeXS->true);
+  return ( $self->_entered_text($wt), 0 );
+}
+
+# session-N, the first N whose directory and branch are free.
+sub _next_worktree_name {
+  my ($self, $dir, $top) = @_;
+  my $git = $self->_worktree_git;
+  while (1) {
+    my $n = $self->_worktree_counter + 1;
+    $self->_worktree_counter($n);
+    my $name = 'session-'.$n;
+    return $name unless -e $dir->child($name) || $git->branch_exists($top, 'worktree-'.$name);
+  }
+}
+
+sub _enter_worktree_path {
+  my ($self, $path, $top) = @_;
+  my $git = $self->_worktree_git;
+  my $abs = $self->_worktree_abs_path($path);
+  my $list = $git->list($top);
+  return ( 'enter_worktree: '.$list->{error}, 1 ) if $list->{error};
+  my ($entry) = grep { $self->_worktree_abs_path($_->{path}) eq $abs } @{ $list->{worktrees} };
+  return ( $abs.' is not a worktree of the repository at '.$top.' (git worktree list).', 1 ) unless $entry;
+  return ( $abs.' is the main checkout; pass the path of a linked worktree.', 1 ) if $entry->{main};
+  my $old = $self->worktree_session;
+  return ( 'Already working in the worktree '.$abs.'; nothing changed.', 0 ) if $old && $old->{path} eq $abs;
+  return ( 'enter_worktree: '.$abs.' does not exist.', 1 ) unless -d $abs;
+  # The worktree left behind stays on disk untouched and is no longer tracked.
+  my $wt = {
+    path    => $abs,
+    branch  => $entry->{branch},
+    top     => $top,
+    created => 0,
+    session => $self->has_run ? $self->_run->{session} : undef,
+  };
+  $wt->{root} = $self->_root_in_worktree($abs);
+  $self->_move_working_root($wt->{root}, $wt);
+  $self->_worktree_event($wt, 'worktree.entered', created => JSON::MaybeXS->false);
+  return ( $self->_entered_text($wt), 0 );
+}
+
+# What exit_worktree answers once the gate let it run (ADR 0032 §4).
+sub _exit_worktree {
+  my ($self, $in) = @_;
+  my $wt = $self->worktree_session or return ( 'No worktree session is active; nothing changed.', 0 );
+  my $root = $self->root;
+  my $branch = $wt->{branch} // 'HEAD';
+  if ($in->{action} eq 'keep') {
+    $self->_move_working_root($root);
+    $self->_worktree_event($wt, 'worktree.exited', removed => JSON::MaybeXS->false, reason => 'exit_worktree');
+    return ( 'Left the worktree '.$wt->{path}.'; it stays on branch '.$branch.'. Working directory: '.$root.'.', 0 );
+  }
+  return ( $wt->{path}.' was entered by path, not created by this session; use action "keep".', 1 )
+    unless $wt->{created};
+  my $git = $self->_worktree_git;
+  unless ($in->{discard_changes}) {
+    my $changes = $git->changes($wt->{path}, $wt->{base});
+    return $self->_worktree_kept($wt, $changes->{error}) if $changes->{error};
+    if (@{ $changes->{status} } || $changes->{commits}) {
+      my $n = $changes->{commits};
+      return ( join("\n", 'The worktree '.$wt->{path}.' has changes; nothing was removed.',
+        ( @{ $changes->{status} } ? ( 'git status --porcelain:', @{ $changes->{status} } ) : () ),
+        $n.' commit'.( $n == 1 ? '' : 's' ).' beyond its base.',
+        'Pass discard_changes: true to remove it anyway.'), 1 );
+    }
+  }
+  $self->_move_working_root($root);
+  my $removed = $git->remove(dir => $wt->{top}, path => $wt->{path}, branch => $wt->{branch},
+    $in->{discard_changes} ? ( force => 1 ) : ());
+  return $self->_worktree_kept($wt, $removed->{error}) if $removed->{error};
+  $self->_worktree_event($wt, 'worktree.exited', removed => JSON::MaybeXS->true, reason => 'exit_worktree');
+  return ( 'Removed the worktree '.$wt->{path}.' and its branch '.$branch.'. Working directory: '.$root.'.', 0 );
+}
+
+# A removal git refused: the working root is back at the root, the worktree
+# stays (ADR 0032 §4).
+sub _worktree_kept {
+  my ($self, $wt, $error) = @_;
+  $self->_move_working_root($self->root) if $self->worktree_session;
+  $self->_worktree_event($wt, 'worktree.exited', removed => JSON::MaybeXS->false, reason => 'exit_worktree');
+  return ( 'worktree kept: '.$error.'. Working directory: '.$self->root.'.', 1 );
+}
+
+=method close_worktree_session
+
+    $app->close_worktree_session('clear');         # /clear, /reset, /new
+    $app->close_worktree_session('session_end');   # leaving the REPL, the end of raider -p
+
+Closes the worktree session at a new conversation or the end of the
+session (ADR 0032 E<sect>5), as C<exit_worktree> would, without asking: a
+worktree C<enter_worktree> created is removed with its branch when it has
+no changes, and kept otherwise, with a meta line
+(L</note_meta>: C<worktree P kept on branch B (has changes)>, or the
+reason git gave); one entered by C<path> is only left. The
+L</working_root> is back at L</root>; C<worktree.exited> has C<reason>
+C<clear> or C<session_end>. Nothing without a worktree session. Never
+dies.
+
+=cut
+
+sub close_worktree_session {
+  my ($self, $reason) = @_;
+  my $wt = $self->worktree_session or return;
+  $self->_move_working_root($self->root);
+  my $removed = 0;
+  if ($wt->{created}) {
+    my $git = $self->_worktree_git;
+    my $branch = $wt->{branch} // 'HEAD';
+    my $changes = $git->changes($wt->{path}, $wt->{base});
+    if ($changes->{error}) {
+      $self->note_meta('worktree '.$wt->{path}.' kept on branch '.$branch.' ('.$changes->{error}.')');
+    }
+    elsif (@{ $changes->{status} } || $changes->{commits}) {
+      $self->note_meta('worktree '.$wt->{path}.' kept on branch '.$branch.' (has changes)');
+    }
+    else {
+      my $r = $git->remove(dir => $wt->{top}, path => $wt->{path}, branch => $wt->{branch});
+      $r->{error}
+        ? $self->note_meta('worktree '.$wt->{path}.' kept on branch '.$branch.' ('.$r->{error}.')')
+        : ( $removed = 1 );
+    }
+  }
+  $self->_worktree_event($wt, 'worktree.exited', removed => $removed ? JSON::MaybeXS->true : JSON::MaybeXS->false,
+    reason => $reason);
+  return;
+}
+
+# The tool of $name in the server of the root-bound tools of $kind (files,
+# search, perl) for the working root -- nothing while the working root is
+# the root, whose servers are mounted. Built once per working root.
+sub _working_root_tool {
+  my ($self, $kind, $name) = @_;
+  my $root = $self->working_root;
+  return if $root eq $self->root;
+  my $cache = $self->_working_servers;
+  %$cache = ( root => $root ) unless ( $cache->{root} // '' ) eq $root;
+  my $server = $cache->{$kind} //= $self->_root_bound_server($kind, $root);
+  my ($tool) = grep { $_->name eq $name } @{ $server->tools };
+  return $tool;
+}
+
+sub _root_bound_server {
+  my ($self, $kind, $root) = @_;
+  return $self->_file_tools_server($self->_main_file_tools_args, root => $root) if $kind eq 'files';
+  return $self->_search_tools_server(root => $root) if $kind eq 'search';
+  return $self->_perl_tools_server(root => $root);
+}
+
+# The mounted server of the root-bound tools of $kind, made to follow the
+# working root (ADR 0032 §3): every call of one of its tools runs the tool of
+# the same name of the server for the working root at that moment. The
+# server, its tools, names and schemas stay -- the engine's clients, the
+# mission's tool list and /reload are not touched -- and a call already
+# running finishes where it started. A subagent never gets these tools: its
+# root-bound tools are its own (Langertha::Raider::Subagent).
+sub _follow_working_root {
+  my ($self, $server, $kind) = @_;
+  weaken(my $app = $self);
+  for my $tool (@{ $server->tools }) {
+    my ( $here, $name ) = ( $tool->code, $tool->name );
+    $tool->code(sub {
+      my ( $t, @args ) = @_;
+      my $there = $app ? eval { $app->_working_root_tool($kind, $name) } : undef;
+      return $t->text_result($name.': the working directory '.$app->working_root.' cannot be used: '.( "$@" =~ s/\s+\z//r ), 1)
+        if $app && $@;
+      return $here->($t, @args) unless $there;
+      local $there->{context} = $t->{context};
+      return $there->code->($there, @args);
+    });
+  }
+  return $server;
+}
+
+# The hider of the search tools: hides the files a Read deny or ask rule
+# names, when there is one -- of $policy (default the application's).
+sub _search_hider {
+  my ($self, $policy) = @_;
+  $policy //= $self->permissions;
   return unless $policy->read_rules_active;
   return sub { $policy->hides_read($_[0]) };
 }
@@ -2491,6 +2997,7 @@ sub _build_agent_tools {
         policy   => $app->permissions,
         task_id  => undef,
         detached => 0,
+        root     => $app->working_root,
       };
     },
   );
@@ -2837,13 +3344,15 @@ sub _await_background {
 Leaving raider (ADR 0027 E<sect>3): asks every subagent of the
 application that still runs to end (L<Langertha::Raider::Tasks/stop_all>)
 and runs the loop until they have, at most C<$grace> seconds (default 2),
-so their journals end. Returns how many it stopped.
+so their journals end. Returns how many it stopped. The application is
+L</leaving> from then on.
 
 =cut
 
 sub stop_background {
   my ($self, $grace) = @_;
   return 0 unless $self->_has_tasks;
+  $self->_set_leaving(1);
   my @futures = $self->tasks->stop_all or return 0;
   my $loop = $self->loop;
   $loop->await(Future->wait_any(
@@ -3013,15 +3522,9 @@ sub _build_stock_tool_servers {
   my ($self) = @_;
 
   # The roots are asked on every call, so /reload (reload_permissions) reaches the mounted tools.
+  # The file and search tools follow the working root (ADR 0032 §3).
   weaken(my $app = $self);
-  my $extra = sub { $app ? [ $app->permissions->additional_directory_paths ] : [] };
-  # Confined unless the policy asks for paths outside the roots (Claude layout, ADR 0023).
-  my $confine = sub { $app ? !$app->permissions->ask_outside_roots : 1 };
-  my $files = $self->_file_tools_server(
-    read_state  => $self->file_read_state,
-    sees_images => sub { $app ? $app->_engine_sees_images : 0 },
-    reads_pdf   => sub { $app ? $app->_engine_reads_pdf : 0 },
-  );
+  my $files = $self->_follow_working_root($self->_file_tools_server($self->_main_file_tools_args), 'files');
 
   my $bash = $self->bash_tools->server;
 
@@ -3030,13 +3533,8 @@ sub _build_stock_tool_servers {
     answer => sub { $app ? $app->_web_fetch_answer_f(@_) : Future->fail("the application is gone\n") },
   );
 
-  my $search = Langertha::Raider::SearchTools->new(
-    root        => $self->root,
-    extra_roots => $extra,
-    confine     => $confine,
-    hider       => sub { $app ? $app->_search_hider : undef },
-  )->server;
-  my $todo   = $self->task_tools ? $self->_todo_tools->task_server : $self->_todo_tools->server;
+  my $search = $self->_follow_working_root($self->_search_tools_server, 'search');
+  my $todo  = $self->task_tools ? $self->_todo_tools->task_server : $self->_todo_tools->server;
   my $ask    = Langertha::Raider::AskTools->new(
     answerer => sub { $app && $app->has_on_ask_user ? $app->on_ask_user : undef },
   )->server;
@@ -3044,22 +3542,62 @@ sub _build_stock_tool_servers {
   return [ $files, $bash, $web, $search, $todo, $ask, ( $self->_cron_wanted ? $self->cron_tools->server : () ) ];
 }
 
+# The file tools of the main run: over file_read_state, asking the engine
+# whether it sees images and reads PDFs.
+sub _main_file_tools_args {
+  my ($self) = @_;
+  weaken(my $app = $self);
+  return (
+    read_state  => $self->file_read_state,
+    sees_images => sub { $app ? $app->_engine_sees_images : 0 },
+    reads_pdf   => sub { $app ? $app->_engine_reads_pdf : 0 },
+  );
+}
+
 # A new server with the file tools over the root, with the additional
 # directories and the confinement of the policy -- both asked on every call --
 # and the given read_state, sees_images and reads_pdf. The application mounts one over
-# file_read_state; a subagent one over a read state of its own (ADR 0023).
+# file_read_state; a subagent one over a read state of its own (ADR 0023). A
+# subagent in a worktree (ADR 0032) passes its root and its policy (a code
+# ref answering it), whose additional directories and confinement then hold.
 sub _file_tools_server {
   my ($self, %o) = @_;
-  weaken(my $app = $self);
+  my $policy = $self->_tools_policy($o{policy});
   return build_file_tools_server(
-    root        => $self->root,
-    extra_roots => sub { $app ? [ $app->permissions->additional_directory_paths ] : [] },
+    root        => $o{root} // $self->root,
+    extra_roots => sub { my $p = $policy->(); $p ? [ $p->additional_directory_paths ] : [] },
     # Confined unless the policy asks for paths outside the roots (Claude layout, ADR 0023).
-    confine     => sub { $app ? !$app->permissions->ask_outside_roots : 1 },
+    confine     => sub { my $p = $policy->(); $p ? !$p->ask_outside_roots : 1 },
     ( $o{read_state} ? ( read_state => $o{read_state} ) : () ),
     ( exists $o{sees_images} ? ( sees_images => $o{sees_images} ) : () ),
     ( exists $o{reads_pdf} ? ( reads_pdf => $o{reads_pdf} ) : () ),
   );
+}
+
+# A new server with the search tools over the root (or $o{root}), with the
+# additional directories, the confinement and the Read rules' hider of the
+# application's policy (or of $o{policy}, a code ref answering one) -- asked
+# on every call.
+sub _search_tools_server {
+  my ($self, %o) = @_;
+  weaken(my $app = $self);
+  my $policy = $self->_tools_policy($o{policy});
+  return Langertha::Raider::SearchTools->new(
+    root        => $o{root} // $self->root,
+    extra_roots => sub { my $p = $policy->(); $p ? [ $p->additional_directory_paths ] : [] },
+    confine     => sub { my $p = $policy->(); $p ? !$p->ask_outside_roots : 1 },
+    hider       => sub { my $p = $policy->(); $app && $p ? $app->_search_hider($p) : undef },
+  )->server;
+}
+
+# A code ref answering the policy the file and search tools ask on every
+# call: $policy when given, else the application's permissions (so
+# /reload reaches the mounted tools).
+sub _tools_policy {
+  my ($self, $policy) = @_;
+  return $policy if $policy;
+  weaken(my $app = $self);
+  return sub { $app ? $app->permissions : undef };
 }
 
 =attr file_read_state
@@ -3187,11 +3725,19 @@ sub _todos_updated {
 
 sub _build_perl_tool_server {
   my ($self) = @_;
+  return $self->_follow_working_root($self->_perl_tools_server, 'perl');
+}
+
+# A new server with the Perl tools working in the root (or $o{root}: a
+# worktree, ADR 0032), with the private lib of the root.
+sub _perl_tools_server {
+  my ($self, %o) = @_;
   my $lib_target = $self->has_preferred_lib_target
     ? $self->preferred_lib_target
     : ($self->_load_yml_options->{preferred_lib_target} // undef);
   return build_perl_tools_server(
-    root       => $self->root,
+    root       => $o{root} // $self->root,
+    lib_root   => $self->root,
     loop       => $self->loop,
     lib_target => $lib_target,
   );
@@ -3360,7 +3906,8 @@ sub _build_raider {
     _tool_gate                 => $self->tool_gate,
     ( $self->context->claude_layout ? ( _tool_hook => $self->tool_hook ) : () ),
     async_tools                => { %{ $self->_async_agent_tools },
-      %{ $self->_shell_async_tools(recipient => 'main', detached => 0) } },
+      %{ $self->_shell_async_tools(recipient => 'main', detached => 0,
+        working_directory => sub { $app ? $app->working_root : undef }) } },
     engine                     => $self->_engine,
     mission                    => $self->mission,
     max_iterations             => $self->max_iterations,
@@ -3507,7 +4054,8 @@ one. An empty C<$text> runs nothing and returns nothing.
 # run.finished is written by end_run.
 my %JOURNAL_TYPE = map { $_ => 1 } qw( run.started message tool.call tool.result todo.updated
   permission.asked permission.granted permission.denied permission.mode hook.ran hook.message
-  model.usage agent.started agent.finished agent.warning mcp.server mcp.tools_changed );
+  model.usage agent.started agent.finished agent.warning mcp.server mcp.tools_changed
+  worktree.entered worktree.exited );
 
 =method is_journal_type
 
@@ -3519,7 +4067,11 @@ the C<permission.*> events (ADR 0021), C<hook.ran> and C<hook.message> (ADR
 0022), C<agent.started> and C<agent.finished> of the subagents it starts and
 C<agent.warning> about them (ADR 0020), C<model.usage> of a tool's own
 model call (C<web_fetch>'s prompt, ADR 0026), C<mcp.server> and
-C<mcp.tools_changed> of the configured MCP servers (ADR 0029). C<run.finished> is written by
+C<mcp.tools_changed> of the configured MCP servers (ADR 0029),
+C<worktree.entered> (C<path>, C<branch>, C<created>) and C<worktree.exited>
+(C<path>, C<branch>, C<removed>, C<reason> C<exit_worktree>, C<clear> or
+C<session_end>) of the L</working_root> (ADR 0032 E<sect>6), outside a run
+into the session the worktree was entered in. C<run.finished> is written by
 L</end_run>.
 
 =cut
@@ -3606,7 +4158,10 @@ sub _with_resource_mentions {
 
 Starts a run as L</run_prompt> does, for a surface that drives L</run>
 itself: the run gets the next run id of C<session>, C<run.started> (engine
-and model) and C<run.state> C<running>. L</end_run> ends it.
+and model) and C<run.state> C<running>. L</end_run> ends it. When the
+L</working_root> moved since the mission was compiled, the mission is
+compiled again first (L</reload_mission>), so it names the new working
+directory.
 
 The options of one run (ADR 0030 E<sect>3), all undone by L</end_run>:
 
@@ -3637,6 +4192,11 @@ sub begin_run {
   my ( $self, %o ) = @_;
   my $session = $o{session};
   $self->_todos([]) unless $self->task_tools;
+  # The working root moved since the mission was compiled (ADR 0032 §3).
+  if ($self->_mission_stale) {
+    $self->_mission_stale(0);
+    $self->reload_mission if $self->_has_raider;
+  }
   $self->file_read_state->clear;
   $self->_seed_read_state;
   $self->slash_command_class->record_reads({ files_read => $o{attach_reads} }, $self->file_read_state)

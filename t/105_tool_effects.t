@@ -42,6 +42,7 @@ subtest 'the table only names the five classes' => sub {
     is([ grep { !$valid{$_} } @$fx ], [], $name.': valid classes');
   }
   is($table->effects_for('write_file'), ['write'], 'write_file');
+  is($table->effects_for($_), ['write'], $_.': a checkout and a branch (ADR 0032)') for qw( enter_worktree exit_worktree );
   is($table->effects_for('read_file'),  ['read'],  'read_file: read and write are separate');
   is($table->effects_for('bash'),       ['code'],  'bash');
   is($table->effects_for('perl_check'), ['code'],  'perl -c runs BEGIN/use');

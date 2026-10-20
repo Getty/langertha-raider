@@ -48,6 +48,10 @@ Telegram sender to a principal; a prompt can never set it.
 **Workspace**: a registered working directory with a stable id and a trust decision.
 _Avoid_: project root (as an identity), repo.
 
+**Working root**: the directory a run's file, search and shell tools and its permission
+policy work in — the root, or a git worktree of it after `enter_worktree` or for an isolated
+subagent (ADR 0032). Configuration, context and the journal stay at the root.
+
 **Session**: a persistent conversation, bound to one principal and one workspace (or the
 home), stored as JSONL next to its scope (ADR 0003). _Avoid_: process, PID.
 

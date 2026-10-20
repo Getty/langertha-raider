@@ -16,6 +16,7 @@ use Langertha::Raider::Permissions::ReadOnlyBash;
 use Langertha::Raider::Permissions::Rule;
 use Langertha::Raider::ToolEffects;
 use Langertha::Raider::ToolNames;
+use Langertha::Raider::Worktree;
 
 =synopsis
 
@@ -68,7 +69,8 @@ asks too, in every mode but C<plan> and C<bypassPermissions>: the person
 agrees to plan mode, as in Claude Code (ADR 0025).
 
 =item C<acceptEdits> -- as C<default>, and C<write_file> / C<edit_file> /
-C<multi_edit> are allowed inside the root or an additional directory.
+C<multi_edit> are allowed inside the root or an additional directory, and
+so are C<enter_worktree> and C<exit_worktree> (ADR 0032 E<sect>4).
 
 =item C<auto> -- as C<acceptEdits>, and bash commands that only read are
 allowed without asking: a fixed list
@@ -104,6 +106,9 @@ my %WRITER    = map { $_ => 1 } qw( write_file edit_file multi_edit );
 my %READER    = map { $_ => 1 } qw( read_file list_files glob grep );
 my %PATH_TOOL = ( %WRITER, %READER );
 
+# The tools that move the session into a worktree and out (ADR 0032 §4).
+my %WORKTREE_TOOL = map { $_ => 1 } qw( enter_worktree exit_worktree );
+
 my %EFFECT_TEXT = (
   write   => 'changes files',
   code    => 'runs code',
@@ -111,13 +116,14 @@ my %EFFECT_TEXT = (
   message => 'sends messages',
 );
 
-has root => ( is => 'ro', isa => 'Str', required => 1 );
+has root => ( is => 'ro', isa => 'Str', required => 1, writer => '_set_root' );
 
 =attr root
 
 The project root. Required. Relative rule paths and relative additional
 directories are read against it, and so are relative path arguments, as the
-file tools do.
+file tools do. The application's policy follows its working root
+(L</move_to>).
 
 =cut
 
@@ -222,6 +228,23 @@ C<plan> refuse first; C<bypassPermissions> allows it, as Claude Code does.
 
 =cut
 
+has worktree_isolation => (
+  is        => 'ro',
+  isa       => 'Maybe[HashRef]',
+  predicate => 'has_worktree_isolation',
+  writer    => '_set_worktree_isolation',
+  clearer   => '_clear_worktree_isolation',
+);
+
+=attr worktree_isolation
+
+C<< { top => '/repo', worktree => '/repo/.claude/worktrees/agent-1' } >>
+when the run works in a worktree (ADR 0032 E<sect>3): the main checkout's
+top and the worktree's. Then L</main_checkout_refusal> refuses edits into
+the main checkout. Unset by default.
+
+=cut
+
 has ignored_modes => ( is => 'ro', isa => 'ArrayRef', default => sub { [] } );
 
 =attr ignored_modes
@@ -284,6 +307,7 @@ sub from_sources {
     ( $arg{session_rules}  ? ( session_rules  => $arg{session_rules} )  : () ),
     ( $arg{run_rules}      ? ( run_rules      => $arg{run_rules} )      : () ),
     ( $arg{ask_outside_roots} ? ( ask_outside_roots => 1 ) : () ),
+    ( $arg{worktree_isolation} ? ( worktree_isolation => $arg{worktree_isolation} ) : () ),
   );
 }
 
@@ -300,8 +324,8 @@ L<Langertha::Raider::Context::Settings/permissions>. The rules and
 additional directories of all sources are concatenated. The mode is the
 first of C<cli_mode> and the sources' C<default_mode> in the order given
 that is a mode; a C<default_mode> that is none is skipped and kept in
-L</ignored_modes>. Without any, C<default>. C<session_rules>, C<run_rules>, C<source_servers>
-and C<ask_outside_roots> are passed on as they are (a policy read again keeps the
+L</ignored_modes>. Without any, C<default>. C<session_rules>, C<run_rules>, C<source_servers>,
+C<ask_outside_roots> and C<worktree_isolation> are passed on as they are (a policy read again keeps the
 session's rules). Croaks on an invalid C<cli_mode> -- the command line
 refuses it before.
 
@@ -535,9 +559,11 @@ allowing a session rule invalidates approvals given before.
 =cut
 
 sub for_subrun {
-  my ( $self ) = @_;
+  my ( $self, %o ) = @_;
+  my $isolation = exists $o{worktree_isolation} ? $o{worktree_isolation} : $self->worktree_isolation;
   return ( ref $self )->new(
-    root                   => $self->root,
+    root                   => $o{root} // $self->root,
+    ( $isolation ? ( worktree_isolation => $isolation ) : () ),
     home                   => $self->home,
     mode                   => $self->mode,
     mode_source            => $self->mode_source,
@@ -563,6 +589,17 @@ mode does not take the session with it); a session rule allowed in either
 holds in both. A sub-run never gets more than its parent had: there is no
 argument to widen it.
 
+    my $isolated = $policy->for_subrun(
+      root               => '/repo/.claude/worktrees/agent-1',
+      worktree_isolation => { top => '/repo', worktree => '/repo/.claude/worktrees/agent-1' },
+    );
+
+A subagent in a worktree of its own (ADR 0032 E<sect>2) moves the policy:
+C<root> replaces the root (the rules and additional directories mean the
+same files in the copy), C<worktree_isolation> sets
+L</worktree_isolation>. Without them the sub-run keeps the parent's -- a
+subagent of an isolated one works in the same worktree.
+
 =method own_run_rules
 
     $policy_of_subagent->own_run_rules;
@@ -580,6 +617,31 @@ sub own_run_rules {
   return;
 }
 
+=method move_to
+
+    $policy->move_to(
+      root               => '/repo/.claude/worktrees/session-1',
+      worktree_isolation => { top => '/repo', worktree => '/repo/.claude/worktrees/session-1' },
+    );
+    $policy->move_to( root => '/repo' );   # back: no isolation
+
+Moves this policy to another root in place -- the application's policy
+follows its working root (ADR 0032 E<sect>3): L</root> becomes C<root>,
+L</worktree_isolation> becomes C<worktree_isolation> or is cleared without
+it. Mode, rules, session and run rules stay; so do the approvals bound to
+L</policy_revision>, which the root is no part of. Policies a
+L</for_subrun> made before keep their root.
+
+=cut
+
+sub move_to {
+  my ( $self, %o ) = @_;
+  croak __PACKAGE__.'->move_to needs a root' unless defined $o{root} && length $o{root};
+  $self->_set_root( $o{root} );
+  $o{worktree_isolation} ? $self->_set_worktree_isolation( $o{worktree_isolation} ) : $self->_clear_worktree_isolation;
+  return;
+}
+
 #### Deciding
 
 sub _ctx_base {
@@ -590,6 +652,21 @@ sub _ctx_base {
     return defined $real && $real ne $abs ? [ $abs, $real ] : [ $abs ];
   };
   return { roots => $both->( $self->root ), homes => $both->( $self->home ) };
+}
+
+=method is_builtin_call
+
+    my $ours = $policy->is_builtin_call( { name => 'enter_worktree', source => 'engine:3' } );
+
+True when the call's tool is raider's own: its source is no C<catalog:NAME>
+and none of the L</source_servers>.
+
+=cut
+
+sub is_builtin_call {
+  my ( $self, $call ) = @_;
+  my ( $builtin ) = $self->_call_origin($call);
+  return $builtin ? 1 : 0;
 }
 
 sub _call_origin {
@@ -670,6 +747,9 @@ sub decide {
     if $mode eq 'auto' && $builtin && ($name eq 'bash' || $name eq 'monitor') && $self->_read_only_bash($call);
   return $self->_by_mode( allow => $mode.' mode, inside the allowed directories' )
     if ( $mode eq 'acceptEdits' || $mode eq 'auto' ) &&$builtin && $self->_edit_in_allowed_roots( $call, $ctx );
+  # A worktree of the session is an edit too (ADR 0032 §4).
+  return $self->_by_mode( allow => $mode.' mode, a worktree of the session' )
+    if ( $mode eq 'acceptEdits' || $mode eq 'auto' ) && $builtin && $WORKTREE_TOOL{$name};
 
   my $what = $class eq 'unknown'
     ? $name.' is not a tool of raider'.( defined $server ? " (MCP server '".$server."')" : '' )
@@ -803,6 +883,59 @@ directories. Empty when the path stays inside (or the call is of another
 tool). A symbolic link inside the root that points out of it is outside.
 
 =cut
+
+#### Edits into the main checkout
+
+=method worktree_class
+
+The class that lists a repository's worktrees for
+L</main_checkout_refusal>: L<Langertha::Raider::Worktree>.
+
+=cut
+
+sub worktree_class { 'Langertha::Raider::Worktree' }
+
+sub main_checkout_refusal {
+  my ( $self, $call ) = @_;
+  my $iso = $self->worktree_isolation or return;
+  return unless $WRITER{ $call->{name} // '' };
+  my $path = ref $call->{arguments} eq 'HASH' ? $call->{arguments}{path} : undef;
+  return unless defined $path && !ref $path && length $path;
+  my ( $abs, $real ) = Langertha::Raider::Permissions::Rule->call_paths( $path, $self->_ctx_base );
+  $real //= $abs;
+  my ( $top, $tree ) = map { $self->_real_dir($_) } @$iso{qw( top worktree )};
+  my $inside = sub { my ( $dir ) = @_; $real eq $dir || index( $real, $dir.'/' ) == 0 };
+  return unless $inside->($top);
+  return if $inside->($tree);
+  # Any other worktree of the repository is not the main checkout either.
+  my $list = $self->worktree_class->new->list($top);
+  return if first { !$_->{main} && $inside->( $self->_real_dir( $_->{path} ) ) } @{ $list->{worktrees} // [] };
+  my $rel = substr( $real, length $top ) =~ s{\A/}{}r;
+  return $abs.' is in the main checkout '.$top.'; this session works in the worktree '.$tree.'. Edit '
+    .$tree.( length $rel ? '/'.$rel : '' ).' instead.';
+}
+
+=method main_checkout_refusal
+
+    my $text = $policy->main_checkout_refusal($call);   # or nothing
+
+With L</worktree_isolation>: for a C<write_file>, C<edit_file> or
+C<multi_edit> whose C<path> (relative to the L</root>, real path followed)
+is inside the main checkout's top but outside every worktree of the
+repository (C<git worktree list>), the refusal of ADR 0032 E<sect>3:
+
+    PATH is in the main checkout TOP; this session works in the worktree W. Edit W/REL instead.
+
+Nothing for every other call. The application's gate asks it before any
+rule or mode (L<Langertha::Raider::Application/tool_gate>).
+
+=cut
+
+sub _real_dir {
+  my ( $self, $dir ) = @_;
+  my $abs = Langertha::Raider::Permissions::Rule->_lexical( path($dir)->absolute->stringify );
+  return realpath($abs) // $abs;
+}
 
 #### Reading below a search root
 

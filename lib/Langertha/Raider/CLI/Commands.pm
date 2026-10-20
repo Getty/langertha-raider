@@ -320,6 +320,7 @@ sub cmd_clear {
   my $t = $app->trace_plugin;
   $t->token_stats({ prompt => 0, completion => 0, total => 0, calls => 0 }) if $t;
   $self->output->say_meta('history cleared.');
+  $self->output->say_meta($_) for $app->take_meta_notes;
   return;
 }
 

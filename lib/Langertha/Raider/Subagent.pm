@@ -7,6 +7,7 @@ use Future;
 use Future::AsyncAwait;
 use JSON::MaybeXS;
 use MCP::Server;
+use Path::Tiny;
 use Scalar::Util qw( blessed refaddr weaken );
 use Time::HiRes ();
 use Langertha::Raider;
@@ -15,6 +16,7 @@ use Langertha::Raider::Briefing;
 use Langertha::Raider::FileTools::ReadState;
 use Langertha::Raider::PlanTools;
 use Langertha::Raider::TodoTools;
+use Langertha::Raider::Worktree;
 
 =synopsis
 
@@ -30,6 +32,7 @@ use Langertha::Raider::TodoTools;
         policy   => $app->permissions,        # the caller's permission policy
         task_id  => undef,                    # the calling subagent's agent ID
         detached => 0,                        # the caller runs in the background
+        root     => $app->root,               # the caller's working root
       } },
     );
     my $server = $agent_tools->server;        # agent, send_message
@@ -167,6 +170,40 @@ subagent only. Its own task list fires C<TaskCreated> and C<TaskCompleted>
 the same way, before the change, with the same fields; a block refuses the
 change with the hook's reason as the tool's error result. A continued run
 fires no C<SubagentStart>.
+
+=item * B<Worktree isolation> (ADR 0032 E<sect>2, ADR 0027 E<sect>7). The
+call's C<isolation: "worktree"> or the agent file's C<isolation: worktree>
+(L</isolated>) runs the subagent in a git worktree of its own
+(L<Langertha::Raider::Worktree>): C<TOP/.claude/worktrees/agent-N> in the
+Claude layout, C<TOP/.raider/worktrees/agent-N> otherwise
+(L<Langertha::Raider::Application/worktrees_dir>), TOP the main checkout
+of the caller's root, on branch C<worktree-agent-N>, from the base of
+L<Langertha::Raider::Application/worktree_base_ref>, with the
+F<.worktreeinclude> copy. An agent ID whose directory or branch is left
+from earlier is skipped. A caller root in a subdirectory works in the same
+subdirectory of the worktree (L</working_root>). Not in a git repository:
+C<isolation "worktree" needs a git repository; ROOT is not inside one.>,
+and nothing starts; an agent file's other C<isolation> value refuses the
+spawn too (L</isolation_refusal>). The file, search and shell tools work in
+the working root (the same classes and settings, the root replaced), and
+so do the Perl tools when the caller has them; every hook input of the
+subagent has the working root as C<cwd>; the
+policy is the caller's moved there (L</permissions>), which refuses edits
+into the main checkout; the mission is compiled for the caller's context
+with the working root as its working directory. The worktree is locked
+(C<raider agent agent_N>) while a run runs. After every run, however it
+ended, it is unlocked; with no changes (a clean status, untracked files
+counting, and no commit beyond the base) worktree and branch are removed,
+else both stay and are named in the result (L</result_text>), the
+notification, the registry entry (C<worktree>, C<branch>) and
+C<agent.finished> (C<worktree_kept>; C<agent.started> has C<worktree> and
+C<branch>). A cancelled run nobody hears of -- a new conversation, leaving
+raider, a cancelled turn -- names it in a meta line instead
+(L<Langertha::Raider::Application/note_meta>: C<agent agent_1 left its
+worktree P on branch B>). A git command that fails keeps the worktree
+(C<worktree kept: REASON>), never failing the answer. A continued run
+uses the worktree again, checks its branch out into the same path when the
+worktree is gone, or makes it anew when both are.
 
 =item * B<Messages and children.> What waits for the subagent in the
 registry's queue -- the notifications of its own background subagents, the
@@ -307,6 +344,122 @@ every continued run).
 
 =cut
 
+has isolation => (
+  is  => 'ro',
+  isa => 'Maybe[Str]',
+);
+
+=attr isolation
+
+The C<isolation> of the call (C<worktree>), if any. The agent file's
+C<isolation> holds as well (L</isolated>).
+
+=cut
+
+has caller_root => (
+  is      => 'ro',
+  isa     => 'Str',
+  lazy    => 1,
+  builder => '_build_caller_root',
+);
+
+=attr caller_root
+
+The caller's working root: where its file, search and shell tools work.
+Defaults to the application's L<Langertha::Raider::Application/working_root>
+-- a worktree while the main run works in one (ADR 0032 E<sect>3); a
+subagent of an isolated one gets that one's worktree (L</working_root>).
+
+=cut
+
+sub _build_caller_root { $_[0]->app->working_root }
+
+has worktree => (
+  is       => 'ro',
+  isa      => 'Maybe[HashRef]',
+  init_arg => undef,
+  writer   => '_set_worktree',
+);
+
+=attr worktree
+
+The worktree of an L</isolated> subagent once it is planned (ADR 0032
+E<sect>2): C<top> (the main checkout), C<source> (the working tree of the
+caller's root, where F<.worktreeinclude> is read), C<path>, C<branch>,
+C<root> (L</working_root>) and, once this process made it, C<base> (the
+commit it branched from). Undef otherwise.
+
+=cut
+
+=method isolated
+
+True when the subagent runs in a worktree of its own: the call's
+L</isolation> or the agent file's C<isolation> is C<worktree> (ADR 0032
+E<sect>2; the call cannot turn the file's off).
+
+=method isolation_refusal
+
+    my $text = $sub->isolation_refusal;   # or nothing
+
+The error result when the agent file's C<isolation> is not C<worktree>:
+C<Agent 'NAME': isolation "V" is not supported; use "worktree".>
+
+=method working_root
+
+Where the subagent's file, search and shell tools work and what its
+mission calls the working directory: the worktree's C<root> (the same
+subdirectory of the worktree as the caller's root is of its working tree)
+for an L</isolated> subagent, else L</caller_root>.
+
+=method worktree_name
+
+    my $name = $sub->worktree_name('agent_3');   # agent-3
+
+The directory name of an agent's worktree under
+L<Langertha::Raider::Application/worktrees_dir>; its branch is
+C<worktree-NAME>.
+
+=method worktree_class
+
+The class doing the git work: L<Langertha::Raider::Worktree>.
+
+=cut
+
+sub isolated {
+  my ( $self ) = @_;
+  return 1 if ( $self->agent->{isolation} // '' ) eq 'worktree';
+  return ( $self->isolation // '' ) eq 'worktree' ? 1 : 0;
+}
+
+sub isolation_refusal {
+  my ( $self ) = @_;
+  my $value = $self->agent->{isolation};
+  return if !defined $value || $value eq 'worktree';
+  return 'Agent \''.$self->agent->{name}.'\': isolation "'.$value.'" is not supported; use "worktree".';
+}
+
+sub working_root {
+  my ( $self ) = @_;
+  my $wt = $self->worktree;
+  return $wt ? $wt->{root} : $self->caller_root;
+}
+
+sub worktree_name {
+  my ( $self, $id ) = @_;
+  return $id =~ s/\Aagent_/agent-/r;
+}
+
+sub worktree_class { 'Langertha::Raider::Worktree' }
+
+has _git => ( is => 'ro', init_arg => undef, lazy => 1, builder => '_build__git' );
+
+sub _build__git { $_[0]->worktree_class->new }
+
+# True when the subagent's tools work somewhere else than the application's
+# root: its file and search tools are then built for its working root, over
+# its own policy.
+sub _moved { $_[0]->working_root ne $_[0]->app->root ? 1 : 0 }
+
 has task_id => (
   is        => 'ro',
   isa       => 'Str',
@@ -425,14 +578,21 @@ has permissions => (
 =attr permissions
 
 The subagent's policy: L<Langertha::Raider::Permissions/for_subrun> of
-L</caller_policy>, built once.
+L</caller_policy>, built once -- for an L</isolated> one with the
+L</working_root> as root and the worktree as
+L<Langertha::Raider::Permissions/worktree_isolation>, so project rules mean
+the same files in the copy and edits into the main checkout are refused.
 
 =cut
 
 sub _build_permissions {
   my ( $self ) = @_;
   my $caller = $self->has_caller_policy ? $self->caller_policy : $self->app->permissions;
-  return $caller->for_subrun;
+  my $wt = $self->worktree;
+  return $caller->for_subrun( $wt ? (
+    root               => $wt->{root},
+    worktree_isolation => { top => $wt->{top}, worktree => $wt->{path} },
+  ) : () );
 }
 
 has briefing => (
@@ -635,6 +795,8 @@ counts as unread until the subagent reads it itself.
 
 has _own_todos       => ( is => 'ro', init_arg => undef, lazy => 1, builder => '_build_own_todos' );
 has _own_file_server => ( is => 'ro', init_arg => undef, lazy => 1, builder => '_build_own_file_server' );
+has _own_search_server => ( is => 'ro', init_arg => undef, lazy => 1, builder => '_build_own_search_server' );
+has _own_perl_server   => ( is => 'ro', init_arg => undef, lazy => 1, builder => '_build_own_perl_server' );
 
 has last_outcome => (
   is       => 'ro',
@@ -685,7 +847,7 @@ sub one_shot { $_[0]->agent->{one_shot} ? 1 : 0 }
 
     my $agent_tools = Langertha::Raider::Subagent->agent_tools(
       app => $app, depth => $depth,
-      caller => sub { my ( %ctx ) = @_; { servers, session, call, event, policy, task_id, detached } });
+      caller => sub { my ( %ctx ) = @_; { servers, session, call, event, policy, task_id, detached, root } });
 
 The L<Langertha::Raider::AgentTools> with the tools C<agent> and
 C<send_message> for a run at C<$depth>, over the agent catalogue of the
@@ -694,7 +856,8 @@ for the raider of that run. Every call asks C<caller> -- with the call's
 context (L<Langertha::Raider/async_tools>) -- for the state of the calling
 run at that moment: its active tool set, session, the id of the call (the
 context's C<call>), its event stream, its permission policy, its agent ID
-(undef for the main run) and whether it runs detached. An C<agent> call
+(undef for the main run), whether it runs detached and its working root
+(L</caller_root>; the application's root when not given). An C<agent> call
 runs a new subagent of the invocant class at C<$depth + 1> (L</spawn_f>), a
 C<send_message> call goes to L</send_message>.
 
@@ -736,10 +899,12 @@ sub agent_tool_server {
       call => { description, prompt, model, name, run_in_background },
     );
 
-One C<agent> call: a new subagent at C<$depth + 1>; a briefing that does
-not resolve refuses it, so does the concurrency limit (L</limit_refusal>);
-else it runs in the foreground (L</foreground_f>) or starts in the
-background (L</start_background>). A Future of the tool result.
+One C<agent> call: a new subagent at C<$depth + 1>; an agent file's
+C<isolation> other than C<worktree> refuses it (L</isolation_refusal>), so
+do a briefing that does not resolve and the concurrency limit
+(L</limit_refusal>); else it runs in the foreground (L</foreground_f>) or
+starts in the background (L</start_background>), which make the worktree
+of an L</isolated> one first. A Future of the tool result.
 
 =cut
 
@@ -757,8 +922,12 @@ sub spawn_f {
     caller_servers => $c->{servers},
     ( defined $call->{model} ? ( model => $call->{model} ) : () ),
     ( defined $call->{name}  ? ( name  => $call->{name} )  : () ),
+    ( defined $call->{isolation} ? ( isolation => $call->{isolation} ) : () ),
     ( $c->{policy} ? ( caller_policy => $c->{policy} ) : () ),
   );
+  if ( defined( my $refusal = $sub->isolation_refusal ) ) {
+    return Future->done( $refusal, 1 );
+  }
   my $briefing = $sub->briefing;
   return Future->done( $briefing->missing_note, 1 ) if $briefing->has_missing;
   if ( defined( my $refusal = $class->limit_refusal($app) ) ) {
@@ -795,6 +964,7 @@ sub _caller_args {
     caller_task_id  => $c->{task_id},
     caller_detached => $c->{detached} ? 1 : 0,
     ( $c->{session} ? ( caller_session => $c->{session} ) : () ),
+    ( defined $c->{root} ? ( caller_root => $c->{root} ) : () ),
   );
 }
 
@@ -802,7 +972,9 @@ sub _caller_args {
 
     my ( $text, $is_error ) = await $sub->foreground_f;
 
-Registers the subagent and runs it in the foreground (L</run_f>) on the
+Makes the worktree of an L</isolated> subagent (an error result when that
+fails, nothing started), registers the subagent and runs it in the
+foreground (L</run_f>) on the
 application's loop; a Future of the tool result (L</result_text>), which
 the caller's raider awaits. While it runs, the application knows it as
 live, so cancelling the main run cancels it -- unless it is L</detached>;
@@ -825,6 +997,9 @@ sub foreground_f {
   my $app = $self->app;
   my $briefing = $self->briefing;
   return Future->done( $briefing->missing_note, 1 ) if $briefing->has_missing;
+  if ( defined( my $error = $self->_open_worktree ) ) {
+    return Future->done( $error, 1 );
+  }
   $self->_register;
   my $live = $app->_live_subagents;
   my $key  = refaddr $self;
@@ -854,7 +1029,8 @@ sub run {
 
     my ( $text, $is_error ) = $sub->start_background;
 
-Registers the subagent, starts its run (L</run_f>) on the application's
+Makes the worktree of an L</isolated> subagent as L</foreground_f> does,
+registers the subagent, starts its run (L</run_f>) on the application's
 loop with the next turn of the loop, and returns at once with
 L</launch_text>. The registry holds the run; its end becomes a
 notification for L</recipient> (L</notification>).
@@ -866,6 +1042,9 @@ sub start_background {
   my $app = $self->app;
   my $briefing = $self->briefing;
   return ( $briefing->missing_note, 1 ) if $briefing->has_missing;
+  if ( defined( my $error = $self->_open_worktree ) ) {
+    return ( $error, 1 );
+  }
   $self->_set_background(1);
   # It outlives the run it was started in: its own copy of the run rules.
   $self->permissions->own_run_rules;
@@ -928,9 +1107,13 @@ An agent of an earlier process: the newest child session of the caller's
 session whose C<session.created> has C<agent_id> (or C<name>) C<to>. Its
 agent is looked up by name in the current catalogue; its history is
 replayed into a new subagent (ADR 0015), which takes the session over and
-is registered under the agent ID, finished. Returns the subagent, an error
-text (the agent is not defined any more, is one-shot, or its session cannot
-be opened), or nothing when there is no such session.
+is registered under the agent ID, finished. An agent that ran in a
+worktree (its C<agent.started> names one) or whose file says
+C<isolation: worktree> is L</isolated> again, with the worktree path and
+branch its agent ID gives. Returns the subagent, an error
+text (the agent is not defined any more, is one-shot, its session cannot
+be opened, or its root is no git repository any more), or nothing when
+there is no such session.
 
 =cut
 
@@ -967,15 +1150,23 @@ sub restore {
     prompt         => $first // '',
     caller_servers => $c->{servers},
     ( defined $created->{name} ? ( name => $created->{name} ) : () ),
+    ( $started && defined $started->{worktree} ? ( isolation => 'worktree' ) : () ),
     ( $c->{policy} ? ( caller_policy => $c->{policy} ) : () ),
   );
+  $sub->_set_task_id($id);
+  if ( defined( my $refusal = $sub->isolation_refusal ) ) {
+    return ( undef, $refusal );
+  }
+  # An isolated agent goes on in its worktree (made again on resume when it is gone).
+  if ( $sub->isolated && defined( my $error = $sub->_plan_worktree ) ) {
+    return ( undef, 'Agent '.$id.' cannot be continued: '.$error );
+  }
   my $session = eval { $store->open( $child->{id} ) }
     or return ( undef, 'Agent '.$id.' cannot be continued: '.$class->_error_text($@) );
   $sub->_set_session($session);
   my $raider = $sub->raider;
   $raider->add_history( $_->{role}, $_->{content} ) for @$history;
   $raider->add_session_history( @{ $journal->session_history_messages } );
-  $sub->_set_task_id($id);
   $sub->_register( status => 'completed', background => 1 );
   return $sub;
 }
@@ -1030,11 +1221,9 @@ sub resume {
 sub _register {
   my ( $self, %fields ) = @_;
   my $tasks = $self->app->tasks;
-  unless ( $self->has_task_id ) {
-    my ( $taken ) = $self->_taken_ids;
-    $self->_set_task_id( $tasks->next_id( 'agent', $taken ? ( taken => $taken ) : () ) );
-  }
+  $self->_assign_task_id;
   weaken( my $weak = $self );
+  my $wt = $self->worktree;
   return $tasks->add(
     id          => $self->task_id,
     kind        => 'agent',
@@ -1046,8 +1235,23 @@ sub _register {
     background  => $self->background,
     subagent    => $self,
     stop        => sub { $weak->cancel if $weak },
+    ( $wt ? ( worktree => $wt->{path}, branch => $wt->{branch} ) : () ),
     %fields,
   );
+}
+
+# The agent ID, unless the subagent has one: the next of the registry,
+# skipping those the caller's session already gave out and those $also
+# says are taken (an isolated agent: a worktree or branch of that name is
+# left from earlier).
+sub _assign_task_id {
+  my ( $self, $also ) = @_;
+  return if $self->has_task_id;
+  my ( $taken ) = $self->_taken_ids;
+  my @taken = grep { defined } $taken, $also;
+  $self->_set_task_id( $self->app->tasks->next_id( 'agent',
+    @taken ? ( taken => sub { my ( $id ) = @_; scalar grep { $_->($id) } @taken } ) : () ) );
+  return;
 }
 
 # The agent IDs the child sessions of the caller's session already carry
@@ -1058,6 +1262,124 @@ sub _taken_ids {
   my %taken = map { defined $_->{created}{agent_id} ? ( $_->{created}{agent_id} => 1 ) : () }
     eval { $self->app->session_store->children_of( $self->caller_session->id ) };
   return sub { $taken{ $_[0] } };
+}
+
+#### The worktree of an isolated subagent (ADR 0032 section 2)
+
+# Before the first run: the worktree planned, then made and locked. The
+# error text when it cannot be (nothing starts), or nothing.
+sub _open_worktree {
+  my ( $self ) = @_;
+  return unless $self->isolated;
+  unless ( $self->worktree ) {
+    my $error = $self->_plan_worktree;
+    return $error if defined $error;
+  }
+  return $self->_ensure_worktree;
+}
+
+# Where the worktree goes: under the main checkout's top, named after the
+# agent ID (given here unless the subagent has one, skipping IDs whose
+# worktree directory or branch is left from earlier), the working root in
+# the same subdirectory as the caller's. Sets worktree; the error text when
+# the caller's root is in no git repository, or nothing.
+sub _plan_worktree {
+  my ( $self ) = @_;
+  my $git  = $self->_git;
+  my $root = $self->caller_root;
+  my $top  = $git->repository_top($root);
+  return 'isolation "worktree" needs a git repository; '.$root.' is not inside one.' if $top->{error};
+  my $tree = $git->toplevel($root);
+  return 'isolation "worktree": '.$tree->{error} if $tree->{error};
+  my $dir = path( $self->app->worktrees_dir( $top->{top} ) );
+  $self->_assign_task_id( sub {
+    my $name = $self->worktree_name( $_[0] );
+    -e $dir->child($name) || $git->branch_exists( $top->{top}, 'worktree-'.$name );
+  } );
+  my $name = $self->worktree_name( $self->task_id );
+  my $path = $dir->child($name)->stringify;
+  my $sub  = path($root)->realpath->relative( $tree->{top} )->stringify;
+  $self->_set_worktree( {
+    top    => $top->{top},
+    source => $tree->{top},
+    path   => $path,
+    branch => 'worktree-'.$name,
+    root   => $sub eq '.' ? $path : path($path)->child($sub)->stringify,
+  } );
+  return;
+}
+
+# Before every run: the worktree as it is when it still exists; else its
+# branch checked out into the same path when that is left; else made anew
+# from the base (Application/worktree_base_ref) with the .worktreeinclude
+# copy. Then locked for the run (a lock git refuses changes nothing else).
+# The error text when git cannot make it, or nothing.
+sub _ensure_worktree {
+  my ( $self ) = @_;
+  my $wt = $self->worktree or return;
+  my $git = $self->_git;
+  unless ( -e path( $wt->{path} )->child('.git') ) {
+    my $made;
+    if ( $git->branch_exists( $wt->{top}, $wt->{branch} ) ) {
+      $made = $git->checkout( dir => $wt->{top}, path => $wt->{path}, branch => $wt->{branch} );
+    }
+    else {
+      my $base = $git->base_ref( $self->caller_root, $self->app->worktree_base_ref );
+      return 'isolation "worktree": '.$base->{error} if $base->{error};
+      $made = $git->create( source => $wt->{source}, path => $wt->{path}, branch => $wt->{branch}, base => $base->{commit} );
+      $wt->{base} = $base->{commit} unless $made->{error};
+    }
+    return 'isolation "worktree": '.$made->{error} if $made->{error};
+  }
+  path( $wt->{root} )->mkpath unless -d $wt->{root};
+  $git->lock( $wt->{path}, 'raider agent '.$self->task_id );
+  return;
+}
+
+# After every run, however it ended: unlocked; without changes -- a clean
+# git status (untracked files count) and no commit beyond the base -- the
+# worktree and its branch removed, else both kept and named in $outcome
+# (worktree => { path, branch }); a git command that fails keeps them too,
+# its error in worktree_error. Never dies.
+sub _close_worktree {
+  my ( $self, $outcome ) = @_;
+  my $wt = $self->worktree or return;
+  return unless -e path( $wt->{path} )->child('.git');
+  my $git = $self->_git;
+  $git->unlock( $wt->{path} );
+  my $error;
+  my $base = $wt->{base};
+  unless ( defined $base ) {
+    # A worktree an earlier process made: its base as it resolves now.
+    my $app = $self->app;
+    my $b = $git->base_ref( $self->caller_root, $app ? $app->worktree_base_ref : 'fresh' );
+    $b->{error} ? ( $error = $b->{error} ) : ( $base = $b->{commit} );
+  }
+  unless ( defined $error ) {
+    my $changes = $git->changes( $wt->{path}, $base );
+    if ( $changes->{error} ) {
+      $error = $changes->{error};
+    }
+    elsif ( !@{ $changes->{status} } && !$changes->{commits} ) {
+      my $removed = $git->remove( dir => $wt->{top}, path => $wt->{path}, branch => $wt->{branch} );
+      return unless $removed->{error};
+      $error = $removed->{error};
+    }
+  }
+  $outcome->{worktree} = { path => $wt->{path}, branch => $wt->{branch} };
+  $outcome->{worktree_error} = $error if defined $error;
+  return;
+}
+
+# The lines a result names a kept worktree with (ADR 0027 section 2).
+sub _worktree_lines {
+  my ( $self, $outcome ) = @_;
+  my $wt = $outcome->{worktree} or return;
+  return (
+    'worktreePath: '.$wt->{path},
+    'worktreeBranch: '.$wt->{branch},
+    ( defined $outcome->{worktree_error} ? 'worktree kept: '.$outcome->{worktree_error} : () ),
+  );
 }
 
 =method run_f
@@ -1130,7 +1452,10 @@ async sub _raid_f {
 async sub _resume_raid_f {
   my ( $self, $message ) = @_;
   $self->_reopen_session;
+  # Its worktree again: as it is, back on its branch, or anew (ADR 0032 section 2).
+  my $wt_error = $self->_ensure_worktree;
   $self->_begin_resume($message);
+  die $wt_error."\n" if defined $wt_error;
   await $self->_initialize_mcps_f;
   my $raider = $self->raider;
   $raider->cancel if $self->cancel_requested;
@@ -1217,13 +1542,15 @@ async sub _end_children_f {
 }
 
 # The pairs every hook input of this subagent carries besides the caller's
-# session fields (ADR 0022 section 5).
+# session fields (ADR 0022 section 5); its cwd is the subagent's working
+# root (ADR 0032 §3).
 sub _hook_fields {
   my ( $self ) = @_;
   return (
     agent_id        => $self->agent_id,
     agent_type      => $self->agent->{name},
     permission_mode => $self->permissions->mode,
+    cwd             => $self->working_root,
   );
 }
 
@@ -1393,6 +1720,13 @@ Refused: the refusal. Cancelled: C<Agent 'NAME' (agent_1) was cancelled.>,
 failed: C<Agent 'NAME' (agent_1) failed: REASON> -- both errors, the agent ID
 left out for a one-shot agent.
 
+A kept worktree (ADR 0032 E<sect>2) adds, after the usage (or the error),
+
+    worktreePath: /repo/.claude/worktrees/agent-1
+    worktreeBranch: worktree-agent-1
+
+and C<worktree kept: REASON> when a git command failed.
+
 =cut
 
 sub result_text {
@@ -1400,8 +1734,9 @@ sub result_text {
   my $status = $outcome->{status};
   return ( $outcome->{error}, 1 ) if $status eq 'refused';
   my $who = 'Agent \''.$self->agent->{name}.'\''.( $self->one_shot || !$self->has_task_id ? '' : ' ('.$self->task_id.')' );
-  return ( $who.' was cancelled.', 1 ) if $status eq 'cancelled';
-  return ( $who.' failed: '.$outcome->{error}, 1 ) unless $status eq 'completed';
+  my @worktree = $self->_worktree_lines($outcome);
+  return ( join( "\n", $who.' was cancelled.', @worktree ), 1 ) if $status eq 'cancelled';
+  return ( join( "\n", $who.' failed: '.$outcome->{error}, @worktree ), 1 ) unless $status eq 'completed';
   my @usage = @{ $outcome->{usage} // $self->usage_pairs };
   my @lines;
   while ( my ( $k, $v ) = splice @usage, 0, 2 ) {
@@ -1411,6 +1746,7 @@ sub result_text {
     $outcome->{text} // '',
     ( $self->one_shot ? () : $self->agent_id_line ),
     '<usage>'.join( "\n", @lines ).'</usage>',
+    @worktree,
   ), 0 );
 }
 
@@ -1443,7 +1779,10 @@ L<Langertha::Raider::Tasks/notification_text>) and the line a surface shows
 for it (C<background agent agent_1 finished>). C<completed>: summary
 C<Agent "DESCRIPTION" finished> and the report as C<result>; C<failed>:
 summary C<Agent "DESCRIPTION" failed: REASON>; C<killed> (a cancelled run):
-summary C<Agent "DESCRIPTION" was stopped>. Each with the usage. Without a
+summary C<Agent "DESCRIPTION" was stopped>. Each with the usage, and a
+kept worktree as the C<< <worktree> >> element (C<worktreePath>,
+C<worktreeBranch>; ADR 0032 E<sect>2) -- a git command that failed adds
+C<worktree kept: REASON> to the report of a completed run. Without a
 description the agent's name stands in.
 
 =cut
@@ -1461,8 +1800,10 @@ sub notification {
     tool_use_id => $self->caller_call,
     status      => $status,
     summary     => $summary,
-    ( $status eq 'completed' ? ( result => $outcome->{text} // '' ) : () ),
+    ( $status eq 'completed' ? ( result => join( "\n", $outcome->{text} // '',
+      ( defined $outcome->{worktree_error} ? 'worktree kept: '.$outcome->{worktree_error} : () ) ) ) : () ),
     usage       => $outcome->{usage} // $self->usage_pairs,
+    ( $outcome->{worktree} ? ( worktree => $outcome->{worktree} ) : () ),
   );
   return ( $text, 'background agent '.$self->task_id.' '.$verb );
 }
@@ -1555,6 +1896,7 @@ sub _begin_resume {
 
 sub _agent_started {
   my ( $self, %more ) = @_;
+  my $wt = $self->worktree;
   $self->on_caller_event->( 'agent.started', $self->_defined(
     call        => $self->caller_call,
     agent       => $self->agent->{name},
@@ -1563,6 +1905,8 @@ sub _agent_started {
     description => $self->description,
     session     => $self->session ? $self->session->id : undef,
     model       => $self->_model,
+    worktree    => $wt ? $wt->{path} : undef,
+    branch      => $wt ? $wt->{branch} : undef,
     %more,
   ) );
   return;
@@ -1580,6 +1924,7 @@ sub _outcome_of {
 sub _finish {
   my ( $self, $outcome ) = @_;
   my $app = $self->app;
+  $self->_close_worktree($outcome);
   $self->_set_last_outcome($outcome);
   $self->event( 'message', role => 'assistant', content => $outcome->{text} ) if $outcome->{status} eq 'completed';
   if ( my $session = $self->session ) {
@@ -1604,18 +1949,26 @@ sub _finish {
     agent_id => $self->has_task_id ? $self->task_id : undef,
     session  => $self->session ? $self->session->id : undef,
     status   => $outcome->{status},
+    ( $self->worktree ? ( worktree_kept => $outcome->{worktree} ? JSON::MaybeXS->true : JSON::MaybeXS->false ) : () ),
   ) );
   return unless $app && $self->has_task_id;
   my $tasks = $app->tasks;
-  $tasks->finish( $self->task_id, $self->_registry_status( $outcome->{status} ),
+  my $kept = $outcome->{worktree};
+  my $entry = $tasks->finish( $self->task_id, $self->_registry_status( $outcome->{status} ),
     report => $outcome->{text},
     error  => $outcome->{error},
     usage  => $outcome->{usage},
+    ( $self->worktree ? ( worktree => $kept ? $kept->{path} : undef, branch => $kept ? $kept->{branch} : undef ) : () ),
   );
-  if ( $self->background && !$tasks->get( $self->task_id )->{quiet} ) {
+  my $notifies = $self->background && !$entry->{quiet};
+  if ($notifies) {
     my ( $text, $label ) = $self->notification($outcome);
     $tasks->notify( $self->recipient, $text, id => $self->task_id, label => $label );
   }
+  # A cancelled run whose result nobody reads -- a new conversation, leaving
+  # raider, a cancelled turn -- names its kept worktree to the person.
+  $app->note_meta( 'agent '.$self->task_id.' left its worktree '.$kept->{path}.' on branch '.$kept->{branch} )
+    if $kept && $outcome->{status} eq 'cancelled' && ( !$notifies || $app->leaving );
   return;
 }
 
@@ -1662,9 +2015,10 @@ my @FAMILY = (
 );
 
 # Tools a subagent never has: nobody can answer it (ask_user), and only the
-# main session can enter plan mode (enter_plan_mode). The cron tools are the
+# main session can enter plan mode (enter_plan_mode) or move into a worktree
+# and out (enter_worktree, exit_worktree; ADR 0032 §4). The cron tools are the
 # session's: a scheduled prompt runs in the main conversation (ADR 0031).
-my @NEVER = qw( ask_user enter_plan_mode cron_create cron_delete cron_list );
+my @NEVER = qw( ask_user enter_plan_mode enter_worktree exit_worktree cron_create cron_delete cron_list );
 
 sub _with_families {
   my ( $self, @names ) = @_;
@@ -1678,7 +2032,10 @@ sub _with_families {
 }
 
 # The file tools are the subagent's own, over its own read state; the
-# task-list tools its own, over its own list.
+# task-list tools its own, over its own list. The search tools and the Perl
+# tools -- every tool bound to a root -- are its own too, working in its
+# working root: the main run's follow the application's working root (ADR
+# 0032 §3), a subagent stays where it started.
 sub _own_tools {
   my ( $self ) = @_;
   my $nested = $self->depth < $self->app->max_agent_depth;
@@ -1687,13 +2044,25 @@ sub _own_tools {
     agent          => sub { $nested ? $self->_own_agent_tool('agent') : undef },
     send_message   => sub { $nested ? $self->_own_agent_tool('send_message') : undef },
   );
-  for my $server ( $self->_own_file_server, $self->_own_todos->server, $self->_own_todos->task_server ) {
+  my $perl = grep { $_->name eq $self->perl_server_name } @{ $self->caller_servers };
+  for my $server ( $self->_own_file_server, $self->_own_todos->server, $self->_own_todos->task_server,
+    $self->_own_search_server, ( $perl ? $self->_own_perl_server : () ) ) {
     for my $tool ( @{ $server->tools } ) {
       $own{ $tool->name } = sub { $tool };
     }
   }
   return %own;
 }
+
+=method perl_server_name
+
+The name of the Perl tools' server (L<Langertha::Raider::PerlTools>):
+C<raider-perl>. When the caller has it, the subagent's Perl tools are its
+own, working in its L</working_root>.
+
+=cut
+
+sub perl_server_name { 'raider-perl' }
 
 sub _build_tool_servers {
   my ( $self ) = @_;
@@ -1752,7 +2121,31 @@ sub _build_own_file_server {
     read_state  => $self->file_read_state,
     sees_images => sub { $weak && $weak->app ? $weak->app->_engine_sees_images( $weak->engine ) : 0 },
     reads_pdf   => sub { $weak && $weak->app ? $weak->app->_engine_reads_pdf( $weak->engine ) : 0 },
+    $self->_moved_tools_args,
   );
+}
+
+# The search tools of the subagent, in its working root -- with its own
+# policy when that is not the application's root (_moved).
+sub _build_own_search_server {
+  my ( $self ) = @_;
+  return $self->app->_search_tools_server( $self->_moved_tools_args );
+}
+
+# The Perl tools of the subagent, running in its working root, with the
+# private lib of the application's root.
+sub _build_own_perl_server {
+  my ( $self ) = @_;
+  return $self->app->_perl_tools_server( root => $self->working_root );
+}
+
+# What the file and search tools of a subagent working in another root
+# (_moved: a worktree) are built with: that root, and its own policy.
+sub _moved_tools_args {
+  my ( $self ) = @_;
+  return unless $self->_moved;
+  weaken( my $weak = $self );
+  return ( root => $self->working_root, policy => sub { $weak ? $weak->permissions : undef } );
 }
 
 sub _build_file_read_state { Langertha::Raider::FileTools::ReadState->new }
@@ -1784,6 +2177,7 @@ sub _build_agent_tools {
         policy   => $weak->permissions,
         task_id  => $weak->has_task_id ? $weak->task_id : undef,
         detached => $weak->detached,
+        root     => $weak->working_root,
       };
     },
   );
@@ -1841,7 +2235,7 @@ sub _build_model_resolution {
 sub _build_mission {
   my ( $self ) = @_;
   return $self->app->compile_mission( $self->agent->{body} // '', $self->tool_servers,
-    memory => $self->agent->{memory} // 1 );
+    memory => $self->agent->{memory} // 1, working_directory => $self->working_root );
 }
 
 sub _build_mcps {
@@ -1884,6 +2278,7 @@ sub _build_raider {
       %{ $app->_shell_async_tools(
         recipient => sub { $weak && $weak->has_task_id ? $weak->task_id : 'main' },
         detached  => sub { $weak ? $weak->detached : 0 },
+        working_directory => sub { $weak ? $weak->working_root : undef },
       ) },
     },
     engine                     => $self->engine,

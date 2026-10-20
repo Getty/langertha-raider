@@ -276,7 +276,8 @@ by a file agent of its name like `general-purpose`:
 ### 7. `isolation: "worktree"`
 
 *Decided, not implemented with #161: the coordinator moved it to a follow-up stream
-(2026-10-19). Until then `agent` has no `isolation` parameter.*
+(2026-10-19). Implemented by ADR 0032 (#168), which settles the base fallback, `.worktreeinclude`,
+the frontmatter field and the cleanup paths, and maps `EnterWorktree`/`ExitWorktree`.*
 
 `agent` takes `isolation` (`"worktree"`; any other value is an error result). The subagent
 then works in a git worktree of its own:
@@ -364,7 +365,8 @@ is ignored, and `config explain` lists it as ignored and says where the depth ca
   raider tears it down; a shell whose starting subagent has ended notifies nobody. A
   foreground command run for a background agent survives the first Ctrl-C like the agent
   (`bash` only; `perl_eval`/`perl_cpanm` children are still ended).
-  `ListAgents`, `SubagentHandback`, `EnterWorktree`, `ExitWorktree` stay unmapped.
+  `ListAgents` and `SubagentHandback` stay unmapped; `EnterWorktree`, `ExitWorktree` are
+  mapped since ADR 0032.
 - `agent` parameters: `description`, `prompt`, `subagent_type`, `model` (`sonnet`, `opus`,
   `haiku`, mapped as ADR 0020 §5; overrides the agent's `model`; any other value is an error
   result, as Claude Code's enum would reject it), `run_in_background`, `isolation`, `name`.

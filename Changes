@@ -810,6 +810,73 @@ Revision history for Langertha-Raider
       (raider would resume the agent in the background, which the draft does
       not replay); app: { max_agent_depth: N } only for nesting deeper than
       raider's default of 3; Explore and Plan agents stay Explore and Plan.
+    - Subagents in a worktree of their own (ADR 0032 section 2, ADR 0027
+      section 7): agent takes isolation: "worktree", and an agent file's
+      isolation: worktree isolates every spawn of it; any other value is an
+      error result, and outside a git repository nothing starts ("isolation
+      "worktree" needs a git repository; ROOT is not inside one."). The
+      agent works in .claude/worktrees/agent-N (Claude layout) or
+      .raider/worktrees/agent-N under the main checkout, on branch
+      worktree-agent-N, from origin/HEAD or else HEAD (worktree.baseRef of
+      the Claude settings, worktree_base_ref of the config: fresh or head),
+      with the gitignored files .worktreeinclude names copied in; a root in
+      a subdirectory works in the same subdirectory of the copy. Its file,
+      search and shell tools, its permission policy and the working
+      directory of its mission are the worktree's; a write_file, edit_file
+      or multi_edit into the main checkout is refused before any rule or
+      mode. The worktree is locked while the agent runs. After every run it
+      is unlocked, and removed with its branch when nothing changed;
+      otherwise the result gains worktreePath/worktreeBranch lines, the
+      notification a <worktree> element, the registry entry worktree and
+      branch. A failed git command keeps it ("worktree kept: REASON"), a
+      cancelled run nobody hears of names it in a meta line ("agent agent_1
+      left its worktree P on branch B"). send_message continues in the
+      same worktree, checks the branch out again or makes it anew.
+      agent.started gains worktree and branch, agent.finished worktree_kept.
+      New internal module Langertha::Raider::Worktree (git command line,
+      failures as values). Hook inputs of an isolated agent have its
+      worktree as cwd; its perl_eval, perl_check and perl_cpanm run there
+      too, with the private lib of the root.
+    - enter_worktree and exit_worktree, Claude Code's EnterWorktree and
+      ExitWorktree (ADR 0032 sections 3 to 6), in the main run only (never
+      in a subagent). enter_worktree makes a worktree under
+      .claude/worktrees/NAME (Claude layout) or .raider/worktrees/NAME on
+      branch worktree-NAME, from the same base as an isolated agent's
+      (worktree.baseRef / worktree_base_ref), and moves the session's
+      working root into it -- the same subdirectory when raider runs in
+      one. A name is segments of letters, digits, ".", "_" and "-" joined
+      by "/", at most 64 characters, no "." or ".." segment; without one it
+      is session-N; an existing directory or branch of that name is an
+      error ("Worktree NAME exists; pass path to enter it."). path enters
+      a worktree git worktree list knows instead (not the main checkout),
+      also from inside another one, which stays on disk untouched; a path
+      outside .claude/worktrees/ and .raider/worktrees/ is put to the
+      person every time, whatever rule or mode allows it -- only
+      bypassPermissions skips the question, and nobody to ask refuses it.
+      exit_worktree keep returns to the root; remove deletes worktree and
+      branch, but only one this session created, and with changes (git
+      status --porcelain lines, commits beyond the base) only with
+      discard_changes: true (git worktree remove --force); a removal git
+      refuses returns to the root anyway ("worktree kept: REASON").
+      Outside a worktree it is a no-op that says so. From the next call
+      on, the file, search and shell tools (and the Perl tools when
+      mounted) work in the working root, the permission policy is rooted
+      there and refuses edits into the main checkout, hook inputs carry it
+      as cwd (the hooks themselves still run at the root with
+      CLAUDE_PROJECT_DIR the root), subagents spawned meanwhile start in
+      it and the next run's mission names it as working directory.
+      Context, settings, instructions, skills and the session store stay
+      at the root. Both tools are write tools: asked in default, allowed
+      in acceptEdits and auto, refused in plan; rules and hook matchers
+      name them EnterWorktree and ExitWorktree. A new conversation (/clear,
+      /reset, /new) and the end of the session (leaving the REPL, SIGTERM,
+      the end of raider -p) close a worktree enter_worktree made: removed
+      with its branch when unchanged, kept otherwise with a meta line
+      ("worktree P kept on branch B (has changes)"); one entered by path
+      is only left. The journal records worktree.entered (path, branch,
+      created) and worktree.exited (path, branch, removed, reason
+      exit_worktree, clear or session_end). The main run's tool list grows
+      by the two tools. New internal module Langertha::Raider::WorktreeTools.
 
   [Permissions]
     - INCOMPATIBLE: every tool call of raider now passes a permission policy

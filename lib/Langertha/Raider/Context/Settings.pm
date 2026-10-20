@@ -45,7 +45,7 @@ C<source>.
 Raider uses C<permissions>, C<hooks>, C<disableAllHooks>, C<disableSkillShellExecution>, C<env>,
 C<enabledPlugins> and the approvals of project MCP servers
 (C<enableAllProjectMcpServers>, C<enabledMcpjsonServers>,
-C<disabledMcpjsonServers>; ADR 0029). Every
+C<disabledMcpjsonServers>; ADR 0029) and C<worktree.baseRef> (ADR 0032). Every
 other top-level key is listed by L</ignored>. Here they are only read;
 evaluating permissions (stream P), running hooks (stream H) and applying the
 environment are the caller's business.
@@ -88,7 +88,8 @@ sub _build_claude_home {
 
 # The settings keys raider uses; everything else is listed by ignored().
 my %USED = map { $_ => 1 } qw( permissions hooks disableAllHooks disableSkillShellExecution env enabledPlugins
-  enableAllProjectMcpServers enabledMcpjsonServers disabledMcpjsonServers skipDangerousModePermissionPrompt );
+  enableAllProjectMcpServers enabledMcpjsonServers disabledMcpjsonServers skipDangerousModePermissionPrompt
+  worktree );
 
 # The three files with their data, in read order. Each entry is
 # { file, label, scope, exists, error, data }; data is the decoded object,
@@ -532,6 +533,35 @@ sub _build_mcpjson_approvals {
     }
   }
   return \%out;
+}
+
+=method worktree_base_ref
+
+    my $base = $settings->worktree_base_ref;   # { value => 'head', source => '.claude/settings.json' } or undef
+
+C<worktree.baseRef> (ADR 0032 E<sect>2), a later file winning: where a new
+worktree branches from (C<fresh> or C<head>, as written -- the caller
+decides what another value means). Undef when no file sets a string.
+
+=cut
+
+has worktree_base_ref => (
+  is         => 'ro',
+  isa        => 'Maybe[HashRef]',
+  init_arg   => undef,
+  lazy_build => 1,
+);
+
+sub _build_worktree_base_ref {
+  my ( $self ) = @_;
+  my $out;
+  for my $src ($self->_sources) {
+    my ( $data, $label ) = @$src;
+    my $wt = $data->{worktree};
+    next unless ref $wt eq 'HASH' && $self->_is_string( $wt->{baseRef} );
+    $out = { value => ''.$wt->{baseRef}, source => $label };
+  }
+  return $out;
 }
 
 =method ignored

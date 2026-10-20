@@ -156,6 +156,8 @@ sub _report {
       $end->{status} eq 'cancelled'
         ? $out->say_meta($cancelled_by ? 'cancelled (SIG'.$cancelled_by.')' : 'turn cancelled')
         : $out->say_error($end->{error});
+      # A cancelled subagent's kept worktree (ADR 0032).
+      $out->say_meta($_) for $app->take_meta_notes;
     }
     return $self->_document($machine, $end);
   }

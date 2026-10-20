@@ -49,6 +49,7 @@ An agent is a plain hash ref:
       disallowed    => [ 'write_file', ... ],
       unknown_tools => [ 'NotebookEdit', ... ],   # tools/disallowedTools names not mapped
       model         => 'sonnet' | undef,     # as written; see resolve_model
+      isolation     => 'worktree' | undef,   # as written (trimmed); a list or mapping as 'a list' / 'a mapping'
       skills        => [ 'getty-perl-core', ... ],   # declared, not resolved
       ignored_keys  => [ 'color', ... ],     # frontmatter keys raider does not use
       builtin       => 0 | 1,
@@ -81,6 +82,11 @@ C<raider_*>, ...) -- is taken as it is; C<mcp__*> passes through. Any other
 name is ignored and listed in C<unknown_tools>. C<tools> absent, empty or
 C<*> means every tool of the caller; a list whose names are all unknown
 means none. Names are unique, in the order written.
+
+=item * B<Isolation.> C<isolation: worktree> makes every spawn of the agent
+run in a git worktree of its own (ADR 0032 E<sect>2). The value is kept as
+written; any other one refuses the spawn
+(L<Langertha::Raider::Subagent/isolation_refusal>), nothing here judges it.
 
 =item * B<Skills.> Claude Code's top-level C<skills> first, then
 C<briefing.skills>; a string is split on commas, a C<[a, b]> flow left as a
@@ -135,7 +141,7 @@ sub tool_names_class  { 'Langertha::Raider::ToolNames' }
 sub tool_effects_class { 'Langertha::Raider::ToolEffects' }
 
 # The frontmatter keys raider reads; every other one is listed as ignored.
-my %USED_KEY = map { $_ => 1 } qw( name description tools disallowedTools model skills briefing );
+my %USED_KEY = map { $_ => 1 } qw( name description tools disallowedTools model skills briefing isolation );
 
 =method builtin_name
 
@@ -389,6 +395,7 @@ sub _build__catalog {
       disallowed    => [ @{ $spec->{disallowed} } ],
       unknown_tools => [],
       model         => undef,
+      isolation     => undef,
       skills        => [],
       ignored_keys  => [],
       builtin       => 1,
@@ -449,6 +456,7 @@ sub _add_file {
   my %u;
   my $briefing = $fm->{briefing};
   my $model = $fm->{model};
+  my $isolation = $fm->{isolation};
   my $agent = {
     name          => $name,
     description   => $desc,
@@ -461,6 +469,10 @@ sub _add_file {
     disallowed    => $disallowed,
     unknown_tools => [ grep { !$u{$_}++ } @unknown ],
     model         => defined $model && !ref $model && $model =~ /\S/ ? $model =~ s/\A\s+|\s+\z//gr : undef,
+    # As written; the spawn refuses anything but "worktree" (ADR 0032 section 2).
+    isolation     => !defined $isolation ? undef
+      : ref $isolation ? 'a '.( ref $isolation eq 'ARRAY' ? 'list' : 'mapping' )
+      : $isolation =~ /\S/ ? $isolation =~ s/\A\s+|\s+\z//gr : undef,
     skills        => $self->_unique( map { $self->_name_list($_) }
       $fm->{skills}, ( ref $briefing eq 'HASH' ? $briefing->{skills} : () ) ),
     ignored_keys  => [ sort grep { !$USED_KEY{$_} } keys %$fm ],

@@ -31,15 +31,18 @@ a scenario.
     SendMessage -> send_message
     Monitor -> monitor           CronCreate -> cron_create
     CronDelete -> cron_delete    CronList -> cron_list
+    EnterWorktree -> enter_worktree
+    ExitWorktree -> exit_worktree
 
 A name C<mcp__server__tool> is an MCP tool and passes through unchanged:
 raider addresses MCP tools the same way. Any other name is unknown --
 L</raider_name> returns undef; the table never guesses. ADR 0025 lists every
 Claude Code tool name known and why those without a raider tool have none
-(C<NotebookEdit>, C<ToolSearch>, C<EnterWorktree>, ...).
+(C<NotebookEdit>, C<ToolSearch>, ...).
 C<Monitor>, C<CronCreate>, C<CronDelete> and C<CronList> mean the tools of the
 same names since ADR 0031; C<ScheduleWakeup> stays unmapped.
-C<SendMessage> means C<send_message> since ADR 0027.
+C<SendMessage> means C<send_message> since ADR 0027, C<EnterWorktree> and
+C<ExitWorktree> mean C<enter_worktree> and C<exit_worktree> since ADR 0032.
 
 The table names the raider tool a Claude Code tool stands for; it does not
 say that the tool is mounted in a run. raider mounts one task-list family at
@@ -91,6 +94,8 @@ my %RAIDER = (
   CronCreate      => 'cron_create',
   CronDelete      => 'cron_delete',
   CronList        => 'cron_list',
+  EnterWorktree   => 'enter_worktree',
+  ExitWorktree    => 'exit_worktree',
 );
 
 # The way back: the current Claude Code name of each raider tool.
@@ -124,6 +129,8 @@ my %CLAUDE = (
   cron_create     => 'CronCreate',
   cron_delete     => 'CronDelete',
   cron_list       => 'CronList',
+  enter_worktree  => 'EnterWorktree',
+  exit_worktree   => 'ExitWorktree',
 );
 
 # The arguments that carry another name: raider name => Claude name.

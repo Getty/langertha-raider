@@ -34,8 +34,10 @@ C<SendMessage>) continues an agent by its ID or name.
 The tools know the agents (L</catalog>), check the call and describe every
 agent in the text; they start nothing themselves. L</on_spawn> runs the
 subagent (L<Langertha::Raider::Subagent>), L</on_send> delivers a message.
-An unknown C<subagent_type>, an empty prompt and a C<model> that is not
-C<sonnet>, C<opus> or C<haiku> are error results, and no subagent starts.
+An unknown C<subagent_type>, an empty prompt, a C<model> that is not
+C<sonnet>, C<opus> or C<haiku> and an C<isolation> that is not C<worktree>
+(L</isolation_refusal>, ADR 0032) are error results, and no subagent
+starts.
 
 A raider runs both as asynchronous tools (L</async_tools>, ADR 0027
 E<sect>9): the server carries their name, text and schema, the call itself
@@ -69,8 +71,8 @@ has on_spawn => (
 
 Required. Called for every valid C<agent> call as
 C<< $on_spawn->($agent, { description => ..., prompt => ..., subagent_type => ...,
-model => ..., run_in_background => 0|1, name => ... }, %ctx) >> (C<model> and
-C<name> only when given), with C<$agent> the catalogue entry and C<%ctx>
+model => ..., run_in_background => 0|1, name => ..., isolation => 'worktree' }, %ctx) >>
+(C<model>, C<name> and C<isolation> only when given), with C<$agent> the catalogue entry and C<%ctx>
 the call's context (L<Langertha::Raider/async_tools>; empty on the
 synchronous fallback); returns the tool result as C<( $text, $is_error )>,
 or a Future of it.
@@ -175,14 +177,18 @@ sub _agent_f {
   my $model = $in->{model};
   return Future->done( 'Error: model must be one of '.join( ', ', $self->model_aliases ).'.', 1 )
     if defined $model && !grep { $_ eq $model } $self->model_aliases;
+  my $isolation = $in->{isolation};
+  return Future->done( $self->isolation_refusal($isolation), 1 )
+    if defined $isolation && !grep { !ref $isolation && $_ eq $isolation } $self->isolation_modes;
   my $name = defined $in->{name} && $in->{name} =~ /\S/ ? $in->{name} : undef;
   return Future->call( sub { $self->_future_of( $self->on_spawn->( $agent, {
     description       => $in->{description} // '',
     prompt            => $in->{prompt},
     subagent_type     => $type,
     run_in_background => $in->{run_in_background} ? 1 : 0,
-    ( defined $model ? ( model => $model ) : () ),
-    ( defined $name  ? ( name  => $name )  : () ),
+    ( defined $model     ? ( model     => $model )     : () ),
+    ( defined $name      ? ( name      => $name )      : () ),
+    ( defined $isolation ? ( isolation => $isolation ) : () ),
   }, %ctx ) ) } );
 }
 
@@ -207,6 +213,28 @@ The values the C<model> parameter takes: C<sonnet>, C<opus>, C<haiku>.
 =cut
 
 sub model_aliases { qw( sonnet opus haiku ) }
+
+=method isolation_modes
+
+The values the C<isolation> parameter takes: C<worktree> (ADR 0032).
+
+=method isolation_refusal
+
+    my $text = $agents->isolation_refusal('sandbox');
+    # Error: isolation "sandbox" is not supported; use "worktree".
+
+The error result of a call whose C<isolation> is not one of
+L</isolation_modes>.
+
+=cut
+
+sub isolation_modes { qw( worktree ) }
+
+sub isolation_refusal {
+  my ( $self, $value ) = @_;
+  return 'Error: isolation "'.( ref $value ? JSON::MaybeXS->new( canonical => 1, allow_nonref => 1 )->encode($value) : $value )
+    .'" is not supported; use "worktree".';
+}
 
 =method tools_label
 
@@ -235,7 +263,7 @@ The text of the C<agent> tool, after Claude Code's current C<Agent> text
 in raider's names: what it does, one line per agent
 (C<- name: description (Tools: ...)>), when not to use it, and how --
 background runs and their notifications, C<send_message> to continue an
-agent, several calls in one message.
+agent, several calls in one message, C<isolation> in a worktree.
 
 =cut
 
@@ -270,6 +298,7 @@ Usage notes:
 - Foreground or background: use the foreground (the default) when you need the agent's results before you can go on, such as research whose findings inform your next steps. Use the background when you have genuinely independent work to do in the meantime.
 - To continue an agent you started, use send_message with its agent ID (or the name you gave it with name) as to. It resumes with its full context preserved. Each agent call starts a fresh agent, so give it a complete task description.
 - model (sonnet, opus or haiku) runs the agent on that model instead of its own; only on the Anthropic API, elsewhere it runs on yours.
+- You can optionally set isolation: "worktree" to run the agent in a temporary git worktree, giving it an isolated copy of the repository. The worktree is automatically cleaned up if the agent makes no changes; if changes are made, the worktree path and branch are returned in the result.
 - The agent's outputs should generally be trusted.
 - If an agent's description says it should be used proactively, try your best to use it without the user having to ask for it first. Use your judgement.
 EOM
@@ -327,6 +356,9 @@ sub _build_server {
           description => 'Run the agent in the background; you are notified when it completes' },
         name              => { type => 'string',
           description => 'Optional name for the agent, so send_message can address it by name' },
+        isolation         => { type => 'string', enum => [ $self->isolation_modes ],
+          description => 'Isolation mode. "worktree" creates a temporary git worktree so the agent works on an isolated'
+            .' copy of the repository' },
       },
       required => [qw( description prompt )],
     },

@@ -55,7 +55,8 @@ subtest 'the tool text lists every agent with its tools' => sub {
   like( $text, qr/run_in_background.*notified automatically.*<task-notification>/s, 'background runs and their notification' );
   like( $text, qr/use send_message with its agent ID \(or the name you gave it with name\)/, 'send_message continues an agent' );
   unlike( $text, qr/one after the other/, 'no longer one after the other' );
-  unlike( $text, qr/isolation|worktree/, 'no isolation yet' );
+  like( $text, qr/isolation: "worktree" to run the agent in a temporary git worktree.*cleaned up if the agent makes no changes.*worktree path and branch are returned/,
+    'isolation in a worktree, in Claude Code\'s words (ADR 0032)' );
 
   my @tools = @{ $tools->server->tools };
   is( [ map { $_->name } @tools ], ['agent'], 'without on_send: one tool named agent' );
@@ -92,6 +93,16 @@ subtest 'agent: model, name and run_in_background reach on_spawn; send_message r
   ok( $r->{isError}, 'another model: error' );
   is( text($r), 'Error: model must be one of sonnet, opus, haiku.', 'says which' );
   is( scalar @spawned, 2, 'and starts nothing' );
+
+  # isolation (ADR 0032): "worktree" reaches on_spawn, any other value is an error result.
+  invoke( $tools->server, { description => 'd', prompt => 'p', isolation => 'worktree' } );
+  is( $spawned[2], { description => 'd', prompt => 'p', subagent_type => 'general-purpose', run_in_background => 0,
+    isolation => 'worktree' }, 'isolation worktree reaches on_spawn' );
+  $r = invoke( $tools->server, { description => 'd', prompt => 'p', isolation => 'container' } );
+  ok( $r->{isError}, 'another isolation: error' );
+  is( text($r), 'Error: isolation "container" is not supported; use "worktree".', 'says so' );
+  is( scalar @spawned, 3, 'and starts nothing' );
+  is( $tools->server->tools->[0]->input_schema->{properties}{isolation}{enum}, ['worktree'], 'isolation: worktree only' );
 
   $r = $send->code->( $send, { to => 'agent_1', message => 'more', summary => 'a recap' } );
   is( text($r), 'queued', 'send_message answers with on_send' );
@@ -150,7 +161,7 @@ subtest 'the application mounts the agent tool below the depth limit' => sub {
   my $app = app();
   is( $app->max_agent_depth, 3, 'default depth 3 (ADR 0027)' );
   ok( ( grep { $_->name eq 'agent' } $app->_mounted_tools ), 'agent mounted at depth 0' );
-  like( $app->mission, qr/^  - agent\(description, prompt, \[model\], \[name\], \[run_in_background\], \[subagent_type\]\)$/m,
+  like( $app->mission, qr/^  - agent\(description, prompt, \[isolation\], \[model\], \[name\], \[run_in_background\], \[subagent_type\]\)$/m,
     'and described' );
   like( $app->mission, qr/^  - send_message\(to, message, \[summary\]\)$/m, 'send_message beside it (ADR 0027 section 5)' );
 

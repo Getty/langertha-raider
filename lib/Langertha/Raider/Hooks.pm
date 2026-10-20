@@ -94,11 +94,12 @@ not supported). The data directory is created before a plugin hook runs.
 C<${user_config.*}> is not supported and stays as written.
 
 The event's input is written to stdin as JSON: what the caller passes, plus
-C<hook_event_name> and C<cwd> (L</root> unless given). For tool events
+C<hook_event_name> and C<cwd> (L</root> unless given -- the application
+gives its working root, a subagent its own, ADR 0032). For tool events
 C<tool_name> is turned into the Claude name and C<tool_input> into the
 Claude form (L<Langertha::Raider::ToolNames/claude_input>); the C<file_path>
-of C<Read>, C<Write>, C<Edit> and C<MultiEdit> is made absolute against L</root>, as
-Claude Code hands it.
+of C<Read>, C<Write>, C<Edit> and C<MultiEdit> is made absolute against that
+C<cwd>, as Claude Code hands it.
 
 C<timeout> is in seconds; the default is 600, 30 on C<UserPromptSubmit>. A
 hook over its time gets C<TERM> (its process group), C<KILL> two seconds
@@ -214,8 +215,8 @@ has loop => (
 
 =attr root
 
-The working directory: the hook processes run there, it is the C<cwd> of
-the input and the base of relative tool paths. Required.
+The working directory: the hook processes run there, and it is the C<cwd>
+of an input that names none, the base of its relative tool paths. Required.
 
 =attr project_dir
 
@@ -592,7 +593,7 @@ sub _prepare_input {
   my %in = %$input;
   $in{hook_event_name} = $event;
   $in{cwd} //= $self->root;
-  my %call = ( event => $event, input => \%in );
+  my %call = ( event => $event, input => \%in, cwd => $in{cwd} );
 
   if ($TOOL_EVENT{$event} && defined $in{tool_name} && !ref $in{tool_name}) {
     my $names = $self->tool_names_class;
@@ -604,7 +605,7 @@ sub _prepare_input {
       my $claude = $names->claude_input($tool, $in{tool_input});
       if ($FILE_TOOL{$tool} && defined $claude->{file_path} && !ref $claude->{file_path}
           && length $claude->{file_path} && !path($claude->{file_path})->is_absolute) {
-        $claude->{file_path} = path($self->root)->child($claude->{file_path})->stringify;
+        $claude->{file_path} = path($call{cwd})->child($claude->{file_path})->stringify;
       }
       $in{tool_input} = $claude;
     }
@@ -1041,7 +1042,7 @@ sub _raider_input {
   my $raider = $self->tool_names_class->raider_input($tool, $claude);
   my $orig = ( $call->{raider_args} // {} )->{path};
   if ($FILE_TOOL{$tool} && defined $orig && !ref $orig && length $orig && !path($orig)->is_absolute
-      && defined $raider->{path} && $raider->{path} eq path($self->root)->child($orig)->stringify) {
+      && defined $raider->{path} && $raider->{path} eq path($call->{cwd} // $self->root)->child($orig)->stringify) {
     $raider->{path} = $orig;
   }
   return $raider;

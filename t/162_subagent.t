@@ -37,7 +37,7 @@ sub child {
 
 sub agent { +{ name => 'x', description => 'x', body => 'X-BODY', tools => undef, disallowed => [], @_ } }
 
-subtest 'the tool set: the caller\'s, filtered, without ask_user and enter_plan_mode, agent only below the limit' => sub {
+subtest 'the tool set: the caller\'s, filtered, without ask_user, enter_plan_mode and the worktree tools, agent only below the limit' => sub {
   my $root = root();
   $root->child('.raider/skills/notes/SKILL.md')->touchpath->spew_utf8("---\ndescription: Notes.\n---\nbody\n");
   my $app = mock_app( root => "$root", max_agent_depth => 2 );
@@ -45,11 +45,12 @@ subtest 'the tool set: the caller\'s, filtered, without ask_user and enter_plan_
   ok( ( grep { $_ eq 'ask_user' } @parent ), 'the caller has ask_user' );
   ok( ( grep { $_ eq 'enter_plan_mode' } @parent ), 'and enter_plan_mode' );
   ok( ( grep { $_ eq 'agent' } @parent ), 'and agent' );
-  my %never = map { $_ => 1 } qw( ask_user enter_plan_mode );
+  ok( ( grep { $_ eq 'enter_worktree' } @parent ) && ( grep { $_ eq 'exit_worktree' } @parent ), 'and the worktree tools' );
+  my %never = map { $_ => 1 } qw( ask_user enter_plan_mode enter_worktree exit_worktree );
 
   my $gp = child( $app, $app->context->agent_catalog->find('general-purpose'), depth => 1 );
   is( names( $gp->tool_servers ), [ grep { !$never{$_} } @parent ],
-    'all tools: every tool but ask_user and enter_plan_mode, in order' );
+    'all tools: every tool but ask_user, enter_plan_mode and the worktree tools, in order' );
   my $deep = child( $app, agent(), depth => 2 );
   is( names( $deep->tool_servers ), [ grep { !$never{$_} && $_ ne 'agent' && $_ ne 'send_message' } @parent ],
     'at the depth limit: no agent, no send_message' );
@@ -63,7 +64,9 @@ subtest 'the tool set: the caller\'s, filtered, without ask_user and enter_plan_
   isnt( refaddr $child_tool{$_}, refaddr $parent_tool{$_}, $_.': an instance of its own (own read state)' )
     for qw( read_file write_file edit_file multi_edit );
   isnt( refaddr $child_tool{agent}, refaddr $parent_tool{agent}, 'agent: one of its own depth' );
-  is( refaddr $child_tool{$_}, refaddr $parent_tool{$_}, $_.': the caller\'s' ) for qw( grep web_fetch bash bash_output );
+  isnt( refaddr $child_tool{$_}, refaddr $parent_tool{$_}, $_.': an instance of its own (the caller\'s follows its working root)' )
+    for qw( glob grep );
+  is( refaddr $child_tool{$_}, refaddr $parent_tool{$_}, $_.': the caller\'s' ) for qw( web_fetch bash bash_output );
   is( refaddr $gp->tool_servers->[1], refaddr $app->_tool_servers->[1], 'a server whose tools all stay is reused (bash)' );
   isnt( refaddr $gp->file_read_state, refaddr $app->file_read_state, 'a read state of its own' );
 

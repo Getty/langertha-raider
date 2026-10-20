@@ -21,6 +21,7 @@ subtest 'every Claude Code name maps to its raider tool' => sub {
     SendMessage => 'send_message',
     ListMcpResourcesTool => 'list_mcp_resources', ReadMcpResourceTool => 'read_mcp_resource',
     Monitor => 'monitor', CronCreate => 'cron_create', CronDelete => 'cron_delete', CronList => 'cron_list',
+    EnterWorktree => 'enter_worktree', ExitWorktree => 'exit_worktree',
   );
   is( $names->raider_name($_), $want{$_}, "$_ -> $want{$_}" ) for sort keys %want;
   is( [ $names->claude_names ], [ sort keys %want ], 'the table has exactly these names' );
@@ -35,7 +36,7 @@ subtest 'mcp__ names pass through, unknown names are unknown' => sub {
   is( $names->raider_name('NotATool'), undef, 'unknown: undef' );
   # Claude Code tools raider deliberately has no counterpart for (ADR 0025)
   is( $names->raider_name($_), undef, "no raider tool: $_" )
-    for qw( NotebookEdit NotebookRead ToolSearch EnterWorktree ExitWorktree
+    for qw( NotebookEdit NotebookRead ToolSearch
       ListAgents ScheduleWakeup StructuredOutput SubagentHandback SlashCommand );
   is( $names->raider_name('read_file'), undef, 'a raider name is not a Claude name' );
   like( dies { $names->raider_name('') }, qr/needs a tool name/, 'empty name croaks' );
@@ -48,6 +49,8 @@ subtest 'the way back answers with the current Claude name' => sub {
   is( $names->claude_name('kill_shell'), 'TaskStop', 'TaskStop, not KillShell or KillBash' );
   is( $names->claude_name('task_create'), 'TaskCreate', 'TaskCreate' );
   is( $names->claude_name('enter_plan_mode'), 'EnterPlanMode', 'EnterPlanMode' );
+  is( $names->claude_name('enter_worktree'), 'EnterWorktree', 'EnterWorktree (ADR 0032)' );
+  is( $names->claude_name('exit_worktree'), 'ExitWorktree', 'ExitWorktree (ADR 0032)' );
   is( $names->claude_name('list_files'), 'LS', 'LS' );
   is( $names->claude_name('perl_eval'), undef, 'a raider-only tool has no Claude name' );
   is( $names->raider_name( $names->claude_name($_) ), $_, "round trip: $_" ) for $names->raider_names;

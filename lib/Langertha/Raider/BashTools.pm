@@ -388,7 +388,9 @@ The optional caller (see L</async_tools>) says who runs it: the
 C<recipient> of the notification when the command ends in the background
 (default C<main>), the C<call> id the notification names as
 C<tool-use-id>, and whether the run is C<detached> -- its foreground
-command then belongs to the session (L</background_pids>).
+command then belongs to the session (L</background_pids>). Its
+C<working_directory> is where a command without one runs instead of
+L</working_directory> (a subagent in a worktree of its own, ADR 0032).
 
 =cut
 
@@ -398,7 +400,7 @@ sub bash {
   my $command = $in->{command};
   return ( 'No command given: the command parameter must be a non-empty string', 1 )
     unless defined $command && $command =~ /\S/;
-  my $wd = $in->{working_directory} // $self->working_directory;
+  my $wd = $in->{working_directory} // $caller->{working_directory} // $self->working_directory;
   if ( my $refused = $self->_refusal( $command, $wd ) ) {
     return ( $refused, 1 );
   }
@@ -997,13 +999,15 @@ sub background_pids {
     my $tools = $shell->async_tools(
       recipient => sub { $subagent->task_id },
       detached  => sub { $subagent->detached },
+      working_directory => sub { $subagent->working_root },   # optional
       applies   => sub { my ( $mcp ) = @_; ... },   # is $mcp a client of this server?
     );
 
 The three tools as L<Langertha::Raider/async_tools> for the raider of one
 run. C<bash> runs with that run as its caller (L</bash>): the
-C<recipient> of its background shells' notifications and whether it is
-C<detached> -- each a value or a code reference asked at the call -- and
+C<recipient> of its background shells' notifications, whether it is
+C<detached> and the C<working_directory> its commands run in by default
+-- each a value or a code reference asked at the call -- and
 the call id from the call's context (C<call>, else C<id>). C<bash_output>
 goes through L</bash_output_f>, so C<block> lets the loop run;
 C<kill_shell> is L</kill_shell>. Each handler returns a Future of an MCP
@@ -1034,6 +1038,7 @@ sub async_tools {
         recipient => $value->( $caller{recipient} ) // 'main',
         detached  => $value->( $caller{detached} ),
         call      => $ctx{call} // $ctx{id},
+        ( $caller{working_directory} ? ( working_directory => $value->( $caller{working_directory} ) ) : () ),
       } ) ) );
     },
     bash_output => sub {

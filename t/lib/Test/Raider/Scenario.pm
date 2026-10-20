@@ -11,6 +11,7 @@ use YAML::PP;
 use Test::Raider::MockAI qw( mock_app );
 use Test::Raider::SlowAI qw( slow_app );
 use Test::Raider::FakeProc qw( fake_proc );
+use Test::Raider::Git qw( have_git git_in );
 use Test::Raider::LocalHTTP;
 use IO::Async::Loop;
 use Langertha::Raider::Loadguard;
@@ -35,6 +36,13 @@ our @EXPORT_OK = qw( run_scenario_files );
 #
 #   title:   what the scenario shows
 #   files:   { path => content }        written to the root before the run
+#   git:     true                       the root is a git repository: after `files:` are
+#            written, git init (branch main), a local user, and everything
+#            committed (Test::Raider::Git: no global or system git
+#            configuration is read). The scenario is skipped when git is
+#            missing. The root is the repository root, so a Claude-layout
+#            scenario (.claude/ in `files:`) puts its worktrees in
+#            ROOT/.claude/worktrees, a native one in ROOT/.raider/worktrees.
 #   age:     { path => seconds }        how long ago the file was last modified (default: now)
 #   http:    { /path => { status, type, body, location } }  a local web server
 #            (Test::Raider::LocalHTTP) on the application's loop; {{HTTP}} in
@@ -106,6 +114,8 @@ our @EXPORT_OK = qw( run_scenario_files );
 #     outcome:     { status, error } of the last run_prompt (error: a regex)
 #     files:       { path => content }  must exist afterwards with this content
 #     absent:      [ path, ... ]        must not exist afterwards
+#     branches:    { present: [ name, ... ], absent: [ name, ... ] }  local git branches
+#                  of the root afterwards (needs `git: true`)
 #     requests:    [ { index: N, contains: text, absent: text } ] -- the text of the
 #                  conversation the model saw in request N (0-based); with
 #                  offers: [ tool, ... ] the tools that request offered, exactly (any
@@ -128,7 +138,8 @@ our @EXPORT_OK = qw( run_scenario_files );
 #     tools:       one entry per tool call, in order:
 #                    name:   the tool
 #                    error:  true if the call must have failed (default false)
-#                    text:   regex the result text must match
+#                    text:   regex the result text must match; {{ROOT}} in it (and in
+#                            not_text) is the root, quoted so it matches literally
 #                    not_text: regex it must not match
 #
 # A new scenario is a new file; nothing here changes. Only the scenarios in
@@ -151,6 +162,7 @@ sub run_scenario_file {
   my $name = path($file)->basename;
   subtest "$name: " . ( $s->{title} // '' ) => sub {
     skip_all $s->{skip} if $s->{skip};
+    skip_all 'needs git' if $s->{git} && !have_git();
     local %ENV = %ENV;
     my @tmp  = ( Path::Tiny->tempdir, Path::Tiny->tempdir );   # held: removed at the end
     my ( $root, $home ) = map { $_->realpath } @tmp;
@@ -165,6 +177,14 @@ sub run_scenario_file {
     };
     $root->child($_)->touchpath->spew_utf8( $fill->( $s->{files}{$_} ) ) for keys %{ $s->{files} // {} };
     $home->child($_)->touchpath->spew_utf8( $fill->( $s->{home}{$_} ) ) for keys %{ $s->{home} // {} };
+    if ( $s->{git} ) {
+      git_in( $root, qw( init -q -b main ) );
+      git_in( $root, qw( config user.name Tester ) );
+      git_in( $root, qw( config user.email tester@example.com ) );
+      git_in( $root, qw( config commit.gpgsign false ) );
+      git_in( $root, qw( add -A ) );
+      git_in( $root, qw( commit -q --allow-empty -m initial ) );
+    }
     ( m{\A~/(.+)\z}s ? $home->child($1) : $root->child($_) )->chmod(0755) for @{ $s->{executable} // [] };
 
     for my $path ( keys %{ $s->{age} // {} } ) {
@@ -185,6 +205,8 @@ sub run_scenario_file {
       return { answer => 'no', reason => $1 } if $a =~ /\Ano:\s*(.*)\z/s;
       return { answer => $a };
     };
+    # {{ROOT}} in an expected pattern: the root, quoted.
+    my $in_root = sub { my ( $t ) = @_; $t =~ s/\{\{ROOT\}\}/quotemeta $root/ge if defined $t; $t };
     my $deep_fill;
     $deep_fill = sub {
       my ( $v ) = @_;
@@ -259,6 +281,11 @@ sub run_scenario_file {
         && is( $root->child($p)->slurp_utf8, $expect->{files}{$p}, "$p content" );
     }
     ok( !$root->child($_)->exists, "$_ absent" ) for @{ $expect->{absent} // [] };
+    if ( my $want = $expect->{branches} ) {
+      my %have = map { ( s/\A[*+ ]+//r => 1 ) } split /\n/, git_in( $root, qw( branch --list ) );
+      ok( $have{$_}, "branch $_ exists" ) for @{ $want->{present} // [] };
+      ok( !$have{$_}, "branch $_ absent" ) for @{ $want->{absent} // [] };
+    }
 
     for my $r ( @{ $expect->{requests} // [] } ) {
       my $req = $app->mock_engine->requests->[ $r->{index} ];
@@ -323,8 +350,8 @@ sub run_scenario_file {
         my $tag  = "tool $i ($w->{name})";
         is( $g->{tool_call}{name}, $w->{name}, "$tag: name" );
         is( !!$g->{result}{isError}, !!$w->{error}, "$tag: " . ( $w->{error} ? 'fails' : 'succeeds' ) );
-        like( $text, qr/$w->{text}/s, "$tag: result text" ) if defined $w->{text};
-        unlike( $text, qr/$w->{not_text}/s, "$tag: result text excludes" ) if defined $w->{not_text};
+        like( $text, qr/${\ $in_root->( $w->{text} ) }/s, "$tag: result text" ) if defined $w->{text};
+        unlike( $text, qr/${\ $in_root->( $w->{not_text} ) }/s, "$tag: result text excludes" ) if defined $w->{not_text};
       }
     }
   };

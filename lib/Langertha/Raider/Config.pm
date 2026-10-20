@@ -101,7 +101,7 @@ overwrite it.
 =cut
 
 # Keys that configure raider itself and never reach the engine constructor.
-my %APP_KEY = map { $_ => 1 } qw( agent_models claude detect engine max_agent_depth max_concurrent_agents no_detect packs permissions perl preferred_lib_target project_tools providers skills web_fetch_model );
+my %APP_KEY = map { $_ => 1 } qw( agent_models claude detect engine max_agent_depth max_concurrent_agents no_detect packs permissions perl preferred_lib_target project_tools providers skills web_fetch_model worktree_base_ref );
 # The MCP servers and their approvals (ADR 0029), read on their own.
 $APP_KEY{$_} = 1 for qw( mcp mcp_approvals );
 
@@ -652,7 +652,7 @@ sub engine_options {
 True for the keys that configure raider itself (C<agent_models>, C<claude>,
 C<detect>, C<engine>, C<max_agent_depth>, C<max_concurrent_agents>,
 C<no_detect>, C<packs>, C<permissions>, C<perl>, C<preferred_lib_target>, C<project_tools>,
-C<providers>, C<skills>, C<web_fetch_model>) and never reach the engine constructor.
+C<providers>, C<skills>, C<web_fetch_model>, C<worktree_base_ref>) and never reach the engine constructor.
 C<mcp> and C<mcp_approvals> are raider keys too (L</mcp_servers>,
 L</mcp_approvals>).
 

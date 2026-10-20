@@ -843,6 +843,9 @@ sub run {
   # A one-shot run waits for its background agents (ADR 0027 section 3).
   my $ok = $runner->run_prompt($text, %run, machine => $machine, session => scalar $session_for->(), catch_signals => 1,
     wait_background => 1);
+  # A worktree the run left the session in is closed (ADR 0032 §5).
+  $app->close_worktree_session('session_end');
+  $self->_warn($_."\n") for $app->take_meta_notes;
   $app->shutdown_hooks;   # async hooks end with the run, as with claude -p
   $app->shutdown_mcp;     # so do the configured MCP servers (ADR 0029)
   return $ok ? EXIT_OK : EXIT_RUN_ERROR;

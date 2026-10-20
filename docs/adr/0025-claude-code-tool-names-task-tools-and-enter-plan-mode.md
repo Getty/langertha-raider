@@ -98,7 +98,7 @@ included); "listed" means the name only appears in Claude Code's tool lists, nev
 | `ListAgents`, `TeamCreate`, `TeamDelete`, `AgentOutput`, `AgentOutputTool` | 279, removed | unknown: the agent-team machinery, same reason |
 | `ToolSearch` | 737 | unknown: loads deferred tool schemas; raider mounts the whole active tool set (ADR 0005), nothing is deferred |
 | `Monitor` | 713 | `monitor` since ADR 0031 §1: streams the stdout lines of a background command as notifications (was unknown here: `bash_output` polls, which is not the same contract) |
-| `EnterWorktree`, `ExitWorktree` | 401, 66 | unknown: moves the session into another git worktree; raider's root and its compiled context are fixed for a session (ADR 0004) |
+| `EnterWorktree`, `ExitWorktree` | 401, 66 | `enter_worktree`, `exit_worktree` since ADR 0032: moves the session's working root into a git worktree; the root and the compiled context stay (ADR 0004) |
 | `StructuredOutput` | 82 | unknown: the SDK's final structured answer; raider's machine output is `--json` (ADR 0013) |
 | `Artifact`, `ArtifactComments`, `ArtifactData`, `DesignSync` | 34, listed | unknown: claude.ai pages; no counterpart |
 | `CronCreate`, `CronDelete`, `CronList` | 10, 7, listed | `cron_create`, `cron_delete`, `cron_list` since ADR 0031 §2: session jobs in the REPL; a scheduled prompt gives no permission, so ADR 0005 holds (was unknown here) |

@@ -18,7 +18,7 @@ expect:
     - { index: 0, tool_text: "- careful: Works without a shell. (Tools: All tools except bash)" }
     - { index: 0, tool_text: "- general-purpose: " }
     - { index: 1, contains: CAREFUL-BODY-MARKER }
-    - { index: 1, lacks: [ bash, bash_output, kill_shell, ask_user, enter_plan_mode ] }
+    - { index: 1, lacks: [ bash, bash_output, kill_shell, ask_user, enter_plan_mode, enter_worktree, exit_worktree ] }
     - { index: 1, contains: "write_file(" }
     - { index: 1, contains: "task_create(" }
   tools:

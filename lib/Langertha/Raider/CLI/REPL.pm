@@ -54,7 +54,11 @@ a terminal the REPL waits for its background subagents and delivers their
 notifications before it ends (L</finish_background>); leaving it any other
 way -- C</quit>, Ctrl-D, a second Ctrl-C, C<SIGTERM> -- stops them
 (L<Langertha::Raider::Application/stop_background>). The first Ctrl-C
-leaves them running.
+leaves them running. However the REPL is left, a worktree the session
+still works in is closed (ADR 0032 E<sect>5,
+L<Langertha::Raider::Application/close_worktree_session>): removed when
+C<enter_worktree> made it and it has no changes, else kept and named in a
+meta line before C<bye.>.
 
 The first C<SIGINT> (Ctrl-C) while a prompt runs cancels that turn
 (L<Langertha::Raider::CLI::Runner/cancel_run>): the tool commands still
@@ -339,8 +343,11 @@ sub run {
     $self->runner->terminate_children;
     $self->runner->abandon($signal);
     $self->app->stop_background;
+    $self->app->close_worktree_session('session_end');
+    $out->emit("\n");
+    $out->say_meta($_) for $self->app->take_meta_notes;   # kept worktrees (ADR 0032)
     $call->('save');
-    $out->emit($out->c(meta => "\nbye."), "\n");
+    $out->emit($out->c(meta => "bye."), "\n");
     exit 0;
   };
   my $last_sigint = 0;
@@ -398,6 +405,8 @@ sub run {
   # notifications delivered (ADR 0027 section 3).
   $self->finish_background unless $quit || -t $in;
   $self->app->stop_background;
+  $self->app->close_worktree_session('session_end');
+  $out->say_meta($_) for $self->app->take_meta_notes;   # kept worktrees (ADR 0032)
   $call->('save');
   $self->app->shutdown_hooks;
   $self->app->shutdown_mcp;

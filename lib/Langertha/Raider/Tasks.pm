@@ -44,7 +44,8 @@ for its children waits for those of kind C<agent>. An entry is a hash reference 
 (C<agent>, C<bash>, ...) and C<status> (C<running>, C<completed>,
 C<failed>, C<killed>); everything else is the kind's own (an agent's
 C<description>, C<name>, C<tool_use_id>, C<recipient>, C<report>,
-C<usage>, C<subagent>). Two keys mean the same for every kind: C<stop>, a
+C<usage>, C<subagent>; an isolated agent's C<worktree> and C<branch>, set
+while it runs and after it while its worktree is kept, ADR 0032). Two keys mean the same for every kind: C<stop>, a
 code reference that asks the work to end (L</stop>), and C<future>, the
 future of the run, which the registry holds until it is ready (so nobody
 else has to). Entries stay after their run ends, so they can be found
