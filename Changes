@@ -362,6 +362,37 @@ Revision history for Langertha-Raider
     - Tests t/280-t/283, scenarios 210-214; the test server has a rich mode
       (prompts, resources, a tool that changes the tool list).
 
+  [Monitor and cron jobs like Claude Code]
+    - ADR 0031 decides how raider streams events and schedules prompts as
+      Claude Code does, on the task registry of ADR 0027.
+    - New tool monitor (Claude Code's Monitor; description, command,
+      timeout_ms): runs a command in the background and delivers every
+      stdout line as a <task-notification> ("Monitor event: ...", the lines
+      of one 0.2 s batch in one <event>). The end, the deadline (5 minutes,
+      at most 30, at most 10 in a run nobody can answer) and a stop each
+      send one notice; a monitor that sends more than 20 notifications in
+      10 seconds, or 500 in all, is stopped with a hint. kill_shell
+      (TaskStop) stops it, bash_output shows its status; it ends with the
+      subagent that started it, and a piped or -p run waits for its
+      monitors. IDs monitor_1, monitor_2, ...
+    - monitor is a shell tool: allowed_commands and the loadguard gate
+      apply, a Bash(...) permission rule covers it (Monitor(...) names it
+      alone), and its effect class is code.
+    - New tools cron_create, cron_delete and cron_list (CronCreate,
+      CronDelete, CronList) in the REPL: session-scoped jobs with a
+      five-field cron expression in local time, recurring or one-shot, at
+      most 50, run as a turn of their own when the REPL is idle -- never in
+      a turn in progress, once after a long turn (no catch-up) -- with
+      Claude Code's jitter and the 7-day expiry of recurring jobs (one last
+      fire). Jobs are not durable and not restored on resume; a run with a
+      single prompt, a Hall raider and ACP are not offered the tools.
+      CLAUDE_CODE_DISABLE_CRON turns them off.
+    - No ScheduleWakeup: it belongs to the self-paced /loop raider does not
+      have; a reminder is a one-shot cron_create.
+    - ToolNames maps Monitor, CronCreate, CronDelete and CronList. Tests
+      t/300-t/305, scenarios 230-236 (injectable clock, no real waiting for
+      cron).
+
   [Status]
     - Marked as in development (POD and README): a developer release, not yet
       covered end to end. Release it with `dzil release --trial`.

@@ -768,6 +768,8 @@ sub run {
   # given on argv / piped in / requested as one-shot machine output.
   my $in = $self->in;
   my $interactive = $opt->{interactive} || (!$opt->{print} && !$opt->{machine} && !@prompt && -t $in);
+  # Scheduled prompts (cron_create) run as turns of the REPL when it is idle (ADR 0031).
+  $app->scheduling(1) if $interactive;
   $runner = $self->runner_class->new(app => $app, output => $self->output, err => $self->err);
   # --permission-channel (set by the hall for a run of an ACP session): a call
   # the policy asks about is put to the hall, never answered yes by default.

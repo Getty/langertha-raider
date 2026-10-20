@@ -51,9 +51,11 @@ matches (also with leading keywords, wrappers such as C<sudo> and
 C<VAR=value> assignments taken off). An allow rule covers only a command of
 one part that matches as written (or, for an exact rule, the whole command
 as written), without substitutions, heredocs or redirections into files; L<Langertha::Raider::Permissions> covers a command
-of several parts when every part is covered by some allow rule.
+of several parts when every part is covered by some allow rule. A C<Bash>
+rule applies to the C<monitor> tool as well (its command runs the same way,
+ADR 0031); C<Monitor> and C<Monitor(command)> name the monitor alone.
 
-=item C<Read(path)>, C<Edit(path)> -- gitignore-style globs (C<*>, C<**>,
+ C<Read(path)>, C<Edit(path)> -- gitignore-style globs (C<*>, C<**>,
 C<?>). C<//abs> is absolute, C<~/x> under the home, C</x>, C<./x> and
 C<x/y> under the project root, and a pattern without a slash matches at any
 depth under the root. A pattern that matches a directory matches everything
@@ -144,8 +146,10 @@ my %FAMILY = (
   glob       => [ path   => 'glob' ],
   Grep       => [ path   => 'grep' ],
   grep       => [ path   => 'grep' ],
-  Bash       => [ bash   => 'bash' ],
-  bash       => [ bash   => 'bash' ],
+  Bash       => [ bash   => 'bash', 'monitor' ],
+  bash       => [ bash   => 'bash', 'monitor' ],
+  Monitor    => [ bash   => 'monitor' ],
+  monitor    => [ bash   => 'monitor' ],
   WebFetch   => [ domain => 'web_fetch' ],
   web_fetch  => [ domain => 'web_fetch' ],
   Agent      => [ named  => 'agent' ],

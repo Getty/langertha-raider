@@ -20,6 +20,7 @@ subtest 'every Claude Code name maps to its raider tool' => sub {
     AskUserQuestion => 'ask_user', EnterPlanMode => 'enter_plan_mode', ExitPlanMode => 'exit_plan_mode',
     SendMessage => 'send_message',
     ListMcpResourcesTool => 'list_mcp_resources', ReadMcpResourceTool => 'read_mcp_resource',
+    Monitor => 'monitor', CronCreate => 'cron_create', CronDelete => 'cron_delete', CronList => 'cron_list',
   );
   is( $names->raider_name($_), $want{$_}, "$_ -> $want{$_}" ) for sort keys %want;
   is( [ $names->claude_names ], [ sort keys %want ], 'the table has exactly these names' );
@@ -34,8 +35,8 @@ subtest 'mcp__ names pass through, unknown names are unknown' => sub {
   is( $names->raider_name('NotATool'), undef, 'unknown: undef' );
   # Claude Code tools raider deliberately has no counterpart for (ADR 0025)
   is( $names->raider_name($_), undef, "no raider tool: $_" )
-    for qw( NotebookEdit NotebookRead ToolSearch Monitor EnterWorktree ExitWorktree
-      ListAgents ScheduleWakeup CronCreate CronDelete CronList StructuredOutput SubagentHandback SlashCommand );
+    for qw( NotebookEdit NotebookRead ToolSearch EnterWorktree ExitWorktree
+      ListAgents ScheduleWakeup StructuredOutput SubagentHandback SlashCommand );
   is( $names->raider_name('read_file'), undef, 'a raider name is not a Claude name' );
   like( dies { $names->raider_name('') }, qr/needs a tool name/, 'empty name croaks' );
 };

@@ -667,7 +667,7 @@ sub decide {
   }
   return $self->_by_mode( allow => $mode.' mode' ) if $class eq 'read' || $class eq 'control';
   return $self->_by_mode( allow => 'auto mode, a read-only bash command' )
-    if $mode eq 'auto' && $builtin && $name eq 'bash' && $self->_read_only_bash($call);
+    if $mode eq 'auto' && $builtin && ($name eq 'bash' || $name eq 'monitor') && $self->_read_only_bash($call);
   return $self->_by_mode( allow => $mode.' mode, inside the allowed directories' )
     if ( $mode eq 'acceptEdits' || $mode eq 'auto' ) &&$builtin && $self->_edit_in_allowed_roots( $call, $ctx );
 
@@ -745,7 +745,7 @@ sub _allowing_rules {
   if ( my $rule = first { $_->matches( $call, $ctx ) } @allow ) {
     return ( $rule );
   }
-  return unless $builtin && ( $call->{name} // '' ) eq 'bash';
+  return unless $builtin && grep { ($call->{name} // '') eq $_ } qw( bash monitor );
   my $command = ref $call->{arguments} eq 'HASH' ? $call->{arguments}{command} : undef;
   return unless defined $command && !ref $command;
   my $shell = Langertha::Raider::Permissions::Rule->shell_parts($command);
@@ -849,7 +849,7 @@ sub suggest_rule {
     # A configured server's tool already carries the prefix (ADR 0029).
     return index($name, 'mcp__'.$server.'__') == 0 ? $name : 'mcp__'.$server.'__'.$name;
   }
-  if ( $name eq 'bash' ) {
+  if ( $name eq 'bash' || $name eq 'monitor' ) {
     my $command = $args->{command};
     return unless defined $command && !ref $command;
     ( my $trimmed = $command ) =~ s/\A\s+|\s+\z//g;

@@ -1208,6 +1208,8 @@ async sub _end_children_f {
   my $tasks = $app->tasks;
   my @running = $tasks->running( kind => 'agent', recipient => $self->task_id );
   $tasks->stop( $_->{id} ) for @running;
+  # Its monitors end with it: nobody is left to read their events (ADR 0031).
+  $tasks->stop( $_->{id}, quiet => 1 ) for $tasks->running( kind => 'monitor', recipient => $self->task_id );
   my @futures = grep { defined && !$_->is_ready } map { $_->{future} } @running;
   await Future->wait_all(@futures) if @futures;
   $tasks->discard( $self->task_id );
@@ -1660,8 +1662,9 @@ my @FAMILY = (
 );
 
 # Tools a subagent never has: nobody can answer it (ask_user), and only the
-# main session can enter plan mode (enter_plan_mode).
-my @NEVER = qw( ask_user enter_plan_mode );
+# main session can enter plan mode (enter_plan_mode). The cron tools are the
+# session's: a scheduled prompt runs in the main conversation (ADR 0031).
+my @NEVER = qw( ask_user enter_plan_mode cron_create cron_delete cron_list );
 
 sub _with_families {
   my ( $self, @names ) = @_;

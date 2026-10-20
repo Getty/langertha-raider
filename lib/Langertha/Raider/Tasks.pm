@@ -419,6 +419,7 @@ sub wait_f {
       tool_use_id => 'c3',
       status      => 'completed',             # failed, killed
       summary     => 'Agent "Find it" finished',
+      event       => $lines,                  # optional: what a monitor printed (ADR 0031)
       result      => $report,                 # optional
       usage       => [ subagent_tokens => 1200, tool_uses => 4, duration_ms => 5300 ],   # optional
       worktree    => { path => $p, branch => $b },                                     # optional
@@ -435,7 +436,7 @@ sub notification_text {
   my ( $self, %n ) = @_;
   my $el = sub { my ( $name, $text ) = @_; '<'.$name.'>'.$self->escape($text).'</'.$name.'>' };
   my @lines = ( '<task-notification>' );
-  for my $name (qw( task_id tool_use_id status summary result )) {
+  for my $name (qw( task_id tool_use_id status summary event result )) {
     next unless defined $n{$name};
     push @lines, $el->( $name =~ s/_/-/gr, $n{$name} );
   }

@@ -25,6 +25,7 @@ use Langertha::Raider::PlanTools;
 use Langertha::Raider::Approval;
 use Langertha::Raider::Loadguard;
 use Langertha::Raider::BashTools;
+use Langertha::Raider::CronTools;
 use Langertha::Raider::SkillTools qw( build_skill_tools_server );
 use Langertha::Raider::SlashCommand;
 use Langertha::Raider::Packs     qw( build_packs );
@@ -69,8 +70,9 @@ F<~/.raider/config.yml>), picks
 the engine through L<Langertha::Raider::EngineResolver>, activates the
 packs (L<Langertha::Raider::Packs>, ADR 0012), compiles the mission (ADR
 0004, ADR 0014), mounts the tool servers -- files
-(L<Langertha::Raider::FileTools>), C<bash> with C<bash_output> and C<kill_shell>
-(L<Langertha::Raider::BashTools>), web
+(L<Langertha::Raider::FileTools>), C<bash> with C<bash_output>, C<kill_shell> and
+C<monitor> (L<Langertha::Raider::BashTools>), the cron tools in the REPL
+(L</scheduling>, L<Langertha::Raider::CronTools>), web
 (L<Langertha::Raider::WebTools>), the Perl tools
 (L<Langertha::Raider::PerlTools>) when granted, the Hall tools when
 spawned by a Hall, the C<agent> and C<send_message> tools
@@ -1758,8 +1760,8 @@ sub _build_loadguard { Langertha::Raider::Loadguard->new }
 
 =attr bash_tools
 
-The L<Langertha::Raider::BashTools> behind C<bash>, C<bash_output> and
-C<kill_shell>, built once with L</root>, L</allowed_commands>, the
+The L<Langertha::Raider::BashTools> behind C<bash>, C<bash_output>,
+C<kill_shell> and C<monitor>, built once with L</root>, L</allowed_commands>, the
 L</loadguard> gate, L</loop> and L</tasks>. Its background shells belong to the
 application: they live across the runs of a session and are stopped when the
 application goes away. They are entries of L</tasks> (C<bash_N>) and notify
@@ -1786,8 +1788,11 @@ sub _shell_async_tools {
 
 sub _build_bash_tools {
   my ($self) = @_;
+  weaken(my $app = $self);
   return Langertha::Raider::BashTools->new(
     loop              => $self->loop,
+    # A run nobody can answer (a single prompt) watches at most 10 minutes (ADR 0031).
+    unattended        => sub { $app && !$app->has_on_permission_request ? 1 : 0 },
     working_directory => $self->root,
     ( $self->has_allowed_commands ? ( allowed_commands => $self->allowed_commands ) : () ),
     validator         => $self->loadguard->validator,
@@ -2599,6 +2604,55 @@ sub _build_web_fetch_engine {
   return $resolver->meta->clone_object($resolver, model => $model)->build_engine;
 }
 
+=attr scheduling
+
+Bool, default false. True when the surface runs scheduled prompts as turns
+of their own while it is idle -- the REPL does (ADR 0031): only then are
+C<cron_create>, C<cron_delete> and C<cron_list> mounted. A run with a single
+prompt, a Hall raider and ACP have no idle state a prompt could be run in,
+so they are not offered the tools, and Claude Code's
+C<CLAUDE_CODE_DISABLE_CRON=1> turns them off in the REPL too. Set it before
+the tools are first used (the engine is built).
+
+=cut
+
+has scheduling => (
+  is      => 'rw',
+  isa     => 'Bool',
+  default => 0,
+);
+
+=attr cron_tools
+
+The L<Langertha::Raider::CronTools> behind the cron tools, built once over
+L</loop> and L</tasks>. Its jobs belong to the application: they are
+entries of L</tasks> (C<cron_N>) and go when it does.
+
+=cut
+
+has cron_tools => (
+  is       => 'ro',
+  isa      => 'Langertha::Raider::CronTools',
+  lazy     => 1,
+  builder  => '_build_cron_tools',
+  init_arg => undef,
+);
+
+sub _build_cron_tools {
+  my ($self) = @_;
+  return Langertha::Raider::CronTools->new( loop => $self->loop, tasks => $self->tasks, recipient => $self->cron_queue );
+}
+
+# The queue of the task registry the prompts of due cron jobs wait in (not
+# main: they are no notifications, a turn in progress does not take them).
+sub cron_queue { 'cron' }
+
+# True when the cron tools are mounted (ADR 0031).
+sub _cron_wanted {
+  my ($self) = @_;
+  return $self->scheduling && !( $ENV{CLAUDE_CODE_DISABLE_CRON} && $ENV{CLAUDE_CODE_DISABLE_CRON} !~ /\A(?:0|false|no|off)?\z/i ) ? 1 : 0;
+}
+
 sub tasks_class { 'Langertha::Raider::Tasks' }
 
 sub _build_tasks {
@@ -2630,9 +2684,35 @@ sub caller_event {
 
     my $n = $app->background_running;
 
-How many background subagents of the main run still run. Background
-shells do not count: nothing waits for them (ADR 0024, a server may run
-for the whole session); their notifications are delivered when they come.
+How many background subagents and monitors of the main run still run. A
+monitor ends at its deadline (at most 10 minutes in a run with a single
+prompt, ADR 0031), so a run that waits for it waits for a bounded time.
+Background shells do not count: nothing waits for them (ADR 0024, a server
+may run for the whole session); their notifications are delivered when they
+come.
+
+=method scheduled_pending
+
+How many prompts of due cron jobs wait for the surface to run them (ADR
+0031).
+
+=method take_scheduled
+
+    my @items = $app->take_scheduled;   # ( { text, id, label, scheduled }, ... )
+
+Takes the prompts of due cron jobs, oldest first: for the surface that runs
+each as a turn of its own when it is idle (the REPL).
+
+=method idle_pending
+
+How many notifications and scheduled prompts wait for an idle surface.
+
+=method idle_wait_f
+
+    $app->loop->await( $app->idle_wait_f );
+
+A future that is done once something waits for an idle surface
+(L</idle_pending>). Cancelling it is fine.
 
 =method notifications_pending
 
@@ -2657,7 +2737,32 @@ background subagent of it runs any more; returns how many wait.
 sub background_running {
   my ($self) = @_;
   return 0 unless $self->_has_tasks;
-  return scalar $self->tasks->running(kind => 'agent', recipient => 'main', background => 1);
+  my $tasks = $self->tasks;
+  return scalar( $tasks->running(kind => 'agent', recipient => 'main', background => 1) )
+    + scalar( $tasks->running(kind => 'monitor', recipient => 'main') );
+}
+
+sub scheduled_pending {
+  my ($self) = @_;
+  return 0 unless $self->_has_tasks;
+  return $self->tasks->pending($self->cron_queue);
+}
+
+sub take_scheduled {
+  my ($self) = @_;
+  return unless $self->_has_tasks;
+  return $self->tasks->take($self->cron_queue);
+}
+
+sub idle_pending {
+  my ($self) = @_;
+  return $self->notifications_pending + $self->scheduled_pending;
+}
+
+sub idle_wait_f {
+  my ($self) = @_;
+  my $tasks = $self->tasks;
+  return Future->wait_any( $tasks->wait_f('main'), $tasks->wait_f($self->cron_queue) );
 }
 
 sub notifications_pending {
@@ -2936,7 +3041,7 @@ sub _build_stock_tool_servers {
     answerer => sub { $app && $app->has_on_ask_user ? $app->on_ask_user : undef },
   )->server;
 
-  return [ $files, $bash, $web, $search, $todo, $ask ];
+  return [ $files, $bash, $web, $search, $todo, $ask, ( $self->_cron_wanted ? $self->cron_tools->server : () ) ];
 }
 
 # A new server with the file tools over the root, with the additional

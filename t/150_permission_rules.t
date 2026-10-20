@@ -33,7 +33,8 @@ subtest 'parsing' => sub {
   my $r = rule('Bash(npm run test:*)', 'allow');
   ok $r->is_valid, 'Bash with prefix';
   is $r->family, 'bash', 'family';
-  is $r->tools, ['bash'], 'tools';
+  is $r->tools, [qw( bash monitor )], 'Bash covers bash and monitor (a Monitor runs a command the same way)';
+  is rule('Monitor(tail -f *)')->tools, ['monitor'], 'Monitor names the monitor alone';
   is $r->specifier, 'npm run test:*', 'specifier';
 
   is rule('Read')->tools, [qw( read_file list_files glob grep )], 'Read covers every reading tool';

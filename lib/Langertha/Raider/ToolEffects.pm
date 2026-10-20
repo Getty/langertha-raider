@@ -61,6 +61,12 @@ C<code> and passed the gate then) or a subagent of the session (whose calls
 passed the gate themselves); it starts nothing, and asking before stopping
 would make stopping harder than starting (ADR 0024, ADR 0027).
 
+C<monitor> is C<code>, like C<bash>, whose command it runs in the background and
+whose gates apply to it (ADR 0031). C<cron_create>, C<cron_delete> and
+C<cron_list> have no effect class: a job only queues a prompt for a later
+turn of the session, and what that turn does goes through the gate again
+when it does it; a prompt gives no permission (ADR 0005).
+
 C<exit_plan_mode> has no effect class: it hands a plan to the person and
 may switch the permission mode of the run (ADR 0021), which changes nothing
 outside it. Neither has C<enter_plan_mode>, which switches the mode to
@@ -95,6 +101,9 @@ my %EFFECTS = (
   ask_user               => [qw( message )],
   enter_plan_mode        => [],
   send_message           => [],
+  cron_create            => [],
+  cron_delete            => [],
+  cron_list              => [],
   exit_plan_mode         => [],
   # skills
   skill                  => [qw( read )],
@@ -105,6 +114,7 @@ my %EFFECTS = (
   bash                   => [qw( code )],
   bash_output            => [qw( read )],
   kill_shell             => [],
+  monitor                => [qw( code )],
   # web
   web_search             => [qw( network )],
   web_fetch              => [qw( network )],

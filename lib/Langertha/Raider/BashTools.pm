@@ -1,5 +1,5 @@
 package Langertha::Raider::BashTools;
-# ABSTRACT: Internal shell tools of raider: bash, bash_output and kill_shell
+# ABSTRACT: Internal shell tools of raider: bash, bash_output, kill_shell and monitor
 our $VERSION = '0.504';
 use Moose;
 use namespace::autoclean;
@@ -8,6 +8,7 @@ use Encode ();
 use Future;
 use Future::AsyncAwait;
 use JSON::MaybeXS ();
+use Langertha::Raider::Monitor;
 use List::Util qw( min );
 use MCP::Server;
 use Path::Tiny;
@@ -64,6 +65,11 @@ that it will be notified. C<bash_output> and C<kill_shell> also take the ID
 subagent: C<bash_output> answers with its status and, once it has ended,
 its report; C<kill_shell> asks it to stop (L<Langertha::Raider::Tasks/stop>).
 This module does not know what a subagent is; the registry does.
+
+With L</tasks> it also has C<monitor> (ADR 0031): a command in the
+background whose stdout lines are delivered as notifications
+(L<Langertha::Raider::Monitor>), stopped with C<kill_shell> like a shell.
+C<monitor> is a shell tool: the gates of C<bash> apply to its command.
 
 =cut
 
@@ -177,6 +183,59 @@ Seconds C<bash_output> with C<block> waits when the call gives no C<timeout>.
 
 =cut
 
+has monitor_timeout => ( is => 'ro', isa => 'Int', default => 300 );
+
+=attr monitor_timeout
+
+Seconds a C<monitor> watches when the call gives no C<timeout_ms>: 300.
+
+=cut
+
+has monitor_max_timeout => ( is => 'ro', isa => 'Int', default => 1800 );
+
+=attr monitor_max_timeout
+
+The longest a C<monitor> may watch, in seconds: 1800 (30 minutes). A larger
+C<timeout_ms> is cut down to it.
+
+=cut
+
+has monitor_unattended_max_timeout => ( is => 'ro', isa => 'Int', default => 600 );
+
+=attr monitor_unattended_max_timeout
+
+The same limit when L</unattended> says there is nobody to talk to (a run
+with a single prompt, C<raider -p>): 600 (10 minutes).
+
+=cut
+
+has unattended => ( is => 'ro', isa => 'CodeRef', predicate => 'has_unattended' );
+
+=attr unattended
+
+Optional. Called without arguments when a monitor starts: true when the
+run has no person at the keyboard (the application has no one to ask).
+
+=cut
+
+has monitor_min_timeout => ( is => 'ro', isa => 'Num', default => 1 );
+
+=attr monitor_min_timeout
+
+The shortest watch in seconds: 1, as the C<timeout_ms> of Claude Code has a
+minimum of 1000. Tests lower it.
+
+=cut
+
+has monitor_options => ( is => 'ro', isa => 'HashRef', default => sub { {} } );
+
+=attr monitor_options
+
+Extra arguments for every L<Langertha::Raider::Monitor> (C<batch_window>,
+C<burst_limit>, ...). Tests use it to make the limits small.
+
+=cut
+
 has server => (
   is       => 'ro',
   lazy     => 1,
@@ -195,6 +254,7 @@ has _shells => ( is => 'ro', isa => 'HashRef', default => sub { {} }, init_arg =
 has _count  => ( is => 'rw', isa => 'Int', default => 0, init_arg => undef );
 has _dir    => ( is => 'ro', lazy => 1, builder => '_build__dir', init_arg => undef );
 has _quiet  => ( is => 'rw', isa => 'Bool', default => 0, init_arg => undef );
+has _monitors => ( is => 'ro', isa => 'HashRef', default => sub { {} }, init_arg => undef );
 
 sub _build__dir { Path::Tiny->tempdir( TEMPLATE => 'raider-bash-XXXXXXXX' ) }
 
@@ -283,6 +343,33 @@ sub _build_server {
     },
     code => $call->('kill_shell'),
   );
+  $server->tool(
+    name         => 'monitor',
+    description  => 'Start a background monitor that streams events from a long-running command or script. Each line the '
+      .'command writes to stdout is an event, delivered to you as a notification while you keep working -- do not poll or '
+      .'sleep. Use it to watch a log for errors, a build, a test run, the status of a PR or a job, files that change: '
+      .'anything you would otherwise check in a loop. The command runs with bash -c in the project root, under the same '
+      .'rules as bash (permissions, loadguard). Lines that arrive close together are delivered as one notification; '
+      .'stderr is not delivered. Filter the stream so that only what matters is printed (grep --line-buffered, or a '
+      .'poll loop that prints when something changed): a monitor that sends too many events is stopped. The watch ends '
+      .'when the command exits, at the deadline timeout_ms (default '.( $self->monitor_timeout * 1000 ).', at most '
+      .( $self->monitor_max_timeout * 1000 ).'; at most '.( $self->monitor_unattended_max_timeout * 1000 )
+      .' in a run with a single prompt and nobody to talk to) with one notice so that you can start it again, or when '
+      .'you stop it with kill_shell (shell_id: the monitor\'s ID).',
+    input_schema => {
+      type       => 'object',
+      properties => {
+        description => { type => 'string', description => 'Short human-readable description of what you are monitoring (shown in notifications).' },
+        timeout_ms  => { type => 'number', minimum => 1000, maximum => 3600000, default => $self->monitor_timeout * 1000,
+          description => 'Kill the monitor after this deadline. Default '.( $self->monitor_timeout * 1000 ).'ms. Deadlines above '
+            .( $self->monitor_max_timeout * 1000 ).'ms are capped to '.( $self->monitor_max_timeout * 1000 )
+            .'ms. You are notified at expiry and can re-arm.' },
+        command     => { type => 'string', description => 'Shell command or script. Each stdout line is an event; exit ends the watch.' },
+      },
+      required => [ 'description', 'command' ],
+    },
+    code => $call->('monitor'),
+  ) if $self->has_tasks;
   return $server;
 }
 
@@ -819,6 +906,71 @@ sub kill_shell {
   return ( 'Successfully stopped task: '.$id.' ('.$shell->{command}.')', 0 );
 }
 
+#### monitor
+
+=method monitor
+
+    my ( $text, $is_error ) = $shell->monitor(
+      { description => 'errors in the log', command => 'tail -f app.log | grep --line-buffered ERROR', timeout_ms => 600000 },
+      { recipient => 'agent_2', call => 'c4' },
+    );
+
+The C<monitor> tool: starts the command as a L<Langertha::Raider::Monitor>
+(an entry of L</tasks>, C<monitor_N>) and answers at once. The gates of
+C<bash> (L</allowed_commands>, the L</validator>) are asked first and refuse
+with the same texts. C<timeout_ms> is held to L</monitor_min_timeout> and
+L</monitor_max_timeout> (L</monitor_unattended_max_timeout> without a
+person); the caller is as for L</bash>.
+
+=cut
+
+sub monitor {
+  my ( $self, $in, $caller ) = @_;
+  $caller //= {};
+  return ( 'The monitor tool needs the task registry', 1 ) unless $self->has_tasks;
+  my ( $command, $description ) = @$in{qw( command description )};
+  return ( 'No command given: the command parameter must be a non-empty string', 1 )
+    unless defined $command && !ref $command && $command =~ /\S/;
+  return ( 'No description given: the description parameter must be a non-empty string', 1 )
+    unless defined $description && !ref $description && $description =~ /\S/;
+  my $wd = $self->working_directory;
+  if ( my $refused = $self->_refusal( $command, $wd ) ) {
+    return ( $refused, 1 );
+  }
+  my $cap = $self->has_unattended && $self->unattended->() ? $self->monitor_unattended_max_timeout : $self->monitor_max_timeout;
+  my $ms  = $in->{timeout_ms};
+  my $seconds = defined $ms && !ref $ms && looks_like_number($ms) && $ms == $ms && $ms > 0
+    ? $ms / 1000 : $self->monitor_timeout;
+  $seconds = $self->monitor_min_timeout if $seconds < $self->monitor_min_timeout;
+  $seconds = $cap if $seconds > $cap;
+
+  my $id = $self->tasks->next_id('monitor');
+  weaken( my $weak = $self );
+  my $monitor = Langertha::Raider::Monitor->new(
+    id                => $id,
+    loop              => $self->loop,
+    tasks             => $self->tasks,
+    command           => $command,
+    description       => $description,
+    timeout           => $seconds,
+    recipient         => $caller->{recipient} // 'main',
+    tool_use_id       => $caller->{call},
+    ( defined $wd ? ( working_directory => $wd ) : () ),
+    stderr_file       => $self->_dir->child( $id.'.stderr' ),
+    kill_grace        => $self->kill_grace,
+    on_end            => sub { delete $weak->_monitors->{ $_[0]->id } if $weak },
+    %{ $self->monitor_options },
+  );
+  if ( my $error = $monitor->start ) {
+    return ( 'Cannot start bash: '.$error, 1 );
+  }
+  $self->_monitors->{$id} = $monitor;
+  return ( 'Monitor started (task '.$id.', expires in '.$monitor->span.' unless the source ends first; you get one notice '
+    ."at expiry \x{2014} re-arm if you still need the watch). You will be notified on each event. Keep working \x{2014} "
+    ."do not poll or sleep. Events may arrive while you are waiting for the user \x{2014} an event is not their reply. "
+    .'Stop it with kill_shell (shell_id: '.$id.').', 0 );
+}
+
 #### The shells
 
 =method background_pids
@@ -833,8 +985,10 @@ stops the children of a cancelled run leaves these alone.
 
 sub background_pids {
   my ( $self ) = @_;
-  return map { $_->{pid} } grep { ( $_->{background} || $_->{detached} ) && $_->{status} eq 'running' }
-    values %{ $self->_shells };
+  return (
+    ( map { $_->{pid} } grep { ( $_->{background} || $_->{detached} ) && $_->{status} eq 'running' } values %{ $self->_shells } ),
+    ( map { $_->pid } grep { $_->status eq 'running' } values %{ $self->_monitors } ),
+  );
 }
 
 =method async_tools
@@ -892,6 +1046,14 @@ sub async_tools {
       return $gone->() unless $weak;
       return Future->done( $result->( $weak->kill_shell( $in->($input) ) ) );
     },
+    ( $self->has_tasks ? ( monitor => sub {
+      my ( $input, %ctx ) = @_;
+      return $gone->() unless $weak;
+      return Future->done( $result->( $weak->monitor( $in->($input), {
+        recipient => $value->( $caller{recipient} ) // 'main',
+        call      => $ctx{call} // $ctx{id},
+      } ) ) );
+    } ) : () ),
   );
   return { map { $_ => { code => $tools{$_}, ( $caller{applies} ? ( applies => $caller{applies} ) : () ) } } keys %tools };
 }
@@ -907,6 +1069,7 @@ so no shell outlives the application.
 
 sub stop_all {
   my ( $self ) = @_;
+  $_->stop for values %{ $self->_monitors };
   $self->_stop( values %{ $self->_shells } );
   return;
 }
@@ -914,6 +1077,7 @@ sub stop_all {
 sub DEMOLISH {
   my ( $self ) = @_;
   $self->_quiet(1);
+  $_->quiet(1) for values %{ $self->_monitors };
   $self->stop_all;
   return;
 }

@@ -34,8 +34,10 @@ working coding/system agent:
 (L<Langertha::Raider::FileTools>).
 
 =item * Full shell via L<Langertha::Raider::BashTools> (the C<bash> tool, with
-C<bash_output> and C<kill_shell> for background commands), started in the
-root but not confined to it.
+C<bash_output> and C<kill_shell> for background commands, and C<monitor> to
+stream the output of one as notifications), started in the root but not
+confined to it. In the REPL the model can also schedule prompts for later
+turns (C<cron_create>, L<Langertha::Raider::CronTools>).
 
 =item * Web search + fetch via L<Net::Async::WebSearch> and
 L<Net::Async::HTTP> (L<Langertha::Raider::WebTools>).

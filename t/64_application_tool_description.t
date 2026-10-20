@@ -70,6 +70,7 @@ subtest 'stock set: exactly the mounted tools, with their parameters' => sub {
     'bash(command, [description], [run_in_background], [timeout], [working_directory])',
     'bash_output(bash_id, [block], [filter], [timeout])',
     'kill_shell(shell_id)',
+    'monitor(description, command, [timeout_ms])',
     'web_search(query, [allowed_domains], [blocked_domains], [limit])',
     'web_fetch(url, [as_html], [prompt])',
     'glob(pattern, [path])',

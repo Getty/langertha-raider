@@ -413,17 +413,33 @@ A turn of the notifications that wait for the main conversation (ADR 0027
 E<sect>4): a meta line for each (C<background agent agent_1 finished>),
 then one prompt of them all, in the order their work ended, recorded with
 C<notification> 1. Further options go to
-L<Langertha::Raider::CLI::Runner/run_prompt>. Returns what the runner
-returns, true when nothing was due.
+L<Langertha::Raider::CLI::Runner/run_prompt>. Then the prompt of every cron
+job that came due (ADR 0031) runs as a turn of its own through
+L</run_prompt>, after a meta line that names the job -- not with
+C<wait_background>. Returns what the runner returns, true when nothing was
+due.
 
 =cut
 
 sub run_notifications {
   my ( $self, %o ) = @_;
-  my @items = $self->app->take_notifications or return 1;
-  $self->output->say_meta( $_->{label} // 'background task '.( $_->{id} // '?' ).' ended' ) for @items;
-  return $self->runner->run_prompt( join( "\n", map { $_->{text} } @items ),
-    session => scalar $self->_session_for_run, notification => 1, %o );
+  my $app = $self->app;
+  my $ok  = 1;
+  if ( my @items = $app->take_notifications ) {
+    $self->output->say_meta( $_->{label} // 'background task '.( $_->{id} // '?' ).' ended' ) for @items;
+    $ok = $self->runner->run_prompt( join( "\n", map { $_->{text} } @items ),
+      session => scalar $self->_session_for_run, notification => 1, %o );
+  }
+  # The prompts of cron jobs that came due (ADR 0031): the surface is idle
+  # now, each runs as a turn of its own, as if typed. Not while the REPL only
+  # waits for background work at the end of piped input.
+  unless ( $o{wait_background} ) {
+    for my $job ( $app->take_scheduled ) {
+      $self->output->say_meta( $job->{label} // 'scheduled job '.( $job->{id} // '?' ).' fired' );
+      $ok = $self->run_prompt( $job->{text} );
+    }
+  }
+  return $ok;
 }
 
 =method finish_background
@@ -454,8 +470,9 @@ One line from C<$in> without stopping the application's loop (ADR 0027
 E<sect>4): what is there is read without blocking, and while no whole line
 is, the loop runs until C<$in> is readable. Returns the line, C<undef> at
 the end of the input, or a reference (C<\'notifications'>) when
-notifications of background subagents wait for the main conversation and
-no part of a line has come yet -- the REPL then runs them as a turn. With
+notifications of background work wait for the main conversation, or the
+prompt of a cron job is due (ADR 0031), and no part of a line has come yet
+-- the REPL then runs them as a turn. With
 C<$prompt>, that is printed first (and a line break before such a turn).
 
 =cut
@@ -474,7 +491,7 @@ sub read_line {
     return $partial.$chunk if $state eq 'line';
     return length $partial ? $partial : undef if $state eq 'eof';
     $partial .= $chunk if defined $chunk;
-    if (!length $partial && $app->notifications_pending) {
+    if (!length $partial && $app->idle_pending) {
       $out->emit("\n") if defined $prompt;
       return \'notifications';
     }
@@ -511,7 +528,7 @@ sub _await_input {
   my $loop  = $app->loop;
   my $ready = $loop->new_future;
   $loop->watch_io( handle => $in, on_read_ready => sub { $ready->done(1) unless $ready->is_ready } );
-  my $f = $o{notifications} ? Future->wait_any( $ready, $app->tasks->wait_f('main') ) : $ready;
+  my $f = $o{notifications} ? Future->wait_any( $ready, $app->idle_wait_f ) : $ready;
   $loop->await($f);
   $loop->unwatch_io( handle => $in, on_read_ready => 1 );
   return $ready->is_done ? 1 : 0;
@@ -1018,7 +1035,7 @@ sub _callback_reader {
     } );
     until ($got) {
       my $idle = !length( $term->Attribs->{line_buffer} // '' );
-      if ($idle && $self->app->notifications_pending) {
+      if ($idle && $self->app->idle_pending) {
         $term->callback_handler_remove;
         $self->output->emit("\n");
         return \'notifications';

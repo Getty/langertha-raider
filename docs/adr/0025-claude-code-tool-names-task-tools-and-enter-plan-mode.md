@@ -97,11 +97,12 @@ included); "listed" means the name only appears in Claude Code's tool lists, nev
 | `SubagentHandback` | 726 | unknown: a sub-agent handing its result back; raider's sub-agent ends with its answer (stream A) |
 | `ListAgents`, `TeamCreate`, `TeamDelete`, `AgentOutput`, `AgentOutputTool` | 279, removed | unknown: the agent-team machinery, same reason |
 | `ToolSearch` | 737 | unknown: loads deferred tool schemas; raider mounts the whole active tool set (ADR 0005), nothing is deferred |
-| `Monitor` | 713 | unknown: streams events of a background process into the conversation; `bash_output` (ADR 0024) polls, which is not the same contract |
+| `Monitor` | 713 | `monitor` since ADR 0031 §1: streams the stdout lines of a background command as notifications (was unknown here: `bash_output` polls, which is not the same contract) |
 | `EnterWorktree`, `ExitWorktree` | 401, 66 | unknown: moves the session into another git worktree; raider's root and its compiled context are fixed for a session (ADR 0004) |
 | `StructuredOutput` | 82 | unknown: the SDK's final structured answer; raider's machine output is `--json` (ADR 0013) |
 | `Artifact`, `ArtifactComments`, `ArtifactData`, `DesignSync` | 34, listed | unknown: claude.ai pages; no counterpart |
-| `ScheduleWakeup`, `CronCreate`, `CronDelete`, `CronList`, `RemoteTrigger` | 24, 10, 7, listed | unknown: the model schedules itself; raider's cron is the Hall's configuration, never the model's (ADR 0005: no permissions from prompts) |
+| `CronCreate`, `CronDelete`, `CronList` | 10, 7, listed | `cron_create`, `cron_delete`, `cron_list` since ADR 0031 §2: session jobs in the REPL; a scheduled prompt gives no permission, so ADR 0005 holds (was unknown here) |
+| `ScheduleWakeup`, `RemoteTrigger` | 24, listed | unknown: the wakeup belongs to the self-paced `/loop` raider does not have (ADR 0031 §3); `RemoteTrigger` fires a cloud routine |
 | `SendFeedback`, `PushNotification`, `SendUserFile`, `SendUserMessage`, `ReadNotifications`, `FetchInboxMessage`, `EndConversation`, `Workflow` | 4, 1, listed | unknown: host integrations of claude.ai and the desktop app |
 | `TaskOutput` | listed (removed in later 2.1) | `bash_output`, see §5 |
 | `NotebookEdit`, `NotebookRead` | listed | unknown: Jupyter cells (`cell_id`, `cell_type`, `edit_mode` insert/delete); `edit_file` on the JSON would accept the arguments only lossily, and raider reads no notebooks |
