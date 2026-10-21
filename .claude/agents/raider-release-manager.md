@@ -4,6 +4,7 @@ description: "Owns raider's commits and release readiness — cuts commits from 
 model: sonnet
 briefing:
   skills:
+    - raider-core
     - getty-git-commit-style
     - getty-git-usage
     - getty-perl-release-author-getty

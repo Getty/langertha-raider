@@ -6,6 +6,7 @@ briefing:
   skills:
     - getty-perl-core
     - perl-ai-langertha
+    - raider-core
     - perl-io-async-future
     - perl-mcp
     - kanban-issues-karr-ticket

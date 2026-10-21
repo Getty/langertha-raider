@@ -4,6 +4,7 @@ description: "Raider standalone-binary worker — the PAR::Packer build of bin/r
 model: inherit
 briefing:
   skills:
+    - raider-core
     - raider-single-binary
     - getty-perl-core
     - kanban-issues-karr-ticket
