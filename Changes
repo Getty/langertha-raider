@@ -8,11 +8,13 @@ Revision history for Langertha-Raider
       `raider "..."`, --json and the --stream-* flags, a Hall raider, ACP --
       refuses writing files, bash, the network and messages unless a rule
       allows them. See [Permissions] for the remedies.
+
     - INCOMPATIBLE: bash refuses heavy commands (prove, make test, dzil
       test|build|release, cpanm, docker build, ...) while the host is under
       memory pressure or all heavy slots are taken -- the loadguard gate is
       on by default (ADR 0018). LOADGUARD_THROTTLE=0 turns it off. See
       [Tools].
+
     - INCOMPATIBLE: a project with only CLAUDE.md, CLAUDE.local.md or
       .claude/ is read in Claude mode (ADR 0019): the CLAUDE.md hierarchy,
       the Claude settings (their permissions and env apply, their hooks
@@ -20,28 +22,34 @@ Revision history for Langertha-Raider
       longer glued into the system prompt in full: the prompt lists them,
       the model loads one with the skill tool. See [Claude Code layout and
       skills].
+
     - INCOMPATIBLE: a prompt that starts with /NAME is a slash command, also
       in a one-shot run (ADR 0030): `raider "/foo"` with no command or skill
       foo is "unknown command" with exit 2 instead of a prompt to the model;
       a path such as `/etc/hosts is broken` stays a prompt. In command
       bodies $N counts from 0 as in Claude Code ($0 is the first argument).
       See [Slash commands like Claude Code].
+
     - INCOMPATIBLE: subagents nest up to three levels by default
       (max_agent_depth 3, was 1; max_agent_depth: 1 restores it), the result
       of an agent call ends with an agentId line and a <usage> block, and a
       one-shot run waits for the background agents it started before it ends
       (ADR 0027). See [Claude Code layout and skills].
 
+
   [Release order]
     - Skilletor 0.001 (the perl/ dist of the skilletor repository) goes to
       CPAN first: raider requires it, and `cpanm --installdeps .` cannot
       fetch it before.
+
     - Langertha 0.504 (the release after 0.503, with
       Langertha::Engine::Virtual and stream_usage) goes to CPAN before raider:
       `-e mock` / `-e virtual` and the scenario suites need
       Langertha::Engine::Virtual. The cpanfile floor (still 0.503) moves
       to it in the release audit; knarr's floor moves to the same Langertha.
+
     - Then this release; the standalone binaries are built from it.
+
 
   [File tools]
     - read_file asks the engine whether images and PDFs may go back as
@@ -50,6 +58,7 @@ Revision history for Langertha-Raider
       answers, so a model that takes images but no PDFs (or the reverse) gets
       the one and a refusal for the other. FileTools::build_file_tools_server
       has reads_pdf next to sees_images; neither falls back on the other.
+
     - INCOMPATIBLE: read_file, write_file and edit_file answer like Claude
       Code's Read, Write and Edit (ADR 0023): "File created successfully at:
       P", "The file P has been updated successfully.", "String to replace
@@ -58,6 +67,7 @@ Revision history for Langertha-Raider
       working directory is ROOT.", "EISDIR: ...", with Claude Code's error
       flags and <tool_use_error> frame. The old "Wrote N bytes" / "Edited" /
       "Error: not a file" texts are gone.
+
     - INCOMPATIBLE: read before write. write_file, edit_file and multi_edit
       refuse an existing file that was not read in the run ("File has not
       been read yet. Read it first before writing to it.") or that changed
@@ -65,6 +75,7 @@ Revision history for Langertha-Raider
       need no read; what the tools wrote counts as read; a read with
       offset/limit counts. The record is per run (begin_run empties it) and
       holds in every layout.
+
     - INCOMPATIBLE: read_file returns cat -n lines ("N<TAB>line") and takes
       offset (1-based) and limit; at most 2000 lines by default with a note
       where the rest is, lines over 2000 characters cut, files over 256 KB
@@ -74,10 +85,12 @@ Revision history for Langertha-Raider
       back as image/document content when the model sees images and its wire
       carries them in a tool result, else a clear refusal; Jupyter notebooks
       come back as their cells with outputs.
+
     - New tool multi_edit(path, edits) like Claude Code's MultiEdit: edits
       applied in order on the content in memory, atomic, the failing edit
       named by its number. Edit/Write/MultiEdit rules, acceptEdits and the
       plan-mode refusal cover it as they cover edit_file.
+
     - INCOMPATIBLE: in the Claude layout the file and search tools are no
       longer confined to the root and the additional directories: a path
       outside them asks (refused with how to allow it when nobody can
@@ -85,6 +98,7 @@ Revision history for Langertha-Raider
       not cover edits outside, bypassPermissions reaches it, deny rules hold.
       A symbolic link out of the root counts as outside. Every other layout
       stays confined ("Path escapes root"), also in bypassPermissions.
+
 
   [Shell tools]
     - INCOMPATIBLE: bash answers like Claude Code's Bash (ADR 0024): on exit
@@ -94,9 +108,11 @@ Revision history for Langertha-Raider
       the === STDOUT === / === STDERR === blocks are gone, and so is MCP-Run's
       `compress` argument. Output over 30000 characters keeps its start and
       its end around "... [N characters truncated] ...".
+
     - INCOMPATIBLE: a command still running after its timeout (seconds,
       default 120, at most 600) is no longer killed: it is moved to the
       background with an ID, as in Claude Code.
+
     - run_in_background: true starts a command in the background and answers
       at once with its ID (bash_1, bash_2, ...). New tools bash_output
       (bash_id, filter, block, timeout: new output, status
@@ -107,10 +123,12 @@ Revision history for Langertha-Raider
       bash_output is a read tool, kill_shell has no effect class; both run in
       every permission mode. The loadguard gate and allowed_commands are asked
       before a background command starts, too.
+
     - bash runs through Langertha::Raider::BashTools instead of MCP::Run::Bash;
       the MCP::Run::Bash requirement is dropped. A working_directory is entered
       with chdir: with MCP-Run's "cd DIR && COMMAND", a command such as
       `x & y` ran y in raider's own directory.
+
 
   [Task tools, plan mode and Claude Code tool names]
     - INCOMPATIBLE: the task list is kept with task_create, task_update,
@@ -123,11 +141,13 @@ Revision history for Langertha-Raider
       RAIDER_ENABLE_TASKS=0 mounts todo_write instead. The task list lasts for
       the conversation (todo_write's stays run state); /clear empties it; both
       report it as todo.updated.
+
     - New tool enter_plan_mode (Claude Code's EnterPlanMode): switches the
       session to plan mode and answers Claude Code's instructions. The
       permission gate asks the person first in default, acceptEdits and auto
       mode ("for this session" adds the rule EnterPlanMode); it runs without a
       question in bypassPermissions and is refused when nobody can agree.
+
     - INCOMPATIBLE: MultiEdit now means multi_edit, not edit_file, in rules,
       agent files and hook matchers; a hook gets it as MultiEdit with an
       absolute file_path. TaskStop, KillShell and KillBash mean kill_shell
@@ -137,17 +157,21 @@ Revision history for Langertha-Raider
       raider tools. ADR 0025 lists every known Claude Code tool name and why
       the others (NotebookEdit, ToolSearch, SendMessage, Monitor,
       EnterWorktree, ...) stay unknown.
+
     - maint/claude-log-to-scenario: a MultiEdit becomes one multi_edit call;
       a section with TodoWrite gets `app: { task_tools: false }`.
+
     - TaskCreated and TaskCompleted hooks (Claude layout, ADR 0022
       addendum): task_create and task_update run them before the change, with
       task_id, task_subject and task_description; exit 2 undoes the change
       and the model reads "TaskCreated hook error: STDERR". todo_write fires
       none. A subagent's own task list fires them too, with its agent_id,
       agent_type and permission_mode; their reports go to its journal.
+
     - A resumed (--continue, --resume) or forked session gets its task list
       back from the journal's last todo.updated (not after /clear; ids
       continue). Only for the task tools.
+
 
   [Refusals, web tools and skills like Claude Code]
     - INCOMPATIBLE: a PreToolUse hook's denial reads as in Claude Code: exit
@@ -159,6 +183,7 @@ Revision history for Langertha-Raider
       with " Tool names are case-sensitive: call Y instead." when only the
       case differs. The old "denied: PreToolUse hook: ..." and "unknown tool
       X" are gone.
+
     - INCOMPATIBLE: refusals read as in Claude Code (ADR 0026). The person's
       no: "The user doesn't want to proceed with this tool use. The tool use
       was rejected ... STOP what you are doing ..." or, with a reason, "... To
@@ -169,12 +194,14 @@ Revision history for Langertha-Raider
       application's "Tool call 'X' was denied: ..." are gone; the events keep
       their reasons. The gate's verdict may carry `message`, the whole text
       the model gets (Langertha::Raider).
+
     - INCOMPATIBLE: exit_plan_mode answers in Claude Code's words: "User has
       approved your plan. You can now start coding. ...", the mode and
       "## Approved Plan:" with the plan; a refused plan is an error result with
       the rejection text and the feedback; with nobody to review it is an error
       result ("Permission to use exit_plan_mode has been denied. ..."); outside
       plan mode "<tool_use_error>You are not in plan mode. ...".
+
     - INCOMPATIBLE: the skill tool answers "Launching skill: NAME"; the skill
       itself (base directory, body, arguments) follows the tool results as a
       user message of its own, as Claude Code adds it. It stays when in-raid
@@ -183,30 +210,36 @@ Revision history for Langertha-Raider
       its tool.result, so a resumed session has it in the same place. An
       unknown name is "<tool_use_error>Unknown skill: NAME. Available skills:
       ...</tool_use_error>".
+
     - A tool result may hand the raid user messages under _meta
       'raider/messages' (Langertha::Raider, TOOL RESULTS THAT ADD MESSAGES):
       added after the batch's tool results, from raider's own tool sources
       only -- a catalog MCP server's result loses the key.
+
     - web_fetch takes prompt (Claude Code's WebFetch(url, prompt)): the page
       text and the question go to a model call of its own, the tool returns
       its answer; the page stays out of the conversation. The run's engine
       answers, or the model web_fetch_model names (a new raider config key,
       also -o web_fetch_model=). The call's tokens are the new journal event
       model.usage (purpose web_fetch).
+
     - INCOMPATIBLE: web_fetch follows a redirect only on the same host (www.
       aside), scheme and port; one to another host is not fetched, the result
       says where it points (Claude Code's "REDIRECT DETECTED" text), so domain
       rules see the new host. A response that is not a success is "The server
       returned HTTP <status>. ..." and, as in Claude Code, no error result.
+
     - web_search takes allowed_domains and blocked_domains (subdomains
       included): the results are filtered, site: / -site: go into the query,
       both at once is an error.
+
     - Token statistics like Claude Code's /cost: every model call of every
       raider (the main one, subagents) and web_fetch's prompt is a
       model.usage event (input, output, cache read/write tokens, model);
       the application keeps them per model. /stats shows the total and one
       line per model (also with --no-trace), the metrics of a run gain
       "usage". Tests t/240-t/244, scenarios 170-174; ADR 0026 addendum.
+
     - read_file: a read over 25000 tokens (bytes / 4) is refused as in
       Claude Code; pages ("1-5", at most 20) reads PDF pages as text
       through pdftotext (poppler, looked up on PATH; a PDF of more than 10
@@ -214,9 +247,11 @@ Revision history for Langertha-Raider
       as read, so they can be edited without a read_file first. FileTools
       and SearchTools share one confinement (Langertha::Raider::PathConfine).
       Tests t/235-t/239, scenarios 165-169; ADR 0023 addendum.
+
     - Tests: t/203-t/206, scenarios t/scenarios/130-135;
       Test::Raider::LocalHTTP serves web pages to scenarios (http:), and
       scenario requests check their last messages (tail:).
+
 
   [Slash commands like Claude Code]
     - Custom commands (ADR 0030): .raider/commands and ~/.raider/commands;
@@ -227,6 +262,7 @@ Revision history for Langertha-Raider
       entries are /plugin:name, a skill beats a command of the same name.
       The model sees the commands it may invoke in the skill listing and
       loads them with the skill tool, as skills.
+
     - /NAME [ARGS] runs a skill or custom command in the REPL and in a
       one-shot run; an entry of the catalogue replaces a built-in of the
       same name, as in Claude Code. Frontmatter: description,
@@ -234,6 +270,7 @@ Revision history for Langertha-Raider
       deny and ask rules still win), model (that run only, not saved),
       disable-model-invocation, user-invocable: false (not runnable as
       /NAME); booleans take yes/no/on/off/1/0.
+
     - Rendering like Claude Code (Langertha::Raider::SlashCommand, also
       for the skill tool): $ARGUMENTS, $ARGUMENTS[N] and $N (0-based,
       shell-style quoting), named `arguments`, ${CLAUDE_SKILL_DIR},
@@ -246,31 +283,38 @@ Revision history for Langertha-Raider
       applies; disableSkillShellExecution in the Claude settings turns it
       off. @path in a /NAME command attaches the file (counted as read) or
       directory listing.
+
     - New -p / --print: a one-shot run even on a terminal, as claude -p.
       Report commands (/help, /context, /skills, /agents, /hooks, /memory,
       /permissions, /config, /stats, /metrics, /packs) print and exit 0,
       /init and /compact run; the rest is a usage error in a one-shot run.
+
     - New built-in commands: /skills, /compact [INSTRUCTIONS], /context,
       /memory [N] (opens a memory file in $VISUAL / $EDITOR), /agents,
       /hooks, /init (asks the model to write CLAUDE.md, or the native
       instructions file), /reset and /new (aliases of /clear). /help lists
       the skills and custom commands with their argument hints.
+
     - Langertha::Raider compress_history(_f) takes focus instructions, and
       forgets the last prompt size afterwards, so the next raid does not
       compress the summary again. New Langertha::Raider override_engine:
       an engine for one run, returns the code that puts the previous one
       back (the `model:` of a /NAME run).
+
     - Langertha::Raider::Permissions has run rules (add_run_rules,
       clear_run_rules): allow rules for the current run, cleared when it
       ends.
+
     - Tests t/260-t/266, scenarios 190-194; the scenario harness sends
       /NAME prompts as slash commands.
+
 
   [MCP servers like Claude Code]
     - ADR 0029 decides how raider connects to the MCP servers a person
       configures, as Claude Code does: sources, precedence, ${VAR}
       expansion, tool names mcp__<server>__<tool>, approval of a
       repository's servers, timeouts, statuses.
+
     - The configured servers run: stdio (own session, in the root, with the
       entry's env and CLAUDE_PROJECT_DIR; stderr kept for the status, never
       on the terminal) and streamable HTTP (session id, protocol header,
@@ -280,15 +324,18 @@ Revision history for Langertha-Raider
       run. Tools reach the model as mcp__<server>__<tool>; calls are bounded
       by the server's timeout or MCP_TOOL_TIMEOUT. Stopped when the
       one-shot run or the REPL ends.
+
     - Raider speaks the initialize handshake of the MCP revisions
       2024-11-05 to 2025-11-25 itself (Langertha::Raider::MCP::Server,
       ::Stdio, ::HTTP): the installed Net::Async::MCP 0.006 speaks only
       2026-07-28 and cannot reach a server of an earlier revision.
+
     - The tools of a configured server are foreign to the permission gate:
       the mode asks, rules name them mcp__<server>__<tool> or mcp__<server>,
       hooks match the mcp__ name. A result cannot hand raider user messages
       (_meta raider/ keys are removed). Subagents use the same connections,
       limited to the mcp__ tools their agent file allows.
+
     - Sources, the first entry of a name winning whole: mcp: of
       .raider/config.yml, mcp: of ~/.raider/config.yml, then in the Claude
       layout the local servers of ~/.claude.json (projects.<dir>),
@@ -297,12 +344,14 @@ Revision history for Langertha-Raider
       entries are Claude Code's .mcp.json format (stdio command/args/env,
       http url/headers, timeout); sse, ws, sdk, headersHelper and oauth are
       reported as unsupported.
+
     - .mcp.json servers and mcp: of a project config start only when
       approved: enabledMcpjsonServers / enableAllProjectMcpServers /
       disabledMcpjsonServers of the Claude settings -- a repository's own
       .claude/settings.json only in a folder Claude Code trusts
       (hasTrustDialogAccepted) -- or the new mcp_approvals: of
       ~/.raider/config.yml. A disabled entry rejects from any file.
+
     - Langertha::Raider::MCP::Config (internal);
       Langertha::Raider::Config->mcp_servers / mcp_approvals,
       Langertha::Raider::Context::Settings->mcpjson_approvals,
@@ -310,6 +359,7 @@ Revision history for Langertha-Raider
       mcp_approvals: are raider keys, never engine options; inside a
       section, or mcp_approvals: in a project file, they are reported by
       config explain.
+
     - The REPL asks once about every .mcp.json (or project mcp:) server that
       waits for an approval, with Claude Code's three choices (use it / use
       all project servers / continue without it), before the first prompt.
@@ -318,21 +368,25 @@ Revision history for Langertha-Raider
       Code saves it), else mcp_approvals of ~/.raider/config.yml. A run
       nobody can ask in (one-shot, --json, Hall, ACP, piped REPL) keeps them
       off and says so on stderr; machine output is unchanged.
+
     - REPL /mcp shows every configured server: status, scope, transport,
       source, reason, approval, tools, the last stderr lines of a failed
       one; /mcp reconnect [NAME|all] restarts servers. /mcp connects the
       servers first; a one-shot raider -p /mcp prints the same report and
       exits 0 (/mcp reconnect is REPL-only). config explain and /config list
       the servers too.
+
     - /reload reads the MCP configuration again: an unchanged server keeps
       running, changed and removed ones are stopped, new ones start with the
       next prompt. A cancelled turn leaves the servers running; SIGTERM, the
       end of the REPL and the end of a one-shot run stop them.
+
     - Tests: t/250-t/259, t/267-t/268, scenarios 180-188 with a stdio test
       server (t/lib/mcp-test-server.pl) and a streamable-HTTP one
       (Test::Raider::MCPHTTP); scenarios may use the PERL and
       MCP_TEST_SERVER placeholders (in double curly braces), and answer
       pending servers with mcp_answers:.
+
 
   [MCP follow-ups: parent .mcp.json, list_changed, output limit, prompts, resources]
     - ADR 0029 Addendum 1. A project's .mcp.json is read from the project
@@ -340,32 +394,41 @@ Revision history for Langertha-Raider
       in several wins whole from the nearest): a ~/.mcp.json now serves
       every project below the home directory, as in Claude Code. They are
       all scope project and need the same approval.
+
     - A session started in bypassPermissions (--permission-mode or
       --dangerously-skip-permissions) with skipDangerousModePermissionPrompt
       in ~/.claude/settings.json approves the project servers without
       asking, as Claude Code does; disabledMcpjsonServers still blocks.
+
     - notifications/tools/list_changed: the server's tools are listed again
       and the next model request offers them.
+
     - MAX_MCP_OUTPUT_TOKENS (default 25000): a tool result's text over the
       limit is cut with a note that says how to raise it; an error text
       over about 11000 characters keeps its first and last 5000. Claude
       Code saves the whole result to a file instead; raider keeps none.
+
     - MCP prompts are slash commands: /mcp__server__prompt ARGS (arguments
       by the prompt's declared order), listed in /help, also in a one-shot
       run.
+
     - MCP resources: the tools list_mcp_resources and read_mcp_resource
       (Claude Code's ListMcpResourcesTool / ReadMcpResourceTool) are
       mounted when servers are configured, and @server:scheme://path in a
       prompt attaches the resource.
+
     - The session journal records mcp.server (starting, connected, failed,
       stopped, with reason and tool count) and the new mcp.tools_changed;
       a stop outside a run reaches only the event stream.
+
     - Tests t/280-t/283, scenarios 210-214; the test server has a rich mode
       (prompts, resources, a tool that changes the tool list).
+
 
   [Monitor and cron jobs like Claude Code]
     - ADR 0031 decides how raider streams events and schedules prompts as
       Claude Code does, on the task registry of ADR 0027.
+
     - New tool monitor (Claude Code's Monitor; description, command,
       timeout_ms): runs a command in the background and delivers every
       stdout line as a <task-notification> ("Monitor event: ...", the lines
@@ -376,9 +439,11 @@ Revision history for Langertha-Raider
       (TaskStop) stops it, bash_output shows its status; it ends with the
       subagent that started it, and a piped or -p run waits for its
       monitors. IDs monitor_1, monitor_2, ...
+
     - monitor is a shell tool: allowed_commands and the loadguard gate
       apply, a Bash(...) permission rule covers it (Monitor(...) names it
       alone), and its effect class is code.
+
     - New tools cron_create, cron_delete and cron_list (CronCreate,
       CronDelete, CronList) in the REPL: session-scoped jobs with a
       five-field cron expression in local time, recurring or one-shot, at
@@ -388,15 +453,19 @@ Revision history for Langertha-Raider
       fire). Jobs are not durable and not restored on resume; a run with a
       single prompt, a Hall raider and ACP are not offered the tools.
       CLAUDE_CODE_DISABLE_CRON turns them off.
+
     - No ScheduleWakeup: it belongs to the self-paced /loop raider does not
       have; a reminder is a one-shot cron_create.
+
     - ToolNames maps Monitor, CronCreate, CronDelete and CronList. Tests
       t/300-t/305, scenarios 230-236 (injectable clock, no real waiting for
       cron).
 
+
   [Status]
     - Marked as in development (POD and README): a developer release, not yet
       covered end to end. Release it with `dzil release --trial`.
+
 
   [Engines]
     - `-e mock` (alias `virtual`) selects Langertha::Engine::Virtual, the rule-driven
@@ -404,18 +473,22 @@ Revision history for Langertha-Raider
       by hand and in tests against a scripted "model". It gets the prompt as typed:
       the [situation] line is left out, because rules match word for word.
 
+
   [Tests]
     - t/53_repl_interrupt_tools waits for the model request before its
       SIGINT instead of giving raider 5 s to start (it takes 4 s idle, up to
       7 s under load; a SIGINT before the REPL's handler killed raider). The
       stub engine gained `seen => $file`, created when the request arrives.
+
     - The hall scenarios (t/202) count the hall as started when it answers
       `ps` on the control socket, not when the socket accepts: the hall
       opens the ACP port later, and under load the ACP connect failed.
+
     - Hall scenario 04c and t/52_cli_cancel wait for events -- the raider's
       end, the stub's request -- instead of fixed delays; 04c's stuck tool
       lives as long as its raider, so a late cancel no longer turns the
       expected KILL into a plain cancel. New t/176_subagent_embeddings.
+
     - Scenario suite: t/200_scenarios.t runs every t/scenarios/*.yml with a
       scripted model (Langertha::Engine::Virtual, via Test::Raider::MockAI; skipped
       without Langertha 0.504 or later) driving the real application, raid
@@ -425,6 +498,7 @@ Revision history for Langertha-Raider
       root and an unknown tool, plus list_files, a failed edit, schema-invalid
       arguments, a failing bash command and a conversation across two prompts
       (`prompts:`, `requests:` in the scenario format).
+
     - Permission scenarios (t/scenarios/11, 60 to 81): each mode, deny before
       allow, Bash prefixes and chains, Edit and Read globs with ../, WebFetch
       domains, home config and settings layers, default modes, the REPL's
@@ -433,6 +507,7 @@ Revision history for Langertha-Raider
       `permission_mode:` (default bypassPermissions: the tool scenarios test
       tools, not approvals), `approve:`, `review:` and the expectations
       `permissions:` and `plans:`. Unit tests t/150 to t/154.
+
     - Hook scenarios (t/scenarios/90 to 99): PreToolUse deny by exit 2 and
       by JSON, updatedInput in Claude Code's form, a hook ask nobody can
       answer, a hook allow against a deny rule, a plugin's PostToolUse with
@@ -441,12 +516,14 @@ Revision history for Langertha-Raider
       gained `executable:` and `run_prompt:` (with `expect: outcome:`). Unit
       tests t/140 to t/143; t/141 runs the real briefing, loadguard and
       skilletor hooks when their checkouts are there.
+
     - Scenarios for glob, grep, todo_write, ask_user and the loadguard gate
       (t/scenarios/12 to 22); the format gained `age:`, `proc:` (a fake /proc,
       Test::Raider::FakeProc -- the tests never create load), `env:`, `ask:`
       and the expectations `events:`, `questions:` and `todos:`. Unit tests
       t/110 (tool names), t/111 (search tools, Perl and ripgrep alike), t/112
       (todo, ask, REPL) and t/114 (loadguard).
+
     - Every scenario runs with a fresh temporary $HOME and no
       $CLAUDE_CONFIG_DIR (`home:` files, HOME and ROOT placeholders in
       double curly braces in contents, `app:` arguments). Claude layout scenarios: CLAUDE.md with an
@@ -456,9 +533,11 @@ Revision history for Langertha-Raider
       read, a plugin skill, settings env seen by bash, native .raider/skills,
       and bare reading nothing. isolate_home() of the test library also
       clears $CLAUDE_CONFIG_DIR, so no test reads the real ~/.claude.
+
     - t/201_remote_session.t: a session on another agent -- an ACP client opens a
       session on a hall in its own process, the hall spawns a real raider on
       `-e mock`, and the answer and the tool's file come back from the remote side.
+
     - Hall scenario suite: t/202_hall_scenarios.t runs every t/scenarios/hall/*.yml
       against a real hall in a process of its own (free ACP port, temporary root)
       whose raiders are real raider processes on `-e mock`, driven over the
@@ -471,6 +550,7 @@ Revision history for Langertha-Raider
       local fake Bot API (allowed chat answered by telegram_reply, stranger
       ignored, routing '*' and per chat) and a hall restart. 04d (tool
       processes outliving a cancel that escalated to KILL) is listed as skipped.
+
     - maint/claude-log-to-scenario drafts a scenario from a section of a
       Claude Code session log: one script step per model response, tool
       names and arguments through Langertha::Raider::ToolNames, files rebuilt
@@ -484,6 +564,7 @@ Revision history for Langertha-Raider
       progress, edits after a read, a failing bash command and the retry,
       exploring before an edit, a hook steering the model, a refused call
       (k156).
+
     - Subagents in Claude Code sessions: maint/claude-log-to-scenario replays
       a subagent's turns from Claude Code's subagent log right after the
       agent call, in the order raider serves them (nested agents raise
@@ -494,29 +575,8 @@ Revision history for Langertha-Raider
       (disallowedTools) searches, finds no write tool, and the caller edits
       (k156).
 
+
   [Distribution]
-    - Langertha-Raider is the merge of the App-Raider distribution with the
-      agent engine extracted from Langertha core. Langertha::Raider,
-      Langertha::Raider::Result and the Langertha::Raid orchestration layer
-      (Raid::Loop, Raid::Parallel, Raid::Sequential) ship here under their
-      own names. Every App::Raider::* module is renamed to
-      Langertha::Raider::*, with the CLI entry point App::Raider becoming
-      Langertha::Raider::CLI; the raider and raider-hall executables keep
-      their names. Requires Langertha 0.503 and Net::Async::MCP 0.004.
-    - The six App::Raider packages previously indexed on CPAN (App::Raider,
-      App::Raider::FileTools, App::Raider::Plugin::Situation,
-      App::Raider::Plugin::Trace, App::Raider::Skill, App::Raider::WebTools)
-      ship as empty reserved-namespace stubs pointing to their
-      Langertha::Raider replacements.
-    - Langertha::Raider calls only Langertha's public engine methods
-      (async_request_f, async_loop, langfuse_timestamp,
-      Langertha::Usage->from_raw) and Role::PluginHost's public plugin hooks
-      (plugin_instances, plugin_args, plugin_pipeline_tool_call_f).
-      Langertha::Raider::Result is self-contained.
-    - IO::Async::SSL is a requirement: every cloud engine and web_search
-      speak https, and without it every request fails.
-    - Docker builds install from the Dist::Zilla build directory via cpm and
-      the MetaCPAN resolver; no cpanfile.snapshot is shipped.
     - The raudssus/raider image is built and pushed by the bundle's
       Dist::Zilla::Plugin::Docker::API over the Engine HTTP API, so rootless
       Podman works, and is tagged latest, <major> and <version>. Every dzil
@@ -524,6 +584,7 @@ Revision history for Langertha-Raider
       set. runtime-root is the Dockerfile's last stage, so a docker build
       without --target yields the published image; runtime-user stays
       available by name.
+
     - The GitHub release is published by the bundle's GitHub::CreateRelease
       after the tag is pushed, with the Changes section as release notes.
 
@@ -531,27 +592,19 @@ Revision history for Langertha-Raider
       timeout (stall_timeout, 20 s), both tool errors, and stops reading and
       cancels the request at max_fetch_bytes instead of buffering the whole
       body first. Its User-Agent carries the dist version.
+
     - web_search ends within fetch_timeout as a tool error when a search
       provider never answers, and its default HTTP client stops requests at
       fetch_timeout and stall_timeout like web_fetch.
+
     - The Telegram hall adapter no longer polls in a tight loop against error
       answers: a non-2xx or ok:false reply is a telegram.poll_error with the
       status and description, retried after retry_after (429) or a growing
       backoff; 401 stops the bot. A failing update is a telegram.update_error
       and no longer stalls polling or holds back the offset.
 
+
   [Standalone binary]
-    - Standalone Linux binaries (x86_64, aarch64) are attached to each GitHub
-      release by the release-binaries workflow; the build, verify and
-      runtime-library scripts are in scripts/ and not shipped to CPAN.
-    - New raider --version: prints raider's and Langertha's version and exits 0.
-    - The binary's hall runs the binary directly instead of perl <binary>,
-      which died with "Unrecognized character \x7F"; RAIDER_HALL_RAIDER_BIN
-      still overrides it.
-    - perl_eval, perl_check and perl_cpanm run the perl on PATH inside the
-      binary, whose $^X is no usable interpreter, and return a tool error
-      saying so when there is none. The lib's perl-version marker records
-      the version of the perl that uses the lib, not the packed one.
     - scripts/verify-binary.sh checks the Claude Code flow in the packed
       binary: Claude mode with project and plugin skills, the skill tool,
       nested CLAUDE.md, glob and grep without rg, todo_write, hooks, the
@@ -560,14 +613,17 @@ Revision history for Langertha-Raider
       the agent tool with briefing from a skilletor git source, and the
       packed Skilletor (https through HTTP::Tiny, gzip, punycode). It now
       needs git.
+
     - The binary no longer packs MCP::Run, since bash runs through
       Langertha::Raider::BashTools; scripts/verify-binary.sh checks the new
       tools in it: background shells, the task tools, read before write with
       multi_edit, the skill message, the new refusal texts and
       enter_plan_mode.
+
     - scripts/verify-binary.sh runs its offline raid, the REPL and the hall
       raider with bypassPermissions: since the permission modes, a run with
       nobody to ask refused their bash and web_fetch calls.
+
 
   [Claude Code layout and skills]
     - A .raider/ directory makes a raider project only when it holds
@@ -576,6 +632,7 @@ Revision history for Langertha-Raider
       project native from its second run on (ADR 0019 addendum 2).
       raiders/ is no marker: ADR 0020 replaced raiders/<name>.yml by
       agents/<name>.md.
+
     - Raider decides once per run which layout it reads (ADR 0019): a project
       with .raider/ (or a legacy .raider.yml / .raider.md) is a raider
       project; one with only CLAUDE.md, CLAUDE.local.md or .claude/ (in it or
@@ -583,6 +640,7 @@ Revision history for Langertha-Raider
       reads it, without any flag; anything else is native, and so is the home
       directory itself. --bare reads no layout. config explain and the REPL
       banner show the mode and what decided it.
+
     - In the Claude layout raider reads the CLAUDE.md hierarchy as Claude
       Code does: ~/.claude/CLAUDE.md, then CLAUDE.md (or AGENTS.md where a
       level has none) and CLAUDE.local.md of every directory from the
@@ -592,6 +650,7 @@ Revision history for Langertha-Raider
       the first file tool that touches its subtree, once per session. -M
       replaces only the persona and the raider instructions file, never
       the Claude memory.
+
     - The Claude settings are read too (~/.claude/settings.json,
       .claude/settings.json, .claude/settings.local.json): their env is set
       for the tools and their subprocesses, enabledPlugins picks the
@@ -600,12 +659,14 @@ Revision history for Langertha-Raider
       below). A broken settings file
       is reported, never fatal; config explain lists the files, rule counts,
       env names (never values), hook events and unused keys.
+
     - Changed: --claude is now the switch for the Claude layout (also in a
       raider project) and is saved as claude: true in the project config,
       not as skills: [claude] (which still means the same when read). In a
       Claude-mode project nothing is saved any more, so no .raider.yml
       appears there. --openai / --codex load AGENTS.md as an instructions
       item.
+
     - Changed: skills are no longer glued into the system prompt in full.
       The prompt lists every skill as "name: description" (frontmatter), and
       the model loads one with the new skill tool, which returns its body
@@ -620,6 +681,7 @@ Revision history for Langertha-Raider
       frontmatter YAML rejects but Claude Code reads (an unquoted ": " in a
       description) is read line by line as key: value, so such a skill keeps
       its description.
+
     - Changed: in Claude mode (only Claude files, no .raider/) raider is
       Claude Code, not Langertha: its default persona and the packs that are
       on only by default (caveman) are off; the instructions are the
@@ -628,21 +690,26 @@ Revision history for Langertha-Raider
       project with claude: true keeps its persona. config explain shows
       "instructions: claude base" and the default packs as switched off by
       the layout.
+
     - /reload reads the Claude memory, settings (env included) and skills
       again, and mounts or drops the skill tool as the skills change.
+
     - Fixed: -o claude=false (and perl=, detect= with false/no/off/0, also from
       a config file or the API) is false; the boolean words go through one
       parser and anything else croaks.
+
     - Fixed: a skills: entry of type file was silently dropped. It is a
       skill now (one flat *.md file, also --skills FILE); a missing file is
       shown by config explain, and an entry with an unknown type or no path
       croaks.
+
     - Skills can appear while working, like in Claude Code: the first file
       tool that touches a subtree reads its .claude/skills, and a skill with
       paths: in its frontmatter (globs, a list or comma separated) is listed
       only once a matching file is touched. Both are announced in a
       second system-reminder block of that tool result. In the Claude layout
       the skill tool is always mounted.
+
     - In the Claude layout raider runs Claude Code's hooks (ADR 0022):
       PreToolUse before the schema check and the permission gate (exit 2 or
       deny refuses the call with the hook's reason, updatedInput replaces the
@@ -657,6 +724,7 @@ Revision history for Langertha-Raider
       run is a hook.ran event in the session journal and the stream,
       messages a hook.message. A native or raider project and --bare run no
       hooks. transcript_path is the session journal (raider's JSONL).
+
     - New Langertha::Raider::Hooks (internal): runs
       the Claude Code hooks of the settings files and of the enabled plugins
       (hooks/hooks.json and the manifest's hooks, with ${CLAUDE_PLUGIN_ROOT},
@@ -672,13 +740,16 @@ Revision history for Langertha-Raider
       loads briefing.skills itself, the briefing plugin's briefing-preload
       hook is skipped for Agent calls so skills are not loaded twice.
       disableAllHooks in the settings turns them all off.
+
     - Langertha::Raider gained an internal, constructor-only _tool_hook
       beside _tool_gate (asked before the schema check; deny, replaced
       arguments, an allow/ask for the gate); Langertha::Raider::Permissions
       gained rule_matches (a hook's "if" rule).
+
     - Langertha::Raider::ToolNames translates tool arguments too, both ways:
       path <-> file_path for read_file, write_file and edit_file, the bash
       timeout in seconds <-> milliseconds; every other key passes unchanged.
+
     - Agent files (ADR 0020, first step): raider now reads Claude Code's
       subagent definitions -- Markdown with frontmatter -- from
       .raider/agents and ~/.raider/agents and, in the Claude layout, from
@@ -695,31 +766,37 @@ Revision history for Langertha-Raider
       keys agent_models (model per alias) and max_agent_depth (default 1)
       are read. The lenient frontmatter reader
       now keeps one level of nesting (briefing: / skills: / - item).
+
     - The agent tool (ADR 0020, second step) starts a subagent in the same
       process: its own context, its own filtered tool set (no ask_user, own
       todo list), its own child session, and agent.started / agent.finished
       in the caller's journal and stream.
+
     - Subagents (ADR 0020, third step) run on the model their file names
       when the caller uses the Anthropic API, and are briefed: their skills
       are put in front of the task in the briefing plugin's format; an
       unknown skill refuses the spawn, over 64 kB warns with agent.warning,
       and config explain flags agents whose skills do not resolve.
+
     - A subagent runs under its caller's permission policy (ADR 0021): the
       same mode, rules and additional directories, session rules shared both
       ways; its own exit_plan_mode never switches the caller's mode. Starting
       an agent needs no approval unless an Agent(name) / Task(name) rule says
       so; a call without subagent_type counts as general-purpose. /reload
       re-reads agent files.
+
     - A skill an agent declares that is not installed is read from the
       sources of skilletor.json (Claude layout; new dependency Skilletor),
       without installing it, a source fetched only when it has no cache yet;
       a refused spawn and config explain give the reason per skill (e.g. a
       template, which the Perl port does not render).
+
     - Hooks and subagents (ADR 0020 section 7): SubagentStart (context in
       front of the prompt) and SubagentStop (Stop-style continuation) fire
       with agent_id and agent_type, a subagent's tool calls run PreToolUse
       and PostToolUse, and the briefing plugin's briefing-preload is skipped
       because raider briefs agents itself.
+
     - Subagents and the Claude Code tools (ADR 0023, ADR 0025): a subagent
       reads a file itself before it writes it (a read state of its own, as
       Claude Code gives a subagent with a fresh context), keeps a task list
@@ -728,6 +805,7 @@ Revision history for Langertha-Raider
       file's tools / disallowedTools, TodoWrite and the Task* names are one
       family, Edit and MultiEdit are one, and Bash brings bash_output and
       kill_shell.
+
     - Built-in Explore and Plan agents beside general-purpose (ADR 0027
       section 6), with Claude Code's descriptions: read-only by their
       instructions and without agent, send_message, write_file, edit_file,
@@ -735,11 +813,13 @@ Revision history for Langertha-Raider
       AGENTS.md or packs, only their instructions, the tools and the skill
       listing. A file agent of the same name replaces either, as for
       general-purpose.
+
     - Subagents nest up to three levels by default (max_agent_depth 3, was
       1; ADR 0027 section 8). Without the config key,
       CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH sets it in the Claude layout
       (also from the settings env); config explain shows where the value
       comes from and lists a value that does not fit as ignored.
+
     - Background subagents (ADR 0027 sections 1-5): every subagent gets an
       agent ID (agent_1, agent_2, ...) in the application's task registry,
       and its result ends with Claude Code's trailer -- the agentId line and
@@ -754,14 +834,17 @@ Revision history for Langertha-Raider
       the first Ctrl-C leaves them running, leaving raider stops them.
       agent.started gains agent_id and background, agent.finished agent_id,
       session.created of a child session agent_id and name.
+
     - New tool send_message (Claude Code's SendMessage) beside agent: a
       running agent gets the message before its next request, a finished one
       is resumed in the background with its history (also one of an earlier
       process, found in the session's child sessions); Explore and Plan are
       one-shot. The agent tool text follows Claude Code's current one.
+
     - The REPL runs the event loop while it waits for input (with
       Term::ReadLine::Gnu through its callback interface, else with a prompt
       of its own instead of IO::Prompt::Tiny; Ctrl-D now leaves there too).
+
     - The agent calls of one model turn run at the same time (ADR 0027
       section 9), each through the gate, the hooks and the plugins, their
       results in call order; any other call between them runs on its own.
@@ -773,6 +856,7 @@ Revision history for Langertha-Raider
       shown by config explain); a spawn or resume beyond it is an error
       result telling the model not to retry now. A Ctrl-C cuts off the
       agent calls and the run ends once their agents have.
+
     - Langertha::Raider: new attribute async_tools -- a tool whose call is a
       handler returning a Future instead of an MCP call, concurrent ones
       dispatched together within a turn. plugin_before_tool_call and
@@ -781,12 +865,14 @@ Revision history for Langertha-Raider
       plugin gives every tool.result the id of its own tool.call. An
       async tool may carry applies, asked with the tool's source in the
       raid, so it stands in for one server's tool only.
+
     - kill_shell (Claude Code's TaskStop) and bash_output (TaskOutput) take
       agent IDs and agent names too (ADR 0027 section 10): kill_shell stops
       a running agent ("Successfully stopped task: agent_1 (DESCRIPTION)",
       then its "was stopped" notification), bash_output answers with the
       agent's status and, once it has ended, its report in <output>; with
       block it waits for the agent's end on the loop.
+
     - Background shells are entries of the task registry (bash_N) and notify
       the run that started them -- the main conversation or a subagent --
       when they end on their own or are stopped, in Claude Code's form
@@ -797,9 +883,11 @@ Revision history for Langertha-Raider
       background shell: a run, raider -p included, ends while one runs.
       bash_output with block lets the loop run while it waits. A subagent's
       background shells outlive its run, as before.
+
     - The first Ctrl-C no longer ends the foreground command of a
       background subagent: it belongs to the session, like a background
       shell (BashTools background_pids). Leaving raider still ends it.
+
     - A background subagent takes its own copy of the run rules (a
       /command's allowed-tools) when it starts: a later command's rules do
       not reach it, the end of the one that started it does not take them
@@ -807,10 +895,12 @@ Revision history for Langertha-Raider
       stop the conversation's background subagents without a notification
       and drop the notifications that wait; background shells go on and
       still notify.
+
     - maint/claude-log-to-scenario: SendMessage is left out with a note
       (raider would resume the agent in the background, which the draft does
       not replay); app: { max_agent_depth: N } only for nesting deeper than
       raider's default of 3; Explore and Plan agents stay Explore and Plan.
+
     - Subagents in a worktree of their own (ADR 0032 section 2, ADR 0027
       section 7): agent takes isolation: "worktree", and an agent file's
       isolation: worktree isolates every spawn of it; any other value is an
@@ -838,6 +928,7 @@ Revision history for Langertha-Raider
       failures as values). Hook inputs of an isolated agent have its
       worktree as cwd; its perl_eval, perl_check and perl_cpanm run there
       too, with the private lib of the root.
+
     - enter_worktree and exit_worktree, Claude Code's EnterWorktree and
       ExitWorktree (ADR 0032 sections 3 to 6), in the main run only (never
       in a subagent). enter_worktree makes a worktree under
@@ -879,6 +970,7 @@ Revision history for Langertha-Raider
       exit_worktree, clear or session_end). The main run's tool list grows
       by the two tools. New internal module Langertha::Raider::WorktreeTools.
 
+
   [Permissions]
     - INCOMPATIBLE: every tool call of raider now passes a permission policy
       (ADR 0021), and in the default mode a run nobody can approve -- a
@@ -892,6 +984,7 @@ Revision history for Langertha-Raider
       --dangerously-skip-permissions, or `permission_mode` on a hall raider.
       Langertha::Raider used as a library is unchanged: without a gate every
       call runs.
+
     - Permission modes like Claude Code: default (reading runs; writing,
       code, network and messages ask), acceptEdits (also writes inside the
       project and the additional directories), plan (read only; writing,
@@ -901,6 +994,7 @@ Revision history for Langertha-Raider
       --dangerously-skip-permissions. The mode comes from the flag, else
       permissions.default_mode of .raider/config.yml / ~/.raider/config.yml,
       else defaultMode of the Claude settings, else default.
+
     - Permission rules in Claude Code syntax from the Claude settings and
       from the new `permissions:` key of .raider/config.yml and
       ~/.raider/config.yml (allow, ask, deny, default_mode,
@@ -912,6 +1006,7 @@ Revision history for Langertha-Raider
       of it (&&, ||, ;, |, newlines) is covered and it has no substitution or
       redirection into a file; ../ and symbolic links do not get around a
       path rule. Invalid rules are ignored and shown.
+
     - The REPL asks before a call the policy asks about: yes once (an
       approval of exactly that call), yes for this session (the rule it
       adds is shown first) or no with an optional reason for the model.
@@ -919,29 +1014,36 @@ Revision history for Langertha-Raider
       every rule with its source and the session rules; /permissions mode
       NAME switches the mode. /reload reads the rules again and keeps the
       session's.
+
     - Plan mode: the new exit_plan_mode tool (after Claude Code's
       ExitPlanMode) presents the plan; accepted in the REPL the mode becomes
       default, refused the model gets the feedback, and with nobody to ask
       it gives the plan as its answer.
+
     - Additional directories (additionalDirectories / additional_directories)
       can be read, searched and, as the mode allows, written by the file and
       search tools. build_file_tools_server takes `extra_roots`.
+
     - glob and grep leave out the files a Read deny or ask rule names and say
       how many ("N paths hidden by permission rules"); a search inside such
       a directory is refused.
+
     - Events permission.asked, permission.granted, permission.denied and
       permission.mode, recorded in the session journal and in --stream-json.
       config explain has a permissions section (mode and source, rules per
       kind and source, invalid rules and mode names, additional
       directories).
+
     - Hall: a raider entry may set permission_mode, passed as
       --permission-mode.
+
     - /reload now reaches the additional directories of the mounted file and
       search tools: they read the roots from the policy on every call
       (`extra_roots` of build_file_tools_server and SearchTools may be a
       CodeRef), so a directory added is reachable and one removed is refused
       from the next call on. Symlink escapes stay refused. Scenario 100;
       scenario format `between:`.
+
     - New permission mode `auto`, the raider form of Claude Code's
       `defaultMode: "auto"` (until now skipped as an unknown mode): acceptEdits
       plus bash commands that only read, from a fixed list (ls, cat, grep, rg,
@@ -952,6 +1054,7 @@ Revision history for Langertha-Raider
       permissions.default_mode: auto and /permissions mode auto. config
       explain and /permissions show "claude auto -> raider acceptEdits +
       read-only bash allowlist". Scenario 101, t/171.
+
     - ACP: a tool call the policy asks about, in a run of an ACP session, is
       put to the client as `session/request_permission` (options allow_once,
       allow_always with the suggested rule as a session rule, reject_once).
@@ -964,10 +1067,159 @@ Revision history for Langertha-Raider
       at the terminal, `raider acp prompt` rejects; the ACP client no longer
       mistakes an agent request for the response of its own call. Hall
       scenarios 109 to 113, t/172 to t/174; ADR 0021 Nachtrag P2.
+
     - A tool call naming a tool no source offers is answered "unknown tool"
       at once, before the PreToolUse hook, the permission gate and any
       approval; in default mode it used to read "needs approval" (ADR 0005:
       resolve comes before policy).
+
+
+  [CLI and REPL]
+    - New raider provider add ALIAS HOST [--credential-env NAME]
+      [--allow-internal]: fetches and validates the manifest, shows its
+      endpoints, auth and what is pinned, asks on a terminal and stores the
+      alias under providers: in ~/.raider/config.yml (origin, issuer, auth
+      types, the name of the environment variable the credential comes
+      from, allow_internal, pinned_at, fingerprint -- never a secret).
+      Without a terminal nothing is fetched or stored. raider --provider
+      ALIAS runs on the stored binding: its origin and allow_internal, the
+      key from its credential_env (or -k); when origin, issuer, an
+      endpoint's origin or dialect or the auth types changed since it was
+      accepted, or the entry was edited, the run stops until provider add is
+      run again. A model-list or capability change does not. API keys in the
+      environment never select an alias; providers: in a project file is
+      ignored.
+
+    - New raider provider list, provider show ALIAS and provider remove ALIAS
+      [--yes] manage the stored aliases: list and show print what is pinned
+      (never a secret) and fetch nothing, remove asks on a terminal and needs
+      --yes without one. The aliases also appear in raider config explain and
+      the REPL banner.
+
+    - credential_env of a stored alias is part of the pin: another variable,
+      by hand or through provider add, needs the renewed acceptance, and
+      raider --provider ALIAS stops until then. Aliases stored before this
+      release are asked for again once.
+
+    - A model offered on several usable endpoints of a provider manifest is
+      refused with the endpoints named; the new --provider-endpoint ID
+      chooses one.
+
+    - A raider --provider that cannot run is also a refused or failed
+      document on stdout with --json (exit status unchanged).
+
+    - The REPL banner no longer says "no API key required" for a -k key under
+      --provider, and shows the provider alias.
+
+
+  [Tools]
+    - edit_file takes replace_all, as Claude Code's Edit: every occurrence
+      of old_string is replaced instead of an error when it is not unique
+      (k156).
+
+    - New tools, named and shaped after Claude Code's Glob, Grep, TodoWrite
+      and AskUserQuestion (ADR 0018). glob(pattern, [path]) lists files by
+      pattern ("**/*.pm", "*.{json,yml}"), newest first, as paths relative to
+      the root. grep(pattern, [path], [glob], [type], [output_mode], [-i],
+      [-n], [-A], [-B], [-C], [context], [multiline], [head_limit], [offset])
+      searches contents: files_with_matches (default), content with context,
+      or count. grep runs ripgrep when it is installed and plain Perl
+      otherwise, with the same output; both skip .git, symbolic links, binary
+      files and files over 10 MB, and neither reads .gitignore. todo_write
+      keeps the model's task list in the state of the run
+      (Application->todos) and reports every change as the event
+      todo.updated (session journal and --stream-json). ask_user puts a
+      question, optionally with choices, to the person at the REPL; in a run
+      nobody can answer (one-shot, Hall, cron, ACP) it is refused with an
+      error result that tells the model to decide itself. glob and grep are
+      confined to the root like the file tools. Effect classes: glob and
+      grep read, todo_write none, ask_user message.
+
+    - INCOMPATIBLE: bash is gated by a port of the loadguard plugin, on by
+      default. A heavy command (prove, make test, dzil test|build|release,
+      cpanm, perlbench, docker|podman build|run, cargo build|test, npm test,
+      claude -p|--bg, codex exec|review), found in command position, is
+      refused with the measured figures and the advice that fits while the
+      host is under memory pressure (PSI memory full avg10 >=
+      LOADGUARD_PSI_FULL, default 10 %; swap used >= LOADGUARD_SWAP_USED,
+      default 90 %) or all heavy slots (LOADGUARD_HEAVY_SLOTS, default max(1,
+      nproc/2)) are held by running commands of raider processes. Light
+      commands are never refused; without /proc/pressure or swap the signal is
+      "no pressure"; LOADGUARD_THROTTLE=0 turns the gate off.
+      LOADGUARD_CONFINE=1 (off by default) makes raider start itself again in
+      a transient systemd user scope with memory limits
+      (LOADGUARD_MEMORY_HIGH/MAX/SWAP_MAX in percent of RAM,
+      LOADGUARD_CPU_WEIGHT). New Langertha::Raider::Loadguard.
+
+    - New Langertha::Raider::ToolNames: the table of Claude Code tool names
+      and the raider tools they stand for (Read -> read_file, Edit and
+      MultiEdit -> edit_file, Glob -> glob, Task and Agent -> agent, ...;
+      mcp__* pass through) for the Claude-mode surfaces.
+
+
+  [Raid engine]
+    - The application no longer sends an embedding request per session-history
+      entry: it mounts no tool that reads them, and a provider without an
+      embeddings endpoint answered every one with a 404. Embeddings run only
+      when a history tool is mounted and the engine can embed (ADR 0028);
+      `raider config explain` shows `session embeddings`. Langertha::Raider
+      used directly is unchanged.
+
+    - A Langertha::Raider that goes away while session-history embeddings
+      are still in flight lets them finish instead of dropping them. Every
+      subagent run printed "Suspended async sub
+      Langertha::Role::Embedding::simple_embedding_f lost its returning
+      future". Cancelling them instead would leave a half-open
+      Net::Async::HTTP connection on the loop.
+
+
+  [Hall]
+    - A client that subscribed to the hall's events on the control socket no
+      longer makes the next event die: the hall asked its stream for ->handle,
+      which an IO::Async::Stream does not have, so spawn answered "command
+      failed" (the raider was started nevertheless) and no event reached the
+      subscriber.
+
+
+0.503     2026-10-01 21:25:19Z
+
+  [Distribution]
+    - Langertha-Raider is the merge of the App-Raider distribution with the
+      agent engine extracted from Langertha core. Langertha::Raider,
+      Langertha::Raider::Result and the Langertha::Raid orchestration layer
+      (Raid::Loop, Raid::Parallel, Raid::Sequential) ship here under their
+      own names. Every App::Raider::* module is renamed to
+      Langertha::Raider::*, with the CLI entry point App::Raider becoming
+      Langertha::Raider::CLI; the raider and raider-hall executables keep
+      their names. Requires Langertha 0.503 and Net::Async::MCP 0.004.
+    - The six App::Raider packages previously indexed on CPAN (App::Raider,
+      App::Raider::FileTools, App::Raider::Plugin::Situation,
+      App::Raider::Plugin::Trace, App::Raider::Skill, App::Raider::WebTools)
+      ship as empty reserved-namespace stubs pointing to their
+      Langertha::Raider replacements.
+    - Langertha::Raider calls only Langertha's public engine methods
+      (async_request_f, async_loop, langfuse_timestamp,
+      Langertha::Usage->from_raw) and Role::PluginHost's public plugin hooks
+      (plugin_instances, plugin_args, plugin_pipeline_tool_call_f).
+      Langertha::Raider::Result is self-contained.
+    - IO::Async::SSL is a requirement: every cloud engine and web_search
+      speak https, and without it every request fails.
+    - Docker builds install from the Dist::Zilla build directory via cpm and
+      the MetaCPAN resolver; no cpanfile.snapshot is shipped. GitHub and
+      Docker release publishing runs from maint/release-after.pl.
+
+  [Standalone binary]
+    - Standalone Linux binaries (x86_64, aarch64) are attached to each GitHub
+      release by the release-binaries workflow; the build, verify and
+      runtime-library scripts are in scripts/ and not shipped to CPAN.
+    - New raider --version: prints raider's and Langertha's version and exits 0.
+    - The binary's hall runs the binary directly instead of perl <binary>,
+      which died with "Unrecognized character \x7F"; RAIDER_HALL_RAIDER_BIN
+      still overrides it.
+    - perl_eval, perl_check and perl_cpanm run the perl on PATH inside the
+      binary, whose $^X is no usable interpreter, and return a tool error
+      saying so when there is none. The lib's perl-version marker records
+      the version of the perl that uses the lib, not the packed one.
 
   [CLI and REPL]
     - bin/raider is a thin wrapper around internal
@@ -1089,36 +1341,6 @@ Revision history for Langertha-Raider
       up again; TLS still verifies the host name. Not combinable with -e,
       -o engine= or -o url=.
       The REPL banner shows the -k key as set without printing it.
-    - New raider provider add ALIAS HOST [--credential-env NAME]
-      [--allow-internal]: fetches and validates the manifest, shows its
-      endpoints, auth and what is pinned, asks on a terminal and stores the
-      alias under providers: in ~/.raider/config.yml (origin, issuer, auth
-      types, the name of the environment variable the credential comes
-      from, allow_internal, pinned_at, fingerprint -- never a secret).
-      Without a terminal nothing is fetched or stored. raider --provider
-      ALIAS runs on the stored binding: its origin and allow_internal, the
-      key from its credential_env (or -k); when origin, issuer, an
-      endpoint's origin or dialect or the auth types changed since it was
-      accepted, or the entry was edited, the run stops until provider add is
-      run again. A model-list or capability change does not. API keys in the
-      environment never select an alias; providers: in a project file is
-      ignored.
-    - New raider provider list, provider show ALIAS and provider remove ALIAS
-      [--yes] manage the stored aliases: list and show print what is pinned
-      (never a secret) and fetch nothing, remove asks on a terminal and needs
-      --yes without one. The aliases also appear in raider config explain and
-      the REPL banner.
-    - credential_env of a stored alias is part of the pin: another variable,
-      by hand or through provider add, needs the renewed acceptance, and
-      raider --provider ALIAS stops until then. Aliases stored before this
-      release are asked for again once.
-    - A model offered on several usable endpoints of a provider manifest is
-      refused with the endpoints named; the new --provider-endpoint ID
-      chooses one.
-    - A raider --provider that cannot run is also a refused or failed
-      document on stdout with --json (exit status unchanged).
-    - The REPL banner no longer says "no API key required" for a -k key under
-      --provider, and shows the provider alias.
     - Saving skills (--skills, --claude, the /skill writers) no longer writes
       an empty skills: ~ into an existing default: section of the project
       config.
@@ -1143,45 +1365,6 @@ Revision history for Langertha-Raider
       git-guru pack drops a pack.yml key the loader never read.
 
   [Tools]
-    - edit_file takes replace_all, as Claude Code's Edit: every occurrence
-      of old_string is replaced instead of an error when it is not unique
-      (k156).
-    - New tools, named and shaped after Claude Code's Glob, Grep, TodoWrite
-      and AskUserQuestion (ADR 0018). glob(pattern, [path]) lists files by
-      pattern ("**/*.pm", "*.{json,yml}"), newest first, as paths relative to
-      the root. grep(pattern, [path], [glob], [type], [output_mode], [-i],
-      [-n], [-A], [-B], [-C], [context], [multiline], [head_limit], [offset])
-      searches contents: files_with_matches (default), content with context,
-      or count. grep runs ripgrep when it is installed and plain Perl
-      otherwise, with the same output; both skip .git, symbolic links, binary
-      files and files over 10 MB, and neither reads .gitignore. todo_write
-      keeps the model's task list in the state of the run
-      (Application->todos) and reports every change as the event
-      todo.updated (session journal and --stream-json). ask_user puts a
-      question, optionally with choices, to the person at the REPL; in a run
-      nobody can answer (one-shot, Hall, cron, ACP) it is refused with an
-      error result that tells the model to decide itself. glob and grep are
-      confined to the root like the file tools. Effect classes: glob and
-      grep read, todo_write none, ask_user message.
-    - INCOMPATIBLE: bash is gated by a port of the loadguard plugin, on by
-      default. A heavy command (prove, make test, dzil test|build|release,
-      cpanm, perlbench, docker|podman build|run, cargo build|test, npm test,
-      claude -p|--bg, codex exec|review), found in command position, is
-      refused with the measured figures and the advice that fits while the
-      host is under memory pressure (PSI memory full avg10 >=
-      LOADGUARD_PSI_FULL, default 10 %; swap used >= LOADGUARD_SWAP_USED,
-      default 90 %) or all heavy slots (LOADGUARD_HEAVY_SLOTS, default max(1,
-      nproc/2)) are held by running commands of raider processes. Light
-      commands are never refused; without /proc/pressure or swap the signal is
-      "no pressure"; LOADGUARD_THROTTLE=0 turns the gate off.
-      LOADGUARD_CONFINE=1 (off by default) makes raider start itself again in
-      a transient systemd user scope with memory limits
-      (LOADGUARD_MEMORY_HIGH/MAX/SWAP_MAX in percent of RAM,
-      LOADGUARD_CPU_WEIGHT). New Langertha::Raider::Loadguard.
-    - New Langertha::Raider::ToolNames: the table of Claude Code tool names
-      and the raider tools they stand for (Read -> read_file, Edit and
-      MultiEdit -> edit_file, Glob -> glob, Task and Agent -> agent, ...;
-      mcp__* pass through) for the Claude-mode surfaces.
     - The tool description in the system prompt and the exported how-to-use
       document (/skill, /skill-claude) are generated from the tool servers
       mounted for the run (name and parameters from each tool's input
@@ -1227,18 +1410,6 @@ Revision history for Langertha-Raider
       on {}.
 
   [Raid engine]
-    - The application no longer sends an embedding request per session-history
-      entry: it mounts no tool that reads them, and a provider without an
-      embeddings endpoint answered every one with a 404. Embeddings run only
-      when a history tool is mounted and the engine can embed (ADR 0028);
-      `raider config explain` shows `session embeddings`. Langertha::Raider
-      used directly is unchanged.
-    - A Langertha::Raider that goes away while session-history embeddings
-      are still in flight lets them finish instead of dropping them. Every
-      subagent run printed "Suspended async sub
-      Langertha::Role::Embedding::simple_embedding_f lost its returning
-      future". Cancelling them instead would leave a half-open
-      Net::Async::HTTP connection on the loop.
     - Inline MCP tools and raider_wait run on the engine's event loop, so an
       engine on its own loop no longer hangs a raid. A raider whose engines
       (engine, compression_engine, engine_catalog, embedding_engine) sit on
@@ -1333,11 +1504,6 @@ Revision history for Langertha-Raider
       /clear in the REPL is recorded and honoured on resume.
 
   [Hall]
-    - A client that subscribed to the hall's events on the control socket no
-      longer makes the next event die: the hall asked its stream for ->handle,
-      which an IO::Async::Stream does not have, so spawn answered "command
-      failed" (the raider was started nevertheless) and no event reached the
-      subscriber.
     - raider hall start/spawn/attach/logs/kill no longer treat options as
       positional arguments (e.g. `start --daemon DIR` ignored DIR).
       spawn/attach/logs/kill take an optional hall DIR as first argument
