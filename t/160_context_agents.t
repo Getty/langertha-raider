@@ -331,11 +331,12 @@ subtest "the repository's own .claude/agents" => sub {
   my $c = catalog(roots => [ { dir => "$dir", source => '.claude/agents' } ]);
   is([ $c->problems ], [], 'no problems');
   my %want = (
-    'raider-worker' => [qw( getty-perl-core perl-ai-langertha getty-perl-moose perl-io-async-future perl-mcp
-                            kanban-issues-karr-ticket getty-perl-pod )],
-    'raider-test-writer' => [qw( getty-perl-core perl-ai-langertha perl-io-async-future perl-mcp kanban-issues-karr-ticket )],
-    'raider-binary-worker' => [qw( raider-single-binary getty-perl-core kanban-issues-karr-ticket )],
-    'raider-release-manager' => [qw( getty-git-commit-style getty-git-usage getty-perl-release-author-getty
+    'raider-worker' => [qw( getty-perl-core perl-ai-langertha raider-core getty-perl-moose perl-io-async-future
+                            perl-mcp kanban-issues-karr-ticket getty-perl-pod )],
+    'raider-test-writer' => [qw( getty-perl-core perl-ai-langertha raider-core perl-io-async-future perl-mcp
+                                 kanban-issues-karr-ticket )],
+    'raider-binary-worker' => [qw( raider-core raider-single-binary getty-perl-core kanban-issues-karr-ticket )],
+    'raider-release-manager' => [qw( raider-core getty-git-commit-style getty-git-usage getty-perl-release-author-getty
                                      perl-release-dist-ini kanban-issues-karr-ticket )],
   );
   for my $name (sort keys %want) {
