@@ -330,8 +330,9 @@ Revision history for Langertha-Raider
       end of the REPL and the end of a one-shot run stop them.
     - Tests: t/250-t/259, t/267-t/268, scenarios 180-188 with a stdio test
       server (t/lib/mcp-test-server.pl) and a streamable-HTTP one
-      (Test::Raider::MCPHTTP); scenarios may use {{PERL}} and
-      {{MCP_TEST_SERVER}}, and answer pending servers with mcp_answers:.
+      (Test::Raider::MCPHTTP); scenarios may use the PERL and
+      MCP_TEST_SERVER placeholders (in double curly braces), and answer
+      pending servers with mcp_answers:.
 
   [MCP follow-ups: parent .mcp.json, list_changed, output limit, prompts, resources]
     - ADR 0029 Addendum 1. A project's .mcp.json is read from the project
@@ -447,8 +448,8 @@ Revision history for Langertha-Raider
       t/110 (tool names), t/111 (search tools, Perl and ripgrep alike), t/112
       (todo, ask, REPL) and t/114 (loadguard).
     - Every scenario runs with a fresh temporary $HOME and no
-      $CLAUDE_CONFIG_DIR (`home:` files, `{{HOME}}` / `{{ROOT}}` in
-      contents, `app:` arguments). Claude layout scenarios: CLAUDE.md with an
+      $CLAUDE_CONFIG_DIR (`home:` files, HOME and ROOT placeholders in
+      double curly braces in contents, `app:` arguments). Claude layout scenarios: CLAUDE.md with an
       import, user memory and CLAUDE.local.md, a raider project with and
       without claude: true, a skill listed and loaded by the skill tool, a
       skill hidden by disable-model-invocation, nested CLAUDE.md on the first
