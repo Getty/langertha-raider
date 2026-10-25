@@ -293,3 +293,8 @@ that recut's choice ("the CLI POD names its own list"), applied to new names onl
 Source: karr #160. Inventory from `lib/` at `c828f0d`: `# ABSTRACT` and marker of every
 package, `=attr` / `=method` of `Application` at `ef7dd92` against `c828f0d`, `$ENV{…}`
 reads, `bin/raider` POD.
+
+## Update (2026-10-25, hall bus)
+
+Rule 7 also covers the hall's event bus and its control-socket protocol (ADR 0033): both are
+public wire formats, documented in the POD of `Langertha::Raider::Hall`.

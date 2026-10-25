@@ -219,10 +219,11 @@ EOF
 # own check of an entry, so what is written is what the hall accepts.
 sub provider_problem {
   my ( $opt ) = @_;
-  return Langertha::Raider::Hall->_provider_problem({
+  my $problem = Langertha::Raider::Hall->_provider_problem({
     (defined $opt->{engine}   ? ( engine   => $opt->{engine} )   : ()),
     (defined $opt->{provider} ? ( provider => $opt->{provider} ) : ()),
-  });
+  }) or return;
+  return $problem->{error};
 }
 
 sub run_start {

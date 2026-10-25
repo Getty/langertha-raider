@@ -15,7 +15,6 @@ in a forum topic.
 
 use Moose;
 use namespace::autoclean;
-use JSON::MaybeXS;
 
 has hall => (
   is => 'ro',
@@ -33,39 +32,39 @@ sub setup_handlers {
     my $name = $payload->{name} // '';
     my $mission = $payload->{mission} // '';
     my $result = $hall->spawn(name => $name, mission => $mission);
-    $stream->write(JSON::MaybeXS->new->encode($result) . "\n");
+    $stream->write($hall->_wire_json->encode($result) . "\n");
   });
 
   $hall->_register_cmd(ps => sub {
     my ($hall, $stream, $payload) = @_;
     my @list = $hall->ps;
-    $stream->write(JSON::MaybeXS->new->encode({raiders => \@list}) . "\n");
+    $stream->write($hall->_wire_json->encode({raiders => \@list}) . "\n");
   });
 
   $hall->_register_cmd(attach => sub {
     my ($hall, $stream, $payload) = @_;
     my $id = $payload->{id} // '';
     my $info = $hall->attach($id);
-    $stream->write(JSON::MaybeXS->new->encode($info) . "\n");
+    $stream->write($hall->_wire_json->encode($info) . "\n");
   });
 
   $hall->_register_cmd(kill => sub {
     my ($hall, $stream, $payload) = @_;
     my $id = $payload->{id} // '';
     my $result = $hall->kill_raider($id);
-    $stream->write(JSON::MaybeXS->new->encode($result) . "\n");
+    $stream->write($hall->_wire_json->encode($result) . "\n");
   });
 
   $hall->_register_cmd(logs => sub {
     my ($hall, $stream, $payload) = @_;
     my $id = $payload->{id} // '';
     my $result = $hall->logs(id => $id);
-    $stream->write(JSON::MaybeXS->new->encode($result) . "\n");
+    $stream->write($hall->_wire_json->encode($result) . "\n");
   });
 
   $hall->_register_cmd(status => sub {
     my ($hall, $stream, $payload) = @_;
-    $stream->write(JSON::MaybeXS->new->encode({
+    $stream->write($hall->_wire_json->encode({
       running => scalar(keys %{$hall->raiders}),
       root => $hall->root->stringify,
       slots => $hall->_running_slots,
@@ -75,7 +74,7 @@ sub setup_handlers {
   $hall->_register_cmd(session_reset => sub {
     my ($hall, $stream, $payload) = @_;
     my $result = $hall->reset_session($payload->{binding});
-    $stream->write(JSON::MaybeXS->new->encode($result) . "\n");
+    $stream->write($hall->_wire_json->encode($result) . "\n");
   });
 
   $hall->_register_cmd(telegram_reply => sub {
@@ -99,7 +98,7 @@ sub setup_handlers {
       # Strip the Future before serialising.
       delete $result->{future};
     }
-    $stream->write(JSON::MaybeXS->new->encode($result) . "\n");
+    $stream->write($hall->_wire_json->encode($result) . "\n");
   });
 }
 

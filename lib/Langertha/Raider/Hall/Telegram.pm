@@ -29,6 +29,12 @@ conversation continues across messages (see
 L<Langertha::Raider::Hall/session_bindings>). The raider's
 C<telegram_reply> answers into the same chat and forum topic.
 
+A mission the hall refuses (C<raider.refused>, see
+L<Langertha::Raider::Hall/EVENT BUS>) -- at once or when it is pulled from
+a queue -- is answered in its chat and topic with the short C<mission not
+started (configuration), see the hall log>; the reason stays in the event
+and the slot log.
+
 C</new> (or C</new@BOTNAME>) from an accepted sender is not a mission: the
 chat's (topic's) next message starts a new session, and the bot confirms
 with a short message. The old journal stays.
@@ -401,6 +407,15 @@ sub send_message {
     });
   });
   return { ok => 1, future => $f };
+}
+
+# A mission of a chat the hall refused (ADR 0033): a short reply without
+# the reason, which stays in raider.refused and the slot log, so alias
+# names and paths never reach a chat.
+sub send_refused {
+  my ($self, %target) = @_;
+  return $self->send_message(%target,
+    text => 'mission not started (configuration), see the hall log');
 }
 
 sub stop {

@@ -1191,6 +1191,19 @@ Revision history for Langertha-Raider
       origin, an alias that is not stored in ~/.raider/config.yml, and
       provider together with engine are refused before writing and at spawn.
 
+    - The hall event bus is a versioned public wire format (ADR 0033): every
+      event carries version 1, seq and a float time (ts stays); events and
+      control-socket answers are canonical JSON; the hall POD lists every
+      type.
+
+    - A mission the hall refuses (provider entry) emits raider.refused with a
+      reason code; the spawn answer adds status/reason, the slot log line
+      reads "[hall] raider NAME refused: WHY; mission not run", Telegram gets
+      a short reply, cron reports binding cron:ID.
+
+    - Fix: an ACP session/prompt whose queued mission was refused when pulled
+      from the queue waited forever; it now ends with JSON-RPC error -32000.
+
 
 0.503     2026-10-01 21:25:19Z
 

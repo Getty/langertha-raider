@@ -52,7 +52,11 @@ A prompt that has to wait -- its C<1name> slot or its session is busy --
 gets no answer until its run has started and ended; then it is answered
 like any other -- C<end_turn>, C<cancelled> or a JSON-RPC error -- also
 when the hall had to start that run without the session
-(C<hall.session_error>).
+(C<hall.session_error>). A prompt whose mission the hall refuses
+(C<raider.refused>, see L<Langertha::Raider::Hall/EVENT BUS>) -- at once
+or when it is pulled from its queue -- ends as JSON-RPC error C<-32000>
+with the refusal's text; nothing ran. The ACP stop reason C<refusal> is
+not used for it: in ACP it means the model refused.
 
 =item * C<session/cancel> — cancel the running raider's run with a
 C<SIGINT> (L<Langertha::Raider::Hall/cancel_raider>): it ends the run as
@@ -328,7 +332,10 @@ sub _session_prompt {
 
 # Waiting prompts start in order on the session's binding: each
 # raider.spawned there takes the oldest one and streams its run to it. So
-# does a hall.session_error there, for the run it started unbound.
+# does a hall.session_error there, for the run it started unbound. A
+# raider.refused there -- the mission was refused when it was pulled from
+# its queue (ADR 0033) -- answers the oldest one with the JSON-RPC error a
+# refused prompt gets at once.
 sub _watch_spawns {
   my ($self, $session, $session_id, $stream) = @_;
   return if $session->{_spawn_watch};
@@ -336,10 +343,14 @@ sub _watch_spawns {
   $session->{_spawn_watch} = $self->_subscribe('', sub {
     my ($evt) = @_;
     my $t = $evt->{type} // '';
-    return unless $t eq 'raider.spawned' || $t eq 'hall.session_error';
-    return unless ($evt->{binding} // '') eq $binding && defined $evt->{id};
+    return unless $t eq 'raider.spawned' || $t eq 'hall.session_error' || $t eq 'raider.refused';
+    return unless ($evt->{binding} // '') eq $binding;
+    return unless $t eq 'raider.refused' || defined $evt->{id};
     my $rid = shift @{ $session->{waiting} // [] };
     return unless defined $rid;
+    return $self->_reply_err($stream, $rid, -32000,
+      'spawn failed: raider '.($evt->{name} // '').': '.($evt->{error} // 'refused'))
+      if $t eq 'raider.refused';
     $session->{current_raider_id} = $evt->{id};
     $session->{pending_request_id} = $rid;
     $self->_attach_subscription($session, $evt->{id}, $stream);
@@ -407,13 +418,6 @@ sub _attach_subscription {
       $self->_reply($stream, $rid, {
         stopReason => $cancelled ? 'cancelled' : 'end_turn',
       }) if defined $rid;
-    }
-    elsif ($t eq 'raider.failed') {
-      # A run failure the hall might report out of band: treat it exactly
-      # like a failed raider.done — a JSON-RPC error, never 'refusal'.
-      # 'refusal' in ACP means the *model* declined, not that the run broke.
-      $self->_fail_run($session, $stream,
-        $evt->{error} // 'raider run failed');
     }
     else {
       # Forward other raider.* events as plaintext chunks so clients get

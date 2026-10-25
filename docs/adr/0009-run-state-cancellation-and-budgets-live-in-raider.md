@@ -36,3 +36,9 @@ status, no cancellation, no budget, no wait states.
 ## Source
 
 Proposal: `docs/RAIDER-REDESIGN-HANDOFF.md` §7; code check 2026-09-24.
+
+## Update (2026-10-25, refused)
+
+`refused` is an end state too, as ADR 0013 already lists it: a run that is refused before it
+starts, by policy or configuration, so no model or tool call happens. The hall reports such a
+mission as `raider.refused` (ADR 0033).

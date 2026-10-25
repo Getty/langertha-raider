@@ -11,7 +11,9 @@ L<Langertha::Raider::Hall> and spawns the named raider when it fires.
 Every job runs in a session of its own, bound as C<cron:ID>, which each
 occurrence continues. An occurrence whose previous run has not ended yet
 waits for it in the hall's queues; with C<coalesce: true> it is dropped
-instead and the hall emits C<cron.coalesced>.
+instead and the hall emits C<cron.coalesced>. An occurrence whose raider
+entry the hall refuses runs nothing: the hall emits C<raider.refused> with
+the C<binding> C<cron:ID>, and C<cron.fired> names no C<raider_id>.
 
 =cut
 

@@ -72,7 +72,7 @@ sub refused {
   is( scalar keys %{ $hall->raiders }, 0, $name.': no raider running' );
   is( runs(), [], $name.': the raider was never started' );
   my $log = $tmp->child( '.raider-hall', 'logs', 'ivar.log' );
-  like( ( -e $log ? $log->slurp_utf8 : '' ), qr/^\[hall\] raider ivar: .*mission not run$/m,
+  like( ( -e $log ? $log->slurp_utf8 : '' ), qr/^\[hall\] raider ivar refused: .*; mission not run$/m,
     $name.': noted in the slot log' );
 }
 
