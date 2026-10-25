@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-10-25T07:20:04Z
+claimed_by: raider-worker-k171
+class: standard
+completed: 2026-10-25T07:20:04Z
+created: 2026-10-25T06:29:50Z
+id: 171
+priority: medium
+started: 2026-10-25T06:30:42Z
+status: done
+tags:
+- hall
+- events
+- acp
+- adr-0033
+title: 'Hall: Event-Bus versioniert (version/seq/time, canonical) + raider.refused,
+  ACP-Haenger bei Queue-Ablehnung'
+updated: 2026-10-25T07:20:04Z
+---
+
+ADR 0033 (neu, uncommittet im Tree; dazu Updates ADR 0009 refused und ADR 0017 hall bus). Umfang: (1) Bus-Umschlag version/seq/time(float), ts bleibt; canonical JSON fuer Bus und Control-Socket-Antworten; vollstaendige Typenliste in Hall-POD. (2) raider.refused {status, slot, name, binding?, reason, error, queued}; reason-Codes provider_not_alias/provider_with_engine/provider_not_stored/provider_config aus _provider_problem/_provider_refusal. (3) spawn-Antwort +status/reason. (4) ACP: wartender session/prompt bei raider.refused -> -32000 (auch Queue-Pull, Hall.pm _spawn_next_in_queue ignoriert heute den Rueckgabewert -> Haenger); toter raider.failed-Zweig weg. (5) Cron: raider.refused mit binding cron:ID. (6) Telegram: kurze Antwort ohne Details. (7) Slot-Log-Zeile: [hall] raider NAME refused: WHY; mission not run. Tests fuer alles, inkl. hall.stopping/acp.started/telegram.send_error falls billig. Aus Events-Audit 2026-10-25.
+
+2026-10-25 06:38 Repro: t/59_hall_refused.t -- ACP session/prompt waiting on a slot/binding queue whose entry turns bad gets no answer at all after the run ahead ends (wait_until times out, reply 2/3 undef). Cause: _watch_spawns only reacts to raider.spawned/hall.session_error; the refusal on the pull only writes the slot log.
+
+2026-10-25 06:43 Implemented: Hall::_emit envelope (version 1, seq via Counter attr _seq, time Time::HiRes float, ts int) + _wire_json (canonical) for bus and control-socket answers (Protocol + hall error replies); _provider_problem/_provider_refusal return {reason,error}; _refuse emits raider.refused, writes '[hall] raider NAME refused: WHY; mission not run', replies in Telegram via new Telegram::send_refused (send_message path) for direct and queued refusals; queued flag from _spawn_next_in_queue and _drain_binding_queue; ACP _watch_spawns answers -32000 on raider.refused, raider.failed branch removed; Hall POD gets EVENT BUS + CONTROL SOCKET. Tests t/59_hall_refused.t, t/59_hall_bus_envelope.t; t/59_hall_provider_alias.t slot-log regex updated. Full suite running.
+
+2026-10-25 07:16 Done per ADR 0033. Hall.pm: bus envelope (version 1, seq per hall, float time, ts kept), canonical _wire_json for bus + control-socket answers (Protocol, hall error replies); _provider_problem/_provider_refusal return {reason,error} (provider_not_alias/_with_engine/_not_stored/provider_config), Hall::CLI adapted; _refuse emits raider.refused {status,slot,name,binding?,reason,error,queued}, slot log '[hall] raider NAME refused: WHY; mission not run', spawn answer +status/reason; queued flag on slot- and binding-queue pulls. ACP: _watch_spawns answers waiting prompt -32000 on raider.refused (repro was a hang), raider.failed branch removed, else branch kept (k176). Cron: refused occurrence -> raider.refused binding cron:ID (no code change needed, POD note). Telegram: Telegram::send_refused (send_message path), called by the hall for direct AND queued refusals, so the spawn return in _handle_update stays ignored. POD: Hall EVENT BUS + CONTROL SOCKET sections. Tests: new t/59_hall_refused.t, t/59_hall_bus_envelope.t (incl. hall.stopping, acp.started, telegram.send_error); t/59_hall_provider_alias.t slot-log regex updated. Verified: hall/ACP subset 26 files PASS; full suite 232 files: only t/103, t/39 failed mid k172 edits, both (and t/143) PASS on rerun.
+
+Committed as 35f4571
