@@ -30,6 +30,9 @@ This rule depends on whether the Agent/Task tool is available to you.
   | Standalone binary: packing, verify-binary, packed-only failures | `raider-binary-worker` |
   | Write/extend tests | `raider-test-writer` |
   | Commits, `Changes`, card → done, pre-release audit | `raider-release-manager` |
+  | Read-only research, audit, gap analysis, codebase sweep | `raider-worker` (say "read-only, change nothing") |
+
+  **Every subagent you spawn here is a `raider-*` agent** — also for research and audits that change nothing. Never the built-in `general-purpose`, `Explore` or `Plan` agents: they get no briefing either, so they explore Raider as blind as you would.
 
 - **You cannot spawn subagents** (you ARE a `raider-*` agent): The delegation lock does not apply to you — implement, refactor, debug, and test per these rules.
 
