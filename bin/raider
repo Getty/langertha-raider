@@ -263,10 +263,12 @@ The API key, over C<api_key:> in F<.raider.yml> and the engine's
 environment variable. With C<--provider> the only source of the key,
 together with C<-o api_key=>.
 
-=opt --provider HOST[:PORT] | https://HOST[:PORT]
+=opt --provider HOST[:PORT] | https://HOST[:PORT] | ALIAS
 
 Runs on the model endpoint a provider's manifest declares, for this one
-run; see L</Using a provider>. Not with C<-e>, C<-o engine=>, C<-o url=>
+run; see L</Using a provider>. A name without dot, port or C<https://> is
+always an alias (L</Stored aliases>); one that is not stored is a usage
+error and nothing is fetched. Not with C<-e>, C<-o engine=>, C<-o url=>
 or C<config explain>.
 
 =opt --provider-endpoint ID
@@ -697,7 +699,10 @@ C<Authorization> header and no cookie, and is bounded:
 =over
 
 =item * C<https> only; a target with userinfo, a query, a fragment or
-another path than the well-known one is a usage error.
+another path than the well-known one is a usage error. Without
+C<https://> a host needs a dot (C<host.tld>) or a port (C<host:PORT>); a
+bare name such as C<acme> or C<localhost> is a provider alias, not a host
+(C<localhost:8443> or C<https://localhost> is one).
 
 =item * at most 1 MiB of body, 10 seconds from resolving the host to the
 last byte, and 3 redirects, each within the origin (scheme, host and
@@ -728,8 +733,8 @@ fetches and validates the manifest as C<provider inspect> does (same
 limits and address rules) and runs on the endpoint of one of its models:
 one-shot, machine output and the REPL work as with C<-e>. Nothing is
 stored and nothing is remembered: naming the host on the command line is
-the whole release, as with C<-o url=>. A name that is a stored alias (see
-L</Stored aliases>) is the binding instead of a host. The rules are
+the whole release, as with C<-o url=>. A name without dot, port or
+C<https://> is an alias (see L</Stored aliases>), never a host. The rules are
 provisional:
 
 =over
@@ -839,9 +844,13 @@ accepted.
 =item * B<C<--allow-internal>> belongs to the alias: given to C<add> it is
 stored and covered by the pin; it is a usage error next to a stored alias.
 
-=item * B<The name> is an alias when it is stored (lowercase letters,
-digits, C<-> and C<_>, at most 32: it can never look like a host); any
-other C<--provider> value is a HOST.
+=item * B<The name> of an alias is lowercase letters, digits, C<-> and
+C<_>, at most 32: it can never look like a host. A C<--provider> value
+without dot, port or C<https://> is always an alias; one that is not stored
+is a usage error (exit C<2>; with C<--json> the C<failed> document) that
+points to C<provider add>, and nothing is fetched -- a typo in an alias
+never turns into a network request. Any other C<--provider> value is a
+HOST.
 
 =item * B<C<provider list>> and B<C<provider show ALIAS>> print what is
 stored (origin, issuer, auth types, the I<name> of the credential variable,

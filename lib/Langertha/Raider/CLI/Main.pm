@@ -87,13 +87,16 @@ for sessions: a C<--session> value that is no session id,
 more than one of C<--session>, C<--continue> and C<--no-session>, an unknown
 or ambiguous session, or C<--continue> without any session; for
 C<provider inspect>: no target or more than one, a target that is no
-host or https origin, or a C<--stream-*> flag; for C<--provider>: a
-target that is none, C<-e>, C<-o engine=>, C<-o url=> or C<config explain>
+host or https origin (also a bare name: no dot, no port, no C<https://>),
+or a C<--stream-*> flag; for C<--provider>: a
+target that is none, a bare name that is no stored alias (nothing is
+fetched), C<-e>, C<-o engine=>, C<-o url=> or C<config explain>
 with it, a model the manifest does not list, no C<-m> where it lists
 several models, or no C<-k> where the endpoint needs a key;
 C<--allow-internal> without C<--provider>, or with a stored alias; for
 C<provider add>: not two words, an alias or variable name that is none,
-auth asked for and no C<--credential-env>, a machine format; for
+a HOST that is none (also a bare name), auth asked for and no
+C<--credential-env>, a machine format; for
 C<provider show> and C<provider remove>: not one word, or an alias that is
 not stored.
 
@@ -236,7 +239,10 @@ Options:
                            binding: its origin and allow-internal setting,
                            its key from the environment variable it names
                            (or -k); stops when the provider changed origin,
-                           issuer, endpoints or auth since you accepted it
+                           issuer, endpoints or auth since you accepted it.
+                           A name without dot, port or https:// is always
+                           an ALIAS: one not stored is an error, nothing
+                           is fetched
       --provider-endpoint ID
                            With --provider: the manifest endpoint to use
                            when the model is offered on several
@@ -656,12 +662,23 @@ sub run {
     my $cli_opts = $opt->{engine_options};
     my $target = $opt->{provider};
     my %binding;
-    # A name that is a stored alias is the binding; any other is a HOST. The
-    # binding's origin and allow_internal are the stored ones -- never the
-    # command line's, and never an API key from the environment but its own
-    # credential_env (nothing is picked by what keys happen to be set).
-    if ( $self->binding_class->valid_alias($target) && exists $config->providers->{$target} ) {
+    # A bare name (no dot, port or scheme) is always an alias (ADR 0007,
+    # update 2026-10-25): one that is not stored is a usage error and
+    # nothing is fetched, so a typo never turns into a network request.
+    # Anything else is a HOST. The binding's origin and allow_internal are
+    # the stored ones -- never the command line's, and never an API key from
+    # the environment but its own credential_env (nothing is picked by what
+    # keys happen to be set).
+    if ( $self->binding_class->valid_alias($target) ) {
       my $alias = $target;
+      unless ( exists $config->providers->{$alias} ) {
+        my $text = "raider --provider: provider alias '".$alias."' is not stored in "
+          .( $config->home_file // '~/.raider/config.yml' )
+          .'; bind it with: raider provider add '.$alias.' HOST (a host needs a dot, a port or https://)';
+        $self->_warn($text."\n");
+        $self->_provider_failure($machine, failed => $text, $alias, $t0);
+        return EXIT_USAGE;
+      }
       my $entry = $config->providers->{$alias};
       if ( my $why = $self->binding_class->problem($entry) ) {
         my $text = "raider --provider: alias '".$alias."' in ".$config->home_file.': '.$why
@@ -1154,7 +1171,9 @@ Usage: raider provider inspect HOST[:PORT] | https://HOST[:PORT] [options]
 
 Fetches https://HOST[:PORT]/.well-known/langertha.json, validates it as a
 provider manifest and shows provider id, issuer, endpoints, auth and
-models. Nothing is stored and no credential is sent or bound.
+models. Nothing is stored and no credential is sent or bound. A HOST has
+a dot (host.tld) or a port (host:PORT); a bare name is a provider alias,
+not a host.
 
 Options:
       --allow-internal     Allow a loopback, private, link-local or reserved

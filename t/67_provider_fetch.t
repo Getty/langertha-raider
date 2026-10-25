@@ -22,6 +22,8 @@ subtest 'target_url: what a command-line target may be' => sub {
   is( $f->target_url('https://provider.example'), 'https://provider.example/.well-known/langertha.json', 'https origin' );
   is( $f->target_url('https://provider.example/'), 'https://provider.example/.well-known/langertha.json', 'https origin with /' );
   is( $f->target_url('https://provider.example'.$PATH), 'https://provider.example/.well-known/langertha.json', 'the well-known URL itself' );
+  is( $f->target_url('localhost:8443'), 'https://localhost:8443/.well-known/langertha.json', 'a bare name with a port is a host (k170)' );
+  is( $f->target_url('https://localhost'), 'https://localhost/.well-known/langertha.json', 'so is an https origin (k170)' );
 
   my %bad = (
     'http://provider.example'              => qr/only https/,
@@ -36,6 +38,10 @@ subtest 'target_url: what a command-line target may be' => sub {
     'provider.example:99999'               => qr/invalid port/,
     'provider example'                     => qr/spaces or control/,
     ''                                     => qr/no provider given/,
+    'acme'                                 => qr/'acme' is no host: a host needs a dot \(host\.tld\), a port \(host:PORT\) or https:\/\/; a bare name is a provider alias/,
+    'localhost'                            => qr/is no host/,
+    'localhost:'                           => qr/is no host/,
+    '[::1]'                                => qr/is no host/,
   );
   for my $target ( sort keys %bad ) {
     like( dies { $f->target_url($target) }, $bad{$target}, "refused: '$target'" );

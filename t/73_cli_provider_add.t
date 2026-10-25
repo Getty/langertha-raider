@@ -410,14 +410,66 @@ subtest 'a project file cannot bind a provider' => sub {
   is( $config->engine_options('openai'), {}, 'never an engine option' );
 };
 
-subtest 'a stored alias is not a HOST, any other name still is' => sub {
-  # no alias of this name: it is a host, fetched like before (a loopback
-  # address is refused without --allow-internal)
+subtest 'a bare name is always an alias: not stored is a usage error, nothing fetched (k170)' => sub {
   my $before = count_requests();
+  # A fetch would be a bug: target_url or fetch_f counts the call and dies.
+  my $calls = 0;
+  no warnings 'redefine';
+  local *Langertha::Raider::Provider::Fetch::target_url = sub { $calls++; die "fetched\n" };
+  local *Langertha::Raider::Provider::Fetch::fetch_f    = sub { $calls++; die "fetched\n" };
   my ( $exit, $out, $err ) = main_run( '', '--provider', 'nobody', '-k', 'sk', 'hi' );
-  is( $exit, 1, 'exit 1' );
-  like( $err, qr/^raider --provider: refused: nobody resolves to 127\.0\.0\.1 \(loopback address\)/, 'fetched as a host' );
-  is( count_requests(), $before, 'and refused before any request' );
+  is( $exit, 2, 'exit 2: a usage error' );
+  is( $out, '', 'nothing on stdout' );
+  like( $err, qr/^raider --provider: provider alias 'nobody' is not stored in \Q$config_file\E; bind it with: raider provider add nobody HOST/,
+    'says it is no stored alias and how to bind it' );
+
+  ( $exit, $out, $err ) = main_run( '', '--provider', 'nobody', '--allow-internal', '-k', 'sk', 'hi' );
+  is( $exit, 2, '--allow-internal does not make it a host' );
+  like( $err, qr/provider alias 'nobody' is not stored/, 'the same message' );
+
+  ( $exit, $out, $err ) = main_run( '', '--provider', 'nobody', '-k', 'sk', '--json', 'hi' );
+  is( $exit, 2, '--json: exit 2' );
+  my $doc = JSON::MaybeXS->new->decode($out);
+  is( [ @$doc{qw( version status provider )} ], [ 1, 'failed', 'nobody' ], '--json: the failed document' );
+  like( $doc->{error}, qr/provider alias 'nobody' is not stored.*raider provider add nobody HOST/, '--json: with the reason' );
+
+  ( $exit, $out, $err ) = main_run( '', '--provider', 'nobody', '-k', 'sk', '--stream-json', 'hi' );
+  is( $exit, 2, '--stream-json: exit 2' );
+  my @events = map { JSON::MaybeXS->new->decode($_) } grep { length } split /\n/, $out;
+  is( [ map { @$_{qw( type status provider )} } $events[-1] ], [ 'run.finished', 'failed', 'nobody' ],
+    '--stream-json: ends with the failed run.finished event' );
+
+  is( $calls, 0, 'Fetch was never called' );
+  is( count_requests(), $before, 'no request reached the server' );
+};
+
+subtest 'a stored alias still runs; a dot or a port is still a HOST (k170)' => sub {
+  local $ENV{ACME_KEY} = 'sk-acme';
+  my ( $exit, $out, $err ) = main_run( '', '--provider', 'acme', '--json', 'say hello' );
+  is( $exit, 0, 'the stored alias acme runs' ) or diag $err;
+  is( JSON::MaybeXS->new->decode($out)->{response}, 'hello from the provider', 'the endpoint answered' );
+
+  # Every name resolves to 127.0.0.1 here: the host way is the fetch, which
+  # refuses the loopback address before any request.
+  for my $target ( $host, 'localhost:'.$srv->port, 'provider.example', 'https://localhost' ) {
+    my $before = count_requests();
+    ( $exit, $out, $err ) = main_run( '', '--provider', $target, '-k', 'sk', 'hi' );
+    is( $exit, 1, "$target: exit 1, refused as a host" );
+    like( $err, qr/^raider --provider: refused: .*127\.0\.0\.1.*\(loopback address\)/, "$target: went the host way" );
+    is( count_requests(), $before, "$target: refused before any request" );
+  }
+};
+
+subtest 'provider add: a bare name is no HOST (k170)' => sub {
+  my $before = count_requests();
+  for my $target (qw( localhost acme )) {
+    my ( $exit, $out, $err ) = main_run( "y\n", qw( provider add other ), $target, qw( --allow-internal --credential-env K ) );
+    is( $exit, 2, "$target: exit 2" );
+    like( $err, qr/^raider provider add: provider target '\Q$target\E' is no host: a host needs a dot \(host\.tld\), a port \(host:PORT\) or https:\/\//,
+      "$target: says why" );
+    ok( !exists stored()->{providers}{other}, "$target: nothing stored" );
+  }
+  is( count_requests(), $before, 'no request was made' );
 };
 
 done_testing;

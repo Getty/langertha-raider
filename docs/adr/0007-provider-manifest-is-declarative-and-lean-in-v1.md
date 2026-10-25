@@ -64,3 +64,10 @@ spawns the raider with `--provider ALIAS`. A bare HOST and `--allow-internal` ar
 accepted there — the hall runs unattended, so it only uses bindings that were consented to
 and pinned with `raider provider add`. `provider` and `engine` on one entry exclude each
 other. ACP sessions served by the hall inherit this through their raider.
+
+## Update (2026-10-25, alias or host)
+
+`--provider NAME` with a NAME that has no dot, no port and no scheme is always an alias. If
+it is not stored, raider stops with a usage error that points to `raider provider add` and
+fetches nothing — a typo in an alias never turns into a network fetch. A host needs a dot
+(`host.tld`, `host.tld:PORT`) or an explicit `https://` origin.

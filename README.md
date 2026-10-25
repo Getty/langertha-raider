@@ -483,8 +483,11 @@ The aliases also show in `raider config explain` and the REPL banner.
 - **`--allow-internal`** belongs to the alias (set it at `add`); it is part of what
   you accepted, is refused next to a stored alias on the command line, and a
   hand-edited entry no longer matches.
-- A name that is a stored alias is the binding; any other `--provider` value is a
-  HOST as before.
+- A `--provider` name without dot, port or `https://` is always an alias. One that
+  is not stored stops raider with a usage error pointing to `raider provider add`,
+  and nothing is fetched — a typo in an alias never becomes a network request. A
+  host needs a dot (`host.tld`, `host.tld:PORT`), a port or an `https://` origin;
+  `provider inspect` and `provider add` take no bare name as a host either.
 - A model that the manifest lists on several usable endpoints is refused with the
   endpoints named; `--provider-endpoint ID` chooses one.
 - A `--provider` that cannot run is also one `refused` or `failed` document on

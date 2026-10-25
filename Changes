@@ -1108,6 +1108,12 @@ Revision history for Langertha-Raider
     - A raider --provider that cannot run is also a refused or failed
       document on stdout with --json (exit status unchanged).
 
+    - raider --provider NAME: a name without dot, port or https:// is always a
+      provider alias; one that is not stored is a usage error (exit 2, the
+      failed document with --json) pointing to raider provider add, and
+      nothing is fetched. provider inspect and provider add no longer take a
+      bare name as HOST: a host needs a dot, a port or https:// (ADR 0007).
+
     - The REPL banner no longer says "no API key required" for a -k key under
       --provider, and shows the provider alias.
 
