@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-10-25T06:30:15Z
+id: 173
+priority: low
+status: backlog
+tags:
+- events
+- cli
+- needs-decision
+title: 'Stream P2: run.state-Wartezustaende (ADR 0009) und task.*-Events fuer Background-Shells/Monitore/Cron/Subagenten'
+updated: 2026-10-25T06:30:15Z
+---
+
+Aus Events-Audit 2026-10-25 / ADR 0034 "Not decided here". (a) run.state gibt waiting_approval/waiting_user/waiting_task nie aus (nur running + Endzustand). (b) Claude Code: system/task_started/task_progress/task_notification; raider: nur agent.started/finished, Shells/Monitore/Cron ohne Event, <task-notification> wird als User-message aus dem Stream gefiltert (Runner.pm). Vorschlag: task.started/task.finished/task.notification. Braucht ADR-Nachtrag.
