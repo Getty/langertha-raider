@@ -1,0 +1,47 @@
+---
+claimed_at: 2026-10-25T01:53:30Z
+claimed_by: raider-worker-k23
+class: standard
+completed: 2026-10-25T01:53:30Z
+created: 2026-09-24T19:41:12Z
+id: 23
+priority: low
+started: 2026-10-25T01:13:03Z
+status: done
+tags:
+- provider-discovery
+- m5
+- needs:langertha#191
+title: 'Provider-Discovery-Client: raider --provider HOST, provider add/inspect'
+updated: 2026-10-25T01:53:37Z
+---
+
+ADR 0007. Manifest begrenzt abrufen (HTTPS, Groessen-/Zeit-/Redirect-Limits, keine Credential-Weitergabe bei Origin-Wechsel, kein Selbstzugriff auf Loopback/Link-Local/Metadaten; interne Knarr/Skeid-Origins per lokaler Freigabe), validieren, Endpunkte+Auth anzeigen, lokale Credential-Bindung, Alias in ~/.raider/config.yml (ADR 0011). Aenderung von Origin/Auth -> erneute Zustimmung. Fixtures F33-F36, F38 aus dem Handoff. Braucht Schema aus langertha#191 und Policy/Executor (ADR 0005).
+
+Aus #78: EngineResolver::_build_engine_name prueft fuer die API-Key-Autowahl nur anthropic/openai/deepseek/groq/mistral/gemini, nicht engine_names. Bewusst unveraendert (Handoff §5.3: Autowahl bleibt vorerst); mit Provider-Discovery neu entscheiden.
+
+2026-09-30: langertha#191 ist erledigt (Langertha::Manifest auf langertha main, 0.503). Slice 1 (inspect, ohne Policy) als #118 abgespalten. Rest hier (--provider HOST, provider add, Credential-Bindung, Alias) bleibt blockiert durch ADR 0005 Policy/Executor und ADR 0011 ~/.raider.
+
+2026-09-30: Slice 2 (ephemeres --provider HOST, ohne Speicherung/Zustimmung) als #119 abgespalten. Blockiert bleiben: provider add, Alias in ~/.raider/config.yml (Home-Config-Loader aus ADR 0011 existiert noch nicht - kein Ticket dafür), Credential-Bindung (Speicherort/Format nicht entschieden), erneute Zustimmung bei Origin/Auth-Änderung (ADR 0005 Policy/Executor nicht implementiert, kein Ticket).
+
+2026-09-30: Rest in Umsetzungskarten zerlegt: #119 (ephemeres --provider), #131 (Änderungsklassifikation), #132 (Home-config-Writer), #133 (provider add + --provider ALIAS, blockiert durch Getty-Entscheidungen). Grundlagen: ADR 0011 #125-#130, ADR 0005 #120-#124. #23 bleibt Dach-Karte.
+
+2026-09-30 #119 fertig. Offene Getty-Fragen aus #119: (a) Defaults der Karte + lmstudio unsupported + Verweigerung, wenn ein Modell auf mehreren nutzbaren Endpunkten liegt; (b) --provider-Fehler nur auf stderr, auch mit --json - stattdessen refused/failed-Dokument? (c) REPL-Banner zeigt im Provider-Modus 'no API key required' trotz -k (kosmetisch, offen). Core-Fixes an Hub gemeldet: Credential-Header bei Cross-Origin-Redirect, IP-Pinning für Engines, Gemini ohne Key.
+
+Empfehlung (Abbau 2026-10-14, keine Umsetzung): Dach-Karte unverändert blockiert lassen; Reststücke hängen an #133 (Getty-Entscheidungen, Empfehlung dort) sowie ADR 0005/0011-Karten #120-#130. Zur Notiz aus #78 (Autowahl prüft engine_names nicht): Empfehlung = Autowahl aus API-Keys bleibt auf die sechs bekannten Provider beschränkt und wird NIE auf Discovery-Provider/Aliase ausgedehnt (deckt sich mit #133: nie Autowahl aus API-Keys); Discovery-Provider nur explizit über --provider.
+
+2026-10-15 01:31 ENTSCHEIDUNG Getty 2026-10-15: Autowahl aus API-Keys wird NIE auf Discovery-Provider/Aliase ausgedehnt; Discovery nur explizit ueber --provider.
+
+2026-10-15 Rest nach #133 (Commit 5c9b31d): (1) ADR-0005-Policy/Executor #120-#124: erneute Zustimmung gilt nur fuer Manifest-Pins, Capabilities autorisieren nichts; (2) Alias-Verwaltung: kein provider list/show/remove, Aliase nicht in config explain/REPL; (3) offen aus #119: Modell auf mehreren Endpunkten/Defaults, --provider-Fehler nur stderr auch mit --json, REPL-Banner 'no API key required' trotz -k; (4) Core-Fixes beim Hub (Credential-Header bei Cross-Origin-Redirect, Gemini ohne Key) Stand ungeklaert; (5) Hall/ACP kennen --provider/Alias nicht; (6) Credential nur Env-Var-Name, nur Auth-Typ api_key; (7) Fixtures F33-F36/F38 nicht systematisch gegen t/67-73 abgeglichen; (8) #78-Beschluss nur indirekt ueber t/73 gesichert, kein EngineResolver-Test.
+
+2026-10-15 ENTSCHEIDUNG Getty (Runde 2, bindend): #119(a) Modell auf mehreren Endpunkten: verweigern, Nutzer waehlt per --provider-Endpunkt; #119(b) --provider-Fehler mit --json als refused/failed-Dokument auf stdout.
+
+2026-10-15 Koordinator: #119(a)/(b), REPL-Banner, EngineResolver-Test, Fixture-Abgleich erledigt ueber #150. Rest: ADR-0005-Policy/Executor (#120-#124), Hall/ACP-Anbindung, Core-Fixes beim Hub.
+
+2026-10-25 ENTSCHEIDUNG Getty: Hall/ACP nur ueber ALIAS: Hall-Raider-Eintrag provider: ALIAS -> Spawn mit --provider ALIAS, hall add-raider --provider ALIAS; kein HOST, kein --allow-internal; provider und engine exklusiv. ADR 0007 Update 2026-10-25.
+
+2026-10-25 01:23 Hall/ACP: provider: ALIAS am Raider-Eintrag -> Spawn mit --provider ALIAS (+ --model, wie die CLI es erlaubt: provider_usage_error verbietet nur -e/-o engine=/-o url=). Pruefung im Hall (_provider_problem: nicht mit engine, nur valid_alias; _provider_refusal zusaetzlich: Alias muss in ~/.raider/config.yml stehen, via Config->providers). Grund fuer den Lookup: raider --provider NAME nimmt einen unbekannten Namen als HOST und wuerde https://NAME ungefragt holen - das widerspricht ADR 0007 Update. Verweigerung beim Spawn: {error}, [hall]-Zeile im Slot-Log, kein Prozess. add-raider/init --provider pruefen statisch vor dem Schreiben. Test t/59_hall_provider_alias.t.
+
+2026-10-25 01:51 Done (Hall/ACP-Anbindung): Hall-Raider-Eintrag provider: ALIAS -> Spawn mit --provider ALIAS (+ --model; nie --engine/--allow-internal). Refused beim Spawn ({error}, [hall]-Zeile im Slot-Log, kein Prozess): kein Alias (HOST/HOST:PORT/https-Origin), provider+engine, Alias nicht in ~/.raider/config.yml (Config->providers; noetig, weil raider --provider NAME einen unbekannten Namen als HOST holt). hall add-raider/init --provider: dieselbe statische Pruefung vor dem Schreiben. ACP unveraendert (behandelt spawn-{error} schon als JSON-RPC-Fehler). Doku: Hall POD CONFIG FILE, bin/raider-hall, Hall::CLI-Hilfe, README. Test t/59_hall_provider_alias.t; volle Suite PASS (230 Dateien, 1999 Tests; nur 3 Live-Tests skipped).
+
+2026-10-25 01:53 Committed 6503919. Hall/ACP only via ALIAS done. Follow-up on unknown alias in the CLI: #170. Note 'waits on langertha#191' is obsolete, langertha#191 is done.
