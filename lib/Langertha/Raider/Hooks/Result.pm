@@ -10,7 +10,7 @@ use namespace::autoclean;
     my $r = await $hooks->run_f( PreToolUse => { tool_name => 'bash', tool_input => { command => 'ls' } } );
     return deny( $r->reason ) if ( $r->decision // '' ) eq 'deny';
     $args = $r->updated_input if $r->updated_input;
-    journal( 'hook.run', %$_ ) for @{ $r->runs };
+    journal( 'hook.ran', %$_ ) for @{ $r->runs };
 
 =head1 DESCRIPTION
 

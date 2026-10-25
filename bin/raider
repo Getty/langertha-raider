@@ -479,16 +479,16 @@ A run that completed:
 
 A run that failed:
 
-    { "elapsed" : 0.42, "error" : "...", "status" : "failed", "version" : 1 }
+    { "elapsed" : 0.42, "error" : "...", "reason" : "engine_error", "status" : "failed", "version" : 1 }
 
 A run cancelled by C<SIGINT> (Ctrl-C; see L</EXIT STATUS>):
 
-    { "elapsed" : 3.912, "status" : "cancelled", "version" : 1 }
+    { "elapsed" : 3.912, "reason" : "signal", "status" : "cancelled", "version" : 1 }
 
 A run stopped by C<SIGTERM>, by a second C<SIGINT> while it is being
 cancelled, or by either signal before it started:
 
-    { "elapsed" : 5.107, "signal" : "TERM", "status" : "interrupted", "version" : 1 }
+    { "elapsed" : 5.107, "reason" : "signal", "signal" : "TERM", "status" : "interrupted", "version" : 1 }
 
 =over
 
@@ -507,6 +507,45 @@ every model call so far, subagents and C<web_fetch> prompts included:
 C<input_tokens>, C<output_tokens>, C<cache_read_tokens>, C<cache_write_tokens>
 (both cache counts are part of the input), C<calls>, and the same per model
 under C<models> (C<completed> only; ADR 0026).
+
+=item C<reason> -- a short code for why the run ended, whenever C<status>
+is not C<completed> (ADR 0034); C<error> stays the text for a person. New
+codes may come within a version, so a consumer must treat one it does not
+know like C<error>:
+
+=over
+
+=item C<max_iterations> -- the raid used up C<--max-iterations> (C<failed>).
+
+=item C<engine_error> -- a model request failed: the provider could not be
+reached, answered with an error or with something raider cannot read
+(C<failed>).
+
+=item C<hook_blocked> -- a C<UserPromptSubmit> hook blocked the prompt
+(C<failed>).
+
+=item C<hook_stopped> -- a hook answered C<continue: false>: a
+C<SessionStart> or C<UserPromptSubmit> hook (C<failed>), a tool hook
+(C<cancelled>).
+
+=item C<run_setup> -- the run could not be set up, for example the engine
+for the model of a C</name> command (C<failed>).
+
+=item C<provider> -- the C<--provider> could not be activated (C<failed> or
+C<refused>).
+
+=item C<user_cancel> -- cancelled by the person or the client: the REPL's
+Ctrl-C, an ACP C<session/cancel> (C<cancelled>).
+
+=item C<signal> -- ended by a signal: the first C<SIGINT> of a one-shot run
+(C<cancelled>), C<SIGTERM> or a second C<SIGINT> (C<interrupted>, see
+C<signal>).
+
+=item C<error> -- any other failure (C<failed>).
+
+=item C<refused> -- a C<refused> document that names no other code.
+
+=back
 
 =item C<error> -- the error message (C<failed> only).
 
@@ -542,9 +581,16 @@ The types of version 1, with the fields each adds:
 
 =over
 
-=item C<run.started> -- C<engine> and, when there is one, C<model>. A run
-interrupted during startup (reading the configuration or the prompt) has
-none: its stream is the C<interrupted> state change and C<run.finished>.
+=item C<run.started> -- the run begins: C<engine> and, when there is one,
+C<model>; C<session> (the session id) and C<run> (the run id within it,
+C<r1>, C<r2>, ...), both missing with C<--no-session>; C<cwd>, the working
+directory (inside a worktree, the worktree); C<permission_mode>; C<tools>,
+the names of the tools the model is offered, in the order it gets them --
+missing while a configured MCP server has not connected yet, since those
+start with the run's first model request (see C<mcp.server>); and
+C<raider_version>. A run interrupted during startup (reading the
+configuration or the prompt) has none: its stream is the C<interrupted>
+state change and C<run.finished>.
 
 =item C<run.state> -- C<state>: C<running> when the run starts, then the
 C<status> it ends with (see L</The document>).
@@ -563,7 +609,77 @@ reaches the stream, but it is no filter: a secret in a tool's arguments or
 output can still show up.
 
 =item C<message> -- a finished assistant message: C<role> (C<assistant>)
-and C<content>. Version 1 reports the final answer of the run.
+and C<content>. The final answer of the run; also an answer a C<Stop> hook
+sent back with feedback (the run goes on), and an answer after which the
+run goes on with the notifications of its background agents. The person's
+own input is never a C<message> of the stream.
+
+=item C<model.usage> -- after every model request that reports tokens, and
+after a tool's own model call: C<purpose> (C<chat>, or C<web_fetch>),
+C<model>, C<input_tokens>, C<output_tokens> and, when the provider reports
+them, C<cache_read_tokens> and C<cache_write_tokens> (both part of
+C<input_tokens>).
+
+=item C<todo.updated> -- the model changed its task list: C<todos>, the
+whole list, each item with C<content>, C<status> and the fields of its
+tool (see L</TOOLS>).
+
+=item C<permission.asked> -- the policy asks about a tool call (see
+L</PERMISSIONS>): C<call>, C<tool>, C<tool_source>, C<mode>, C<reason>,
+the C<rule> and its C<source> when a rule asks, C<suggested_rule> when one
+would allow it. Also when C<exit_plan_mode> puts the plan to the person
+(C<reason> C<review of the plan>).
+
+=item C<permission.granted> -- the person allowed the call: C<call>,
+C<tool>, C<scope> (C<once>, or C<session> with the C<rule> added), C<mode>.
+
+=item C<permission.denied> -- the call does not run: C<call>, C<tool>,
+C<tool_source>, C<mode>, C<reason>, C<rule> and C<source> of a deny rule,
+and C<by> -- who refused it: C<rule>, C<mode>, C<hook>, C<worktree>, C<user>,
+or C<noninteractive> when nobody could be asked.
+
+=item C<permission.mode> -- the mode changed: C<from>, C<to>, C<why> (the
+command or tool that changed it, such as C<enter_plan_mode> or
+C</permissions>), and C<call> when a tool call changed it.
+
+=item C<hook.ran> -- one hook of the project's Claude Code hooks ran or was
+skipped: C<hook_event> (C<PreToolUse>, C<Stop>, ...), C<source> (the
+settings file or C<plugin:NAME>), C<command>, C<outcome> (C<success>,
+C<block>, C<error>, C<timeout>, C<skipped>, C<running> for an async hook,
+C<cancelled>), and when known C<plugin>, C<matcher>, C<args>, C<exit>,
+C<duration_ms>, C<message>, C<stdout> and C<stderr> (each cut at 2000
+characters). A tool hook (C<PreToolUse>, C<PostToolUse>,
+C<PostToolUseFailure>) carries the C<call> it ran for.
+
+=item C<hook.message> -- what hooks say to the person: C<hook_event>,
+C<kind> (C<system> for a C<systemMessage>, C<error>, C<stopped> for a
+C<continue: false>) and C<text>.
+
+=item C<mcp.server> -- a configured MCP server changed its state:
+C<name>, C<scope>, C<transport>, C<status> (C<starting>, C<connected>,
+C<failed>, C<stopped>), C<reason> of a failure, C<tools> (how many tools it
+offers). The servers start with the run's first model request.
+
+=item C<mcp.tools_changed> -- a server announced a new tool list: C<name>,
+C<scope>. The next model request offers the new tools.
+
+=item C<agent.started> -- the C<agent> tool started a subagent: C<call>
+(the C<agent> call), C<agent>, C<agent_id>, C<background>,
+C<description>, C<session> (its own journal), C<model>, and C<resumed> for
+a continued agent.
+
+=item C<agent.finished> -- the subagent ended: C<call>, C<agent>,
+C<agent_id>, C<session>, C<status>.
+
+=item C<agent.warning> -- a subagent starts with a problem worth a look,
+such as a briefing over 64 kB of skill text: C<call>, C<agent>, C<message>.
+Before its C<agent.started>.
+
+=item C<worktree.entered> -- the session moved into a git worktree:
+C<path>, C<branch>, C<created> (whether C<enter_worktree> created it).
+
+=item C<worktree.exited> -- it left it: C<path>, C<branch>, C<removed>,
+C<reason> (C<exit_worktree>, C<clear>, C<session_end>).
 
 =item C<run.finished> -- always the last event, also when the run failed.
 Its fields are exactly the document of L</The document>; a consumer that
@@ -571,15 +687,19 @@ only wants the result reads the last event.
 
 =back
 
+C<call> is the id of a tool call within the raid (C<c1>, C<c2>, ...): the
+events of one call share it, also when calls run at the same time.
+
 A run that calls one tool, as C<--stream-json>:
 
-    {"engine":"openai","model":"gpt-4o-mini","seq":1,"time":1790000000.1,"type":"run.started","version":1}
+    {"cwd":"/src/app","engine":"openai","model":"gpt-4o-mini","permission_mode":"default","raider_version":"0.504","run":"r1","seq":1,"session":"20261025-091500-3f2a","time":1790000000.1,"tools":["list_files","read_file","bash"],"type":"run.started","version":1}
     {"seq":2,"state":"running","time":1790000000.1,"type":"run.state","version":1}
-    {"arguments":{"command":"ls"},"name":"bash","seq":3,"time":1790000001.2,"type":"tool.call","version":1}
-    {"content":"...","name":"bash","ok":true,"seq":4,"size":42,"time":1790000001.3,"truncated":false,"type":"tool.result","version":1}
-    {"content":"There are ...","role":"assistant","seq":5,"time":1790000002.4,"type":"message","version":1}
-    {"seq":6,"state":"completed","time":1790000002.4,"type":"run.state","version":1}
-    {"elapsed":2.312,"metrics":{...},"response":"There are ...","seq":7,"status":"completed","time":1790000002.4,"type":"run.finished","version":1}
+    {"arguments":{"command":"ls"},"call":"c1","name":"bash","seq":3,"status":"dispatched","time":1790000001.2,"type":"tool.call","version":1}
+    {"call":"c1","content":"...","name":"bash","ok":true,"seq":4,"size":42,"status":"succeeded","time":1790000001.3,"truncated":false,"type":"tool.result","version":1}
+    {"input_tokens":1200,"model":"gpt-4o-mini","output_tokens":40,"purpose":"chat","seq":5,"time":1790000002.4,"type":"model.usage","version":1}
+    {"content":"There are ...","role":"assistant","seq":6,"time":1790000002.4,"type":"message","version":1}
+    {"seq":7,"state":"completed","time":1790000002.4,"type":"run.state","version":1}
+    {"elapsed":2.312,"metrics":{...},"response":"There are ...","seq":8,"session":{...},"status":"completed","time":1790000002.4,"type":"run.finished","version":1}
 
 Token deltas are not part of version 1. New event types may appear within a
 version, so a consumer must skip types it does not know.

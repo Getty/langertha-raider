@@ -1117,6 +1117,13 @@ Revision history for Langertha-Raider
     - The REPL banner no longer says "no API key required" for a -k key under
       --provider, and shows the provider alias.
 
+    - run.started names session, run, cwd, permission_mode, tools and
+      raider_version; run.finished and the --json document carry a reason
+      code whenever a run did not complete; permission.* and the tool
+      hooks' hook.ran name their call; a failed, refused or cancelled tool
+      call runs the PostToolUseFailure hooks; bin/raider documents every
+      stream event type (ADR 0034).
+
 
   [Tools]
     - edit_file takes replace_all, as Claude Code's Edit: every occurrence

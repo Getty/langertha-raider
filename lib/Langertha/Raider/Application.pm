@@ -1001,18 +1001,21 @@ sub _build_permissions {
 =method set_permission_mode
 
     my $from = $app->set_permission_mode( 'acceptEdits', '/permissions' );
+    $app->set_permission_mode( 'plan', 'enter_plan_mode', call => 'c3' );
 
 Switches the mode of L</permissions> (croaks on an unknown mode) and emits
-C<permission.mode> with C<from>, C<to> and C<why>. Returns the previous
+C<permission.mode> with C<from>, C<to>, C<why> and the given C<call> (the
+id of the tool call that switched it, ADR 0034). Returns the previous
 mode.
 
 =cut
 
 sub set_permission_mode {
-  my ($self, $mode, $why) = @_;
+  my ($self, $mode, $why, %o) = @_;
   my $from = $self->permissions->set_mode($mode, $why);
   $self->_mode_set_at_runtime(1);
-  $self->event('permission.mode', from => $from, to => $mode, why => $why // 'session');
+  $self->event('permission.mode', from => $from, to => $mode, why => $why // 'session',
+    defined $o{call} ? ( call => $o{call} ) : ());
   # Entering plan mode mounts exit_plan_mode for the next request.
   if ($mode eq 'plan' && !$self->_plan_mode_seen) {
     $self->_plan_mode_seen(1);
@@ -1089,7 +1092,32 @@ stands, with C<permission.denied> (C<by> C<worktree>).
 sub tool_gate {
   my ($self, %for) = @_;
   weaken(my $app = $self);
-  return sub { $app ? $app->_permission_gate($_[1], %for) : { verdict => 'deny', reason => 'the application is gone' } };
+  return sub {
+    return { verdict => 'deny', reason => 'the application is gone' } unless $app;
+    my $verdict = $app->_permission_gate($_[1], %for);
+    $app->_note_plan_call($_[1]) if !%for && $verdict->{verdict} eq 'allow';
+    return $verdict;
+  };
+}
+
+# The id of the main run's enter_plan_mode or exit_plan_mode call the gate
+# just let run, by tool name: its handler (_enter_plan_mode,
+# _exit_plan_mode) gets no call context, and names the call in its
+# permission.* events with it (ADR 0034).
+has _plan_calls => (is => 'ro', isa => 'HashRef', init_arg => undef, default => sub { {} });
+
+sub _note_plan_call {
+  my ($self, $call) = @_;
+  my $name = $call->{name} // '';
+  $self->_plan_calls->{$name} = $call->{call}
+    if defined $call->{call} && $name =~ /\A(?:enter|exit)_plan_mode\z/;
+  return;
+}
+
+sub _take_plan_call {
+  my ($self, $name) = @_;
+  my $id = delete $self->_plan_calls->{$name};
+  return defined $id ? ( call => $id ) : ();
 }
 
 # The tool gate of the raider (ADR 0005, ADR 0021): the policy decides; an
@@ -1176,11 +1204,12 @@ sub _ask_permission {
     rule      => $rule,
   });
   my $choice = ref $answer eq 'HASH' ? $answer->{answer} // 'no' : 'no';
+  my @call_id = defined $call->{call} ? ( call => $call->{call} ) : ();
   if ($choice eq 'session' && defined $rule) {
     $policy->add_session_rule($rule);
     my $again = $policy->decide($call);
     if ($again->{verdict} eq 'allow') {
-      $self->_gate_event($for, 'permission.granted', tool => $call->{name}, scope => 'session', rule => $rule, mode => $policy->mode);
+      $self->_gate_event($for, 'permission.granted', tool => $call->{name}, @call_id, scope => 'session', rule => $rule, mode => $policy->mode);
       return $again;
     }
     $choice = 'once';   # the rule does not cover the call after all: this call only
@@ -1190,7 +1219,7 @@ sub _ask_permission {
     my $approval = Langertha::Raider::Approval->for_call(%binding, call => $call);
     # The approval binds this exact call; held against it as it is about to run.
     if ($approval->covers($self->_approval_binding($for), call => $call)) {
-      $self->_gate_event($for, 'permission.granted', tool => $call->{name}, scope => 'once', mode => $policy->mode);
+      $self->_gate_event($for, 'permission.granted', tool => $call->{name}, @call_id, scope => 'once', mode => $policy->mode);
       return { verdict => 'allow', by => 'user', reason => 'approved once by the user', mode => $policy->mode };
     }
   }
@@ -1243,6 +1272,8 @@ sub _permission_event {
   my ($self, $for, $type, $call, $verdict, %more) = @_;
   $self->_gate_event($for, $type,
     tool => $call->{name},
+    # The call's id within the raid (ADR 0034), as on its tool.call.
+    ( defined $call->{call} ? ( call => $call->{call} ) : () ),
     ( defined $call->{source} ? ( tool_source => $call->{source} ) : () ),
     mode => $verdict->{mode},
     ( defined $verdict->{rule} ? ( rule => $verdict->{rule} ) : () ),
@@ -1374,7 +1405,7 @@ sub _pre_tool_use_f {
   ), tool_source => $call->{source} )->then(sub {
     my ( $r ) = @_;
     return Future->done({}) unless $app;
-    $app->_report_hooks($r, $for{on_event});
+    $app->_report_hooks($r, $for{on_event}, call => $call->{call});
     $app->_hook_stopped($for{on_stop}) if $r->stopped;
     my $arguments = $r->updated_input;
     if (defined( my $context = $r->context )) {
@@ -1415,21 +1446,23 @@ sub _hook_tag {
 sub _hook_stopped {
   my ($self, $on_stop) = @_;
   return $on_stop->() if $on_stop;
-  return $self->cancel_run;
+  return $self->cancel_run(reason => 'hook_stopped');
 }
 
 # Every hook of a result as hook.ran, its errors, systemMessages and a stop
 # as hook.message (ADR 0022). stdout and stderr go into the journal cut at
 # 2000 characters. To $emit (a sub-run's or the caller's stream), else to
-# event.
+# event. A tool hook's caller passes the call's id, 'call' of hook.ran (ADR
+# 0034).
 sub _report_hooks {
-  my ($self, $r, $emit) = @_;
+  my ($self, $r, $emit, %o) = @_;
   weaken(my $app = $self);
   $emit //= sub { $app->event(@_) if $app };
   my $cut = sub { my ( $s ) = @_; length $s > 2000 ? substr($s, 0, 2000).'... (cut)' : $s };
   for my $run (@{ $r->runs }) {
     $emit->('hook.ran',
       hook_event => $run->{event},
+      ( defined $o{call} ? ( call => $o{call} ) : () ),
       source     => $run->{source},
       command    => $run->{command},
       outcome    => $run->{outcome},
@@ -1501,7 +1534,8 @@ sub _stop_conversation_agents {
 # SessionStart once per session (startup, resume, clear), the results of
 # async hooks of earlier turns, then UserPromptSubmit. Returns { prompt }
 # -- the text with the hooks' context in front, as system-reminders -- or
-# { error } when a hook blocked or stopped the prompt. With no_prompt_hook
+# { error, reason } when a hook blocked or stopped the prompt (reason
+# hook_blocked or hook_stopped, ADR 0034). With no_prompt_hook
 # (a turn of notifications) UserPromptSubmit does not run.
 sub _hooks_before_prompt {
   my ($self, $hooks, $text, %o) = @_;
@@ -1521,8 +1555,8 @@ sub _hooks_before_prompt {
         source => $source, ( $self->has_model ? ( model => $self->model ) : () ),
       ) ));
       $self->_report_hooks($r);
-      return { error => 'A SessionStart hook stopped the session'.( defined $r->stop_reason ? ': '.$r->stop_reason : '' ) }
-        if $r->stopped;
+      return { error => 'A SessionStart hook stopped the session'.( defined $r->stop_reason ? ': '.$r->stop_reason : '' ),
+        reason => 'hook_stopped' } if $r->stopped;
       push @context, [ 'SessionStart', $r->context ] if defined $r->context;
     }
   }
@@ -1535,10 +1569,10 @@ sub _hooks_before_prompt {
   if (!$o{no_prompt_hook} && $hooks->has_hooks('UserPromptSubmit')) {
     my $r = $self->_await_hooks($hooks->run_f( UserPromptSubmit => $self->_hook_input( prompt => $text ) ));
     $self->_report_hooks($r);
-    return { error => 'The prompt was blocked by a UserPromptSubmit hook'.( defined $r->reason ? ': '.$r->reason : '' ) }
-      if $r->blocked;
-    return { error => 'A UserPromptSubmit hook stopped the run'.( defined $r->stop_reason ? ': '.$r->stop_reason : '' ) }
-      if $r->stopped;
+    return { error => 'The prompt was blocked by a UserPromptSubmit hook'.( defined $r->reason ? ': '.$r->reason : '' ),
+      reason => 'hook_blocked' } if $r->blocked;
+    return { error => 'A UserPromptSubmit hook stopped the run'.( defined $r->stop_reason ? ': '.$r->stop_reason : '' ),
+      reason => 'hook_stopped' } if $r->stopped;
     push @context, [ 'UserPromptSubmit', $r->context ] if defined $r->context;
   }
 
@@ -2592,7 +2626,8 @@ sub _build_enter_plan_tool_server { $_[0]->_plan_tools->enter_server }
 # Code's words, with raider's tool names.
 sub _enter_plan_mode {
   my ($self) = @_;
-  $self->set_permission_mode('plan', 'enter_plan_mode') unless $self->permissions->mode eq 'plan';
+  my @call_id = $self->_take_plan_call('enter_plan_mode');
+  $self->set_permission_mode('plan', 'enter_plan_mode', @call_id) unless $self->permissions->mode eq 'plan';
   return ( "Entered plan mode. You should now focus on exploring the codebase and designing an implementation approach.\n\n"
     ."In plan mode, you should:\n"
     ."1. Thoroughly explore the codebase to understand existing patterns\n"
@@ -2610,6 +2645,7 @@ sub _enter_plan_mode {
 # the final answer. In Claude Code's words where it has them (ADR 0026).
 sub _exit_plan_mode {
   my ($self, $plan) = @_;
+  my @call_id = $self->_take_plan_call('exit_plan_mode');
   my $mode = $self->permissions->mode;
   return ( '<tool_use_error>You are not in plan mode. To enter plan mode, call the enter_plan_mode tool first. '
     .'If your plan was already approved, continue with implementation.</tool_use_error>', 1 )
@@ -2618,10 +2654,10 @@ sub _exit_plan_mode {
   return ( $self->_denied_text({ name => 'exit_plan_mode' },
     'nobody can approve the plan in this run. Stay in plan mode and give the plan as your final answer.'), 1 )
     unless $review;
-  $self->event('permission.asked', tool => 'exit_plan_mode', mode => $mode, reason => 'review of the plan');
+  $self->event('permission.asked', tool => 'exit_plan_mode', @call_id, mode => $mode, reason => 'review of the plan');
   my $answer = $review->($plan) // {};
   if ($answer->{approve}) {
-    $self->set_permission_mode('default', 'exit_plan_mode');
+    $self->set_permission_mode('default', 'exit_plan_mode', @call_id);
     return ( 'User has approved your plan. You can now start coding. Start with updating your todo list if applicable'
       ."\n\nThe permission mode is now default.\n\n## Approved Plan:\n".( $plan // '' ), 0 );
   }
@@ -4045,10 +4081,19 @@ Returns the outcome as a hash reference: C<status> (C<completed>,
 C<failed>, or C<cancelled> after L</cancel_run>), C<elapsed> (seconds, to
 the millisecond), C<result> (the L<Langertha::Raider::Result>, also of a
 cancelled run), C<response> (its text) and C<metrics> of a completed run,
-C<error> of a failed one, and C<session> (C<id>, C<path>) when there is
-one. An empty C<$text> runs nothing and returns nothing.
+C<error> of a failed one, C<reason> of one that did not complete (see
+L</end_run>; a failed run says C<run_setup> when L</begin_run> croaked,
+C<hook_blocked> or C<hook_stopped> when a C<UserPromptSubmit> or
+C<SessionStart> hook blocked or stopped it, C<max_iterations> or
+C<engine_error> when the raid ended so, else C<error>), and C<session>
+(C<id>, C<path>) when there is one. An empty C<$text> runs nothing and
+returns nothing.
 
 =cut
+
+# The reason of a run that ended with $status when the caller named none
+# (ADR 0034); a cancel names its own (cancel_run).
+my %DEFAULT_REASON = ( failed => 'error', interrupted => 'signal', refused => 'refused' );
 
 # The ADR 0015 event types the journal records from the events of a run;
 # run.finished is written by end_run.
@@ -4093,7 +4138,7 @@ sub run_prompt {
     my $error = $@;
     die $error unless $self->_run;
     chomp $error;
-    return $self->end_run(failed => error => $error);
+    return $self->end_run(failed => error => $error, reason => 'run_setup');
   }
   my $reminders = $o{reminders};
   $reminders = undef unless defined $reminders && length $reminders;
@@ -4111,7 +4156,8 @@ sub run_prompt {
       chomp $error;
       return $self->end_run(failed => error => $error);
     }
-    return $self->end_run(failed => error => $before->{error}) if defined $before->{error};
+    return $self->end_run(failed => error => $before->{error}, reason => $before->{reason})
+      if defined $before->{error};
     $prompt = $before->{prompt};
   }
   $prompt = $reminders."\n\n".$prompt if defined $reminders;
@@ -4126,7 +4172,9 @@ sub run_prompt {
   }) {
     my $error = $@;
     chomp $error;
-    return $self->end_run(failed => error => $error);
+    # The raider marks the ends it knows (max_iterations, engine_error).
+    return $self->end_run(failed => error => $error,
+      reason => $self->_has_raider ? $self->_raider->_end_reason : undef);
   }
   if (blessed $result && $result->can('is_cancelled') && $result->is_cancelled) {
     return { %{ $self->end_run('cancelled') }, result => $result };
@@ -4157,8 +4205,13 @@ sub _with_resource_mentions {
       allow_source => '/review allowed-tools', model => 'sonnet', attach_reads => \@files_read);
 
 Starts a run as L</run_prompt> does, for a surface that drives L</run>
-itself: the run gets the next run id of C<session>, C<run.started> (engine
-and model) and C<run.state> C<running>. L</end_run> ends it. When the
+itself: the run gets the next run id of C<session>, C<run.started> and
+C<run.state> C<running>. C<run.started> names C<engine> and C<model>,
+with a session its id (C<session>) and the run id (C<run>), C<cwd> (the
+L</working_root>), C<permission_mode>, C<tools> -- the names the model is
+offered, in order; left out while a configured MCP server has not connected
+yet, as before the first raid, since L</raid_f> starts them -- and
+C<raider_version> (ADR 0034). L</end_run> ends it. When the
 L</working_root> moved since the mission was compiled, the mission is
 compiled again first (L</reload_mission>), so it names the new working
 directory.
@@ -4198,6 +4251,7 @@ sub begin_run {
     $self->reload_mission if $self->_has_raider;
   }
   $self->file_read_state->clear;
+  %{ $self->_plan_calls } = ();
   $self->_seed_read_state;
   $self->slash_command_class->record_reads({ files_read => $o{attach_reads} }, $self->file_read_state)
     if ref $o{attach_reads} eq 'ARRAY';
@@ -4213,8 +4267,17 @@ sub begin_run {
   $self->_run($run);
   $self->permissions->add_run_rules($o{allow_rules}, $o{allow_source} // 'run')
     if ref $o{allow_rules} eq 'ARRAY';
+  # The tools the model sees, when they are settled now: while a configured
+  # MCP server has not connected yet (raid_f starts them), they are not, and
+  # the field is left out rather than guessed (ADR 0034).
+  my $tools = eval { $self->raider->_tool_names_now };
   $self->event('run.started', engine => $self->engine_name,
-    defined $run_model ? ( model => $run_model ) : $self->has_model ? ( model => $self->model ) : ());
+    defined $run_model ? ( model => $run_model ) : $self->has_model ? ( model => $self->model ) : (),
+    $session ? ( session => $session->id, run => $run->{run} ) : (),
+    cwd             => $self->working_root,
+    permission_mode => $self->permissions->mode,
+    $tools ? ( tools => $tools ) : (),
+    raider_version  => Langertha::Raider->VERSION);
   $self->event('run.state', state => 'running');
   $self->_use_run_model($run, $run_model) if defined $run_model;
   return;
@@ -4247,10 +4310,14 @@ sub _seed_read_state {
     my $end = $app->end_run(interrupted => signal => 'TERM');
 
 Ends the run in progress, if there is one: C<run.finished> with
-C<$status> and the given C<error> and C<signal> into the journal, with the
-given C<metrics> or else the raider's, then C<run.state> with C<$status>.
+C<$status>, C<reason> and the given C<error> and C<signal> into the
+journal, with the given C<metrics> or else the raider's, then C<run.state>
+with C<$status>. C<reason> (ADR 0034) is set whenever C<$status> is not
+C<completed>: the C<reason> given, else for C<cancelled> the one
+L</cancel_run> recorded (default C<user_cancel>), else C<error> for
+C<failed>, C<signal> for C<interrupted>, C<refused> for C<refused>.
 It clears the run rules of the policy and puts back the engine a run
-C<model> replaced (L</begin_run>), whatever the status. Returns C<status>, C<elapsed>, the C<error> and C<signal> given and, with a
+C<model> replaced (L</begin_run>), whatever the status. Returns C<status>, C<reason>, C<elapsed>, the C<error> and C<signal> given and, with a
 session, C<session> (C<id>, C<path>) -- or nothing outside a run. A
 surface calls it for a run it ends itself, as the command line does for a
 signal.
@@ -4261,8 +4328,14 @@ sub end_run {
   my ( $self, $status, %fields ) = @_;
   my $run = $self->_run or return;
   my $elapsed = 0 + sprintf('%.3f', Time::HiRes::time() - $run->{t0});
+  # Why a run that did not complete ended (ADR 0034): the code the caller
+  # gives, else the one the status implies.
+  my $reason = $status eq 'completed' ? undef
+    : $fields{reason} // ( $status eq 'cancelled' ? $run->{cancel_reason} // 'user_cancel' : undef )
+      // $DEFAULT_REASON{$status} // 'error';
   my %end = (
     status  => $status,
+    defined $reason ? ( reason => $reason ) : (),
     ( map { defined $fields{$_} ? ( $_ => $fields{$_} ) : () } qw( error signal ) ),
     elapsed => $elapsed,
   );
@@ -4284,6 +4357,7 @@ sub end_run {
 =method cancel_run
 
     $app->cancel_run;
+    $app->cancel_run( reason => 'hook_stopped' );
 
 Cancels the run in progress (ADR 0009): its raid stops at the next safe
 point (L<Langertha::Raider/cancel>) and L</run_prompt> ends the run as
@@ -4292,16 +4366,18 @@ gets its C<tool.result> with status C<cancelled>. Every foreground subagent
 running for it (L<Langertha::Raider::Subagent>) is cancelled too, with the
 subagents it started, and its C<agent> call ends with an error result.
 Background subagents keep running (ADR 0027 E<sect>3; L</stop_background>
-ends them). Tool subprocesses are not signalled here; that is the surface's to do. Only records the
+ends them). C<reason> becomes the run's C<reason> (default C<user_cancel>;
+the first cancel of a run names it). Tool subprocesses are not signalled here; that is the surface's to do. Only records the
 request, so a signal handler may call it. Outside a run it does nothing
 and returns false.
 
 =cut
 
 sub cancel_run {
-  my ( $self ) = @_;
+  my ( $self, %o ) = @_;
   my $run = $self->_run or return 0;
   $run->{cancelled} = 1;
+  $run->{cancel_reason} //= $o{reason} // 'user_cancel';
   $self->_raider->cancel if $self->_has_raider;
   $_->cancel for grep { defined } values %{ $self->_live_subagents };
   return 1;

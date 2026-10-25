@@ -108,7 +108,7 @@ subtest 'deny: the tool does not run, one tool.call and one failed tool.result' 
   );
   $raider->raid('go');
   is( $mcp->calls, [], 'not run' );
-  is( $seen[0], { name => 'record', source => 'engine:1', arguments => { note => 'x' } }, 'the hook gets the canonical call' );
+  is( $seen[0], { name => 'record', source => 'engine:1', arguments => { note => 'x' }, call => 'c1' }, 'the hook gets the canonical call, with its id' );
   is( $engine->captured->[0]{result}{isError}, JSON->true, 'an error result' );
   like( text_of( $engine->captured->[0] ), qr/\ATool call 'record' was denied: PreToolUse hook: no\z/, 'with the reason' );
   is( [ map { $_->{type} } @$events ], [qw( tool.call tool.result )], 'one tool.call, one tool.result' );
@@ -135,7 +135,7 @@ subtest 'new arguments are schema-checked and gated, and run' => sub {
   );
   $raider->raid('go');
   is( $mcp->calls, [ [ record => { note => 'from the hook' } ] ], 'the hook\'s arguments run' );
-  is( $gated[0], { name => 'record', source => 'engine:1', arguments => { note => 'from the hook' },
+  is( $gated[0], { name => 'record', source => 'engine:1', arguments => { note => 'from the hook' }, call => 'c1',
     hook => { decision => 'allow', reason => 'ok' } }, 'the gate sees them and the hook\'s allow' );
 
   ( $raider, $engine, $mcp ) = raider(

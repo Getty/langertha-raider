@@ -96,7 +96,7 @@ subtest '--json: SIGINT during the model request writes the cancelled document' 
   my ( $status, $stdout, $stderr ) = cancelled_run('--json');
   died_of($status, 'INT', '--json');
   my $doc = eval { $json->decode($stdout) };
-  is($doc, { version => 1, status => 'cancelled', elapsed => D(),
+  is($doc, { version => 1, status => 'cancelled', reason => 'signal', elapsed => D(),
     session => { id => T(), path => T() } },
     'one document, status cancelled') or diag 'stdout: '.$stdout."\nstderr: ".$stderr;
   unlike($stderr, qr/ at \S+ line \d+/, 'no Perl error on stderr') or diag $stderr;
@@ -192,7 +192,7 @@ SKIP: {
     ok($tool_pid, 'bash started and wrote its pid') or return;
     died_of($status, 'INT', 'raider');
     my $doc = eval { $json->decode($stdout) };
-    is($doc, { version => 1, status => 'interrupted', signal => 'INT', elapsed => D(),
+    is($doc, { version => 1, status => 'interrupted', reason => 'signal', signal => 'INT', elapsed => D(),
       session => { id => T(), path => T() } },
       'one document, status interrupted') or diag 'stdout: '.$stdout;
     ok($gone->($tool_pid), 'the bash subprocess is gone');

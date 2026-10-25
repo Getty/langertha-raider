@@ -125,7 +125,7 @@ sub run_prompt {
   # first SIGINT only cancels, so the run still ends by itself.
   my $cancelled_by;
   local $SIG{INT}  = $o{catch_signals} ? sub {
-    return $cancelled_by = 'INT' if !$cancelled_by && $self->cancel_run;
+    return $cancelled_by = 'INT' if !$cancelled_by && $self->cancel_run( reason => 'signal' );
     $self->interrupt(INT => $machine, $self->elapsed_since($t0));
   } : $SIG{INT};
   local $SIG{TERM} = $o{catch_signals} ? sub { $self->interrupt(TERM => $machine, $self->elapsed_since($t0)) } : $SIG{TERM};
@@ -207,7 +207,7 @@ sub interrupt {
   }
   elsif ($machine) {
     $machine->event('run.state', state => 'interrupted');
-    $self->_document($machine, { status => 'interrupted', signal => $signal, elapsed => $elapsed });
+    $self->_document($machine, { status => 'interrupted', reason => 'signal', signal => $signal, elapsed => $elapsed });
   }
   unless ($machine) {
     $self->output->say_meta('interrupted (SIG'.$signal.')');
@@ -219,6 +219,7 @@ sub interrupt {
 =method cancel_run
 
     my $cancelling = $runner->cancel_run;
+    my $cancelling = $runner->cancel_run( reason => 'signal' );
 
 Cancels the run in progress without leaving the process -- the REPL's
 first Ctrl-C, and the first C<SIGINT> of a one-shot run: asks the application to cancel it
@@ -228,14 +229,16 @@ C<bash> (L<Langertha::Raider::BashTools/background_pids>), which belong to the
 session, not to the run. The run ends as
 C<cancelled> at its next safe point and L</run_prompt> returns false,
 after C<turn cancelled> (or with a machine, the C<cancelled> document).
+C<reason> is the document's C<reason> (default C<user_cancel>); the first
+C<SIGINT> of a one-shot run gives C<signal>.
 Only records and signals, so the signal handler calls it. Returns false
 when no run is in progress.
 
 =cut
 
 sub cancel_run {
-  my ( $self ) = @_;
-  return 0 unless $self->_current && $self->app->cancel_run;
+  my ( $self, %o ) = @_;
+  return 0 unless $self->_current && $self->app->cancel_run( defined $o{reason} ? ( reason => $o{reason} ) : () );
   # The configured MCP servers belong to the session too (ADR 0029).
   $self->terminate_children( keep => [ $self->app->bash_tools->background_pids, $self->app->mcp_pids ] );
   return 1;
@@ -261,7 +264,7 @@ sub abandon {
   my $machine = $current->{machine} or return;
   unless ($end) {
     # Interrupted before the application started the run.
-    $end = { status => 'interrupted', signal => $signal, elapsed => $self->elapsed_since($current->{t0}) };
+    $end = { status => 'interrupted', reason => 'signal', signal => $signal, elapsed => $self->elapsed_since($current->{t0}) };
     $machine->event('run.state', state => 'interrupted');
   }
   $self->_document($machine, $end);
@@ -438,7 +441,7 @@ sub _document {
   my ( $self, $machine, $end ) = @_;
   if ($machine) {
     $machine->finish($machine->document($end->{status},
-      map { exists $end->{$_} ? ( $_ => $end->{$_} ) : () } qw( response metrics error signal elapsed session )));
+      map { exists $end->{$_} ? ( $_ => $end->{$_} ) : () } qw( response metrics reason error signal elapsed session )));
   }
   return $end->{status} eq 'completed' ? 1 : 0;
 }

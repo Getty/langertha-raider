@@ -137,11 +137,17 @@ sub versions { (1) }
     my $doc = $machine->document(failed => error => $message, elapsed => $s);
 
 The document of a finished run: C<version>, C<status> and the given fields.
+A document whose C<status> is not C<completed> always has a C<reason> (ADR
+0034): the one given, else C<error> for C<failed>, C<user_cancel> for
+C<cancelled>, C<signal> for C<interrupted>, C<refused> for C<refused>.
 
 =cut
 
+my %DEFAULT_REASON = ( failed => 'error', cancelled => 'user_cancel', interrupted => 'signal', refused => 'refused' );
+
 sub document {
   my ( $self, $status, %fields ) = @_;
+  $fields{reason} //= $DEFAULT_REASON{$status} // 'error' unless $status eq 'completed';
   return { %fields, version => $self->version, status => $status };
 }
 

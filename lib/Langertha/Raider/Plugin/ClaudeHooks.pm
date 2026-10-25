@@ -1,10 +1,11 @@
 package Langertha::Raider::Plugin::ClaudeHooks;
 our $VERSION = '0.504';
-# ABSTRACT: Internal plugin that runs the Claude Code PostToolUse hooks on tool results
+# ABSTRACT: Internal plugin that runs the Claude Code PostToolUse and PostToolUseFailure hooks on tool results
 
 use Moose;
 use namespace::autoclean;
 use Future::AsyncAwait;
+use JSON::MaybeXS ();
 
 extends 'Langertha::Plugin';
 
@@ -37,6 +38,15 @@ C<additionalContext> and the reason of a C<decision: "block"> (or the
 stderr of exit 2) -- the tool already ran, so this is feedback for the
 model,
 
+=item * runs the C<PostToolUseFailure> hooks instead on a result that is
+an error (C<isError>: the tool failed, the gate or a C<PreToolUse> hook
+refused the call, its arguments did not fit the schema) or was cut off by
+a cancel (ADR 0034), with C<tool_name>, C<tool_input>, C<tool_use_id> (the
+model's id of the call, when it gave one), C<error> (the result's text)
+and C<is_interrupt> (true for a cancel), and appends their feedback the
+same way. Claude Code fires it for neither a refused call nor a schema
+error; raider does, as ADR 0034 decides,
+
 =back
 
 each as one more text block wrapped in C<< <system-reminder> >>, the way
@@ -44,8 +54,8 @@ L<Langertha::Raider::Plugin::NestedMemory> appends. It sits after
 NestedMemory and before the Events plugin, so C<tool.result> in the
 journal is the result as the model gets it. The hook runs are reported by
 the application (C<hook.ran>, C<hook.message>) to L</on_event>; a
-C<continue: false> calls L</on_stop> (default: the run is cancelled). A
-failed call (C<isError>) fires no hook: C<PostToolUseFailure> is not run.
+C<continue: false> calls L</on_stop> (default: the run is cancelled). The
+C<hook.ran> of these tool hooks carry the call's id (C<call>, ADR 0034).
 
 =attr app
 
@@ -94,24 +104,33 @@ has on_stop => (
 );
 
 async sub plugin_after_tool_call {
-  my ( $self, $name, $input, $result ) = @_;
+  my ( $self, $name, $input, $result, $ctx ) = @_;
   my $app = $self->app or return $result;
   return $result unless ref $result eq 'HASH';
+  $ctx = {} unless ref $ctx eq 'HASH';
   my @blocks;
   if (defined( my $pre = $app->_take_tool_hook_context($input) )) {
     push @blocks, $pre;
   }
   my $hooks = $app->hooks;
-  if ($hooks && $hooks->has_hooks('PostToolUse') && !$result->{isError} && !$result->{cancelled}) {
-    my $r = await $hooks->run_f( PostToolUse => $app->_hook_input(
+  my $failed = $result->{isError} || $result->{cancelled};
+  my $event = $failed ? 'PostToolUseFailure' : 'PostToolUse';
+  if ($hooks && $hooks->has_hooks($event)) {
+    my $r = await $hooks->run_f( $event => $app->_hook_input(
       ( $self->has_input ? $self->input->() : () ),
-      tool_name     => $name,
-      tool_input    => ref $input eq 'HASH' ? $input : {},
-      tool_response => { content => $result->{content} // [] },
+      tool_name  => $name,
+      tool_input => ref $input eq 'HASH' ? $input : {},
+      $failed ? (
+        ( defined $ctx->{id} ? ( tool_use_id => $ctx->{id} ) : () ),
+        error        => $self->_result_text($result),
+        is_interrupt => $result->{cancelled} ? JSON::MaybeXS->true : JSON::MaybeXS->false,
+      ) : (
+        tool_response => { content => $result->{content} // [] },
+      ),
     ) );
-    $app->_report_hooks($r, $self->has_on_event ? $self->on_event : undef);
+    $app->_report_hooks($r, $self->has_on_event ? $self->on_event : undef, call => $ctx->{call});
     $app->_hook_stopped($self->has_on_stop ? $self->on_stop : undef) if $r->stopped;
-    my $tag = $app->_hook_tag('PostToolUse', $name);
+    my $tag = $app->_hook_tag($event, $name);
     push @blocks, map { $tag.' hook feedback: '.$_ } @{ $r->reasons } ? @{ $r->reasons } : '(no reason given)'
       if $r->blocked;
     push @blocks, $tag.' hook additional context: '.$r->context if defined $r->context;
@@ -124,6 +143,13 @@ async sub plugin_after_tool_call {
       map { { type => 'text', text => "<system-reminder>\n".$_."\n</system-reminder>" } } @blocks,
     ],
   };
+}
+
+# The text blocks of a result, one per line: the error of a failed call.
+sub _result_text {
+  my ( $self, $result ) = @_;
+  my $content = ref $result->{content} eq 'ARRAY' ? $result->{content} : [];
+  return join "\n", map { $_->{text} } grep { ref $_ eq 'HASH' && defined $_->{text} } @$content;
 }
 
 __PACKAGE__->meta->make_immutable;

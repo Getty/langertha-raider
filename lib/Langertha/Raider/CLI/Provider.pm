@@ -232,7 +232,8 @@ With a machine format (C<--json> and friends), the C<--provider> that could
 not run is also a document on stdout, as for a run that failed (ADR 0013):
 C<status> C<refused> for a policy refusal (address, redirect, origin, a
 stored alias that no longer matches), else C<failed> (also for a usage
-error, whose exit status stays C<2>), C<error> and the C<provider> target.
+error, whose exit status stays C<2>), C<reason> C<provider>, C<error> and
+the C<provider> target.
 The message on L</err> is kept.
 
 =cut
@@ -241,6 +242,7 @@ sub failure_document {
   my ( $self, $machine, $status, $error, $target ) = @_;
   $machine->finish($machine->document(
     ( $status eq 'refused' ? 'refused' : 'failed' ),
+    reason   => 'provider',
     error    => $self->output->error_text($error),
     provider => $target,
   ));

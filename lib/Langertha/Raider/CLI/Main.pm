@@ -1313,7 +1313,7 @@ sub _provider_failure {
   my ( $self, $machine, $status, $error, $target, $t0 ) = @_;
   return unless $machine;
   $machine->finish($machine->document($status,
-    error => $error, provider => $target, elapsed => Time::HiRes::time() - $t0));
+    reason => 'provider', error => $error, provider => $target, elapsed => Time::HiRes::time() - $t0));
   return;
 }
 

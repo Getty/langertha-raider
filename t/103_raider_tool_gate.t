@@ -277,13 +277,13 @@ subtest 'the gate sees the canonical call: name, source, final arguments' => sub
   );
   ok run_f($raider->raid_f('go'))->is_final, 'final';
   is \@seen, [
-    { name => 'bash',  source => 'engine:1',
+    { name => 'bash',  source => 'engine:1', call => 'c1',
       arguments => { cmd => 'ls', rewritten => 1, approved => T() } },
-    { name => 'greet', source => 'inline',
+    { name => 'greet', source => 'inline', call => 'c2',
       arguments => { rewritten => 1, approved => T() } },
-    { name => 'raider_wait', source => 'raider',
+    { name => 'raider_wait', source => 'raider', call => 'c3',
       arguments => { seconds => 0, rewritten => 1, approved => T() } },
-  ], 'each call as plugin_before_tool_call handed it on, with the source it runs on';
+  ], 'each call as plugin_before_tool_call handed it on, with the source it runs on and its id';
   is $mcp->calls, [ [ bash => { cmd => 'ls', rewritten => 1, approved => T() } ] ],
     'and those are the arguments the tool ran with';
 };

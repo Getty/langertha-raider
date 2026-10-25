@@ -267,3 +267,8 @@ Plan `perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.m
 the coordinator's decisions for k155 (design questions decided by the stream, maintainer's
 go-ahead). Complements ADR 0005 (gate), ADR 0016 (one loop), ADR 0018 (`ToolNames`),
 ADR 0019 (settings, plugins), ADR 0021 (permissions).
+
+## Update (2026-10-25, PostToolUseFailure)
+
+`PostToolUseFailure` is supported (ADR 0034): it fires when a tool call fails, is refused by
+the gate or is cancelled; `PostToolUse` stays success-only.

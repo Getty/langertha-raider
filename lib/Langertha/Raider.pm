@@ -489,6 +489,37 @@ has _continuation => (
   clearer => 'clear_continuation',
 );
 
+# Why the last raid died, when it died in a way a surface can name:
+# 'max_iterations' (the tool loop ran out) or 'engine_error' (a model
+# request failed, or its reply was an error). Set right before the die, so
+# the text of the error stays what it was; cleared when a raid or respond
+# starts. Internal (ADR 0017): Langertha::Raider::Application reads it for
+# the reason of a failed run (ADR 0034).
+has _end_reason => (
+  is       => 'rw',
+  isa      => 'Maybe[Str]',
+  init_arg => undef,
+  clearer  => '_clear_end_reason',
+);
+
+# Runs $code; a die in it is an engine error (_end_reason), rethrown as it is.
+sub _engine_call {
+  my ( $self, $code ) = @_;
+  my $list = wantarray;
+  my @result;
+  unless ( eval { @result = $list ? $code->() : scalar $code->(); 1 } ) {
+    $self->_end_reason('engine_error');
+    die $@;
+  }
+  return $list ? @result : $result[0];
+}
+
+# $f, with a failure marked as an engine error (_end_reason).
+sub _engine_future {
+  my ( $self, $f ) = @_;
+  return $f->else(sub { $self->_end_reason('engine_error'); Future->fail(@_) });
+}
+
 # A requested cancel (ADR 0009): the flag, and a future completed on the
 # loop that the waits of a raid race against.
 has cancel_requested => (
@@ -769,7 +800,9 @@ has _tools_dirty => (
 #   $gate->( $raider, { name => ..., source => ..., arguments => ... } )
 # source is where the call runs: 'raider' (self-tools), 'inline', 'engine:N'
 # (the engine's Nth MCP server), 'catalog:NAME'; undef for a tool no source
-# offers. It answers { verdict => 'allow' }, { verdict => 'deny', reason => ... }
+# offers. The call also carries 'call', its id within the raid (c1, c2, ...),
+# when a plugin recorded one in the call's context (the Events plugin does).
+# It answers { verdict => 'allow' }, { verdict => 'deny', reason => ... }
 # or { verdict => 'ask', reason => ... }; a refusal may carry 'message', the
 # whole text of the error result the model gets (else the raider words it
 # from the reason). Without a gate every call runs.
@@ -787,7 +820,8 @@ has _tool_gate => (
 # The tool hook (ADR 0022, Claude Code's PreToolUse): a CodeRef the code that
 # builds the raider hands in. Every tool call -- after plugin_before_tool_call,
 # before the inputSchema check and the gate -- is put to it as its canonical
-# call { name, source, arguments }; it answers a Future of a hash:
+# call { name, source, arguments } (and 'call', as for _tool_gate); it
+# answers a Future of a hash:
 #   decision  => 'deny' | 'ask' | 'allow' | undef
 #   reason    => why (for deny and ask)
 #   arguments => a hash that replaces the call's arguments, or undef
@@ -2045,6 +2079,58 @@ async sub _gather_tools_f {
   return ( \@all_tools, \%tool_server_map, \%tool_source );
 }
 
+# Internal (ADR 0017), read by Langertha::Raider::Application for the 'tools'
+# of run.started (ADR 0034): the names the next raid would send the model, in
+# _gather_tools_f's order and with its first-wins dedup, worked out without
+# waiting. A source whose tools are not settled yet -- a configured MCP server
+# that is not connected (or failed or stopped) yet, or a list_tools that does
+# not answer at once -- makes the answer undef: the caller then leaves the
+# field out rather than guessing.
+sub _tool_names_now {
+  my ( $self ) = @_;
+  my $engine = $self->active_engine;
+  my ( @names, %seen );
+  my $take = sub { for (@_) { push @names, $_ unless $seen{$_}++ } };
+  my $listed = sub {
+    my ( $mcp ) = @_;
+    if ( $mcp->can('status') && $mcp->can('tool_names') ) {
+      my $status = $mcp->status;
+      return [ $mcp->tool_names ] if $status eq 'connected';
+      return [] if $status eq 'failed' || $status eq 'stopped';
+      return undef;
+    }
+    my $f = $mcp->list_tools;
+    unless ( $f->is_ready ) { $f->cancel; return undef }
+    return undef unless $f->is_done;
+    my ($tools) = $f->get;
+    return [ map { $_->{name} } @{ $tools // [] } ];
+  };
+
+  if ($engine->can('mcp_servers')) {
+    for my $mcp (@{$engine->mcp_servers}) {
+      my $list = $listed->($mcp) // return undef;
+      $take->(@$list);
+    }
+  }
+  if ($self->has_inline_mcp) {
+    my $list = $listed->($self->_inline_mcp) // return undef;
+    $take->(@$list);
+  }
+  else {
+    $take->(map { $_->{name} } @{$self->tools});
+    for my $plugin (@{$self->plugin_instances}) {
+      my $tools = $plugin->self_tools;
+      $take->(map { $_->{name} } @$tools) if $tools && @$tools;
+    }
+  }
+  for my $name (sort keys %{$self->_active_catalog_mcps}) {
+    my $list = $listed->($self->_active_catalog_mcps->{$name}) // return undef;
+    $take->(@$list);
+  }
+  $take->(map { $_->{name} } @{$self->_self_tool_definitions}) if $self->has_raider_mcp;
+  return \@names;
+}
+
 async sub _initialize_inline_mcp_f {
   my ( $self ) = @_;
   return if $self->has_inline_mcp;
@@ -2125,6 +2211,7 @@ sub _check_engine_connect {
     next unless $engine->can('async_loop') && $engine->async_loop
       && $engine->can('url') && defined $engine->url;
     my $error = connect_error($engine->url) // next;
+    $self->_end_reason('engine_error');
     croak "Raider $name: $error";
   }
   return;
@@ -2137,6 +2224,7 @@ sub raid_f {
 
 async sub _raid_f {
   my ( $self, @messages ) = @_;
+  $self->_clear_end_reason;
   $self->_check_engine_loops;
   $self->_check_engine_connect;
   my $engine = $self->active_engine;
@@ -2167,7 +2255,7 @@ async sub _raid_f {
   # Auto-compress if threshold exceeded
   if ($self->has_max_context_tokens && $self->has_last_prompt_tokens
       && $self->_last_prompt_tokens > $self->max_context_tokens * $self->context_compress_threshold) {
-    await $self->compress_history_f();
+    await $self->_engine_future($self->compress_history_f());
   }
 
   # Plugin hook: transform input messages before raid
@@ -2437,14 +2525,15 @@ async sub _run_raid_loop {
     await $self->_prepare_iteration_f($state, $iteration, $start_iteration);
     my $iter = $self->_start_iteration_trace($state, $iteration);
 
-    my $response = await $self->_send_turn_f($state);
+    my $response = await $self->_engine_future($self->_send_turn_f($state));
     return $self->_cancelled_result($state) if $self->cancel_requested;
     my $data = await $self->_read_turn_f($state, $iter, $response);
 
     # Read this turn's reply (see _read_tool_loop_reply): a 200 body that is an
     # error croaks instead of silently ending the raid with '', Gemini thought
     # parts stay out of the final text, and truncated calls are dropped.
-    my ( $tool_calls, $final_text, $echo_data ) = $self->_read_tool_loop_reply($state->{engine}, $data);
+    my ( $tool_calls, $final_text, $echo_data ) = $self->_engine_call(sub {
+      $self->_read_tool_loop_reply($state->{engine}, $data) });
 
     # No tool calls means done — use the reply's final text
     unless (@$tool_calls) {
@@ -2459,6 +2548,7 @@ async sub _run_raid_loop {
     $self->_append_tool_turn($state, $echo_data, \@results);
   }
 
+  $self->_end_reason('max_iterations');
   die "Raider tool loop exceeded ".$self->max_iterations." iterations";
 }
 
@@ -2567,10 +2657,11 @@ async sub _read_turn_f {
   my $engine = $state->{engine};
 
   unless ($response->is_success) {
+    $self->_end_reason('engine_error');
     die "".(ref $engine)." raid request failed: ".$response->status_line."\n".$response->content;
   }
 
-  my $data = $engine->parse_response($response);
+  my $data = $self->_engine_call(sub { $engine->parse_response($response) });
 
   # Plugin hook: inspect/transform LLM response
   for my $plugin (@{$self->plugin_instances}) {
@@ -2870,9 +2961,12 @@ async sub _dispatch_tool_call_f {
   # the gate, so arguments it replaces are checked and gated like the
   # model's. A deny does not run the call; its error result takes the
   # plugin_after_tool_call path like any other.
+  # The call's id within the raid (the Events plugin's c1, c2, ...), when a
+  # plugin recorded one: the hook and the gate name it in their events.
+  my @call_id = defined $ctx->{call} ? ( call => $ctx->{call} ) : ();
   my $hook;
   if ($self->_has_tool_hook) {
-    $hook = await $self->_tool_hook->($self, { name => $name, source => $source, arguments => $input });
+    $hook = await $self->_tool_hook->($self, { name => $name, source => $source, arguments => $input, @call_id });
     $hook = {} unless ref $hook eq 'HASH';
     if ( ( $hook->{decision} // '' ) eq 'deny' ) {
       my $result = await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0,
@@ -2906,6 +3000,7 @@ async sub _dispatch_tool_call_f {
     name      => $name,
     source    => $source,
     arguments => $input,
+    @call_id,
     ( $hook && defined $hook->{decision} && $hook->{decision} =~ /\A(?:allow|ask)\z/
       ? ( hook => { decision => $hook->{decision}, reason => $hook->{reason} } ) : () ),
   });
@@ -3170,6 +3265,7 @@ async sub _respond_f {
   my ( $self, $answer ) = @_;
   croak "No pending interaction — call raid_f first"
     unless $self->has_continuation;
+  $self->_clear_end_reason;
   $self->_check_engine_loops;
   $self->_check_engine_connect;
 
