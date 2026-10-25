@@ -1,0 +1,80 @@
+{"action":"edit","agent":"strom-d","detail":"in-progress","task_id":159,"ts":"2026-10-19T10:16:49Z"}
+{"action":"handoff","agent":"strom-d","detail":"review","task_id":159,"ts":"2026-10-19T10:16:55Z"}
+{"action":"move","agent":"strom-d","detail":"done","task_id":159,"ts":"2026-10-19T10:26:07Z"}
+{"action":"edit","agent":"strom-d","detail":"done","task_id":159,"ts":"2026-10-19T10:26:08Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":163,"ts":"2026-10-19T10:34:55Z"}
+{"action":"move","agent":"strom-d2","detail":"in-progress","task_id":163,"ts":"2026-10-19T10:35:29Z"}
+{"action":"edit","agent":"strom-a2","detail":"in-progress","task_id":161,"ts":"2026-10-19T10:39:23Z"}
+{"action":"edit","agent":"strom-d2","detail":"in-progress","task_id":163,"ts":"2026-10-19T10:56:03Z"}
+{"action":"edit","agent":"strom-d2","detail":"in-progress","task_id":163,"ts":"2026-10-19T10:57:12Z"}
+{"action":"edit","agent":"strom-d2","detail":"in-progress","task_id":163,"ts":"2026-10-19T11:08:13Z"}
+{"action":"handoff","agent":"strom-d2","detail":"review","task_id":163,"ts":"2026-10-19T11:08:19Z"}
+{"action":"move","agent":"strom-d2","detail":"done","task_id":163,"ts":"2026-10-19T11:16:49Z"}
+{"action":"edit","agent":"strom-d2","detail":"done","task_id":163,"ts":"2026-10-19T11:16:50Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":164,"ts":"2026-10-19T11:18:54Z"}
+{"action":"move","agent":"strom-m1","detail":"in-progress","task_id":164,"ts":"2026-10-19T11:20:16Z"}
+{"action":"edit","agent":"strom-m1","detail":"in-progress","task_id":164,"ts":"2026-10-19T11:23:46Z"}
+{"action":"edit","agent":"strom-m1","detail":"in-progress","task_id":164,"ts":"2026-10-19T11:30:13Z"}
+{"action":"edit","agent":"strom-m1","detail":"in-progress","task_id":164,"ts":"2026-10-19T11:42:47Z"}
+{"action":"edit","agent":"strom-m1","detail":"in-progress","task_id":164,"ts":"2026-10-19T11:43:54Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":165,"ts":"2026-10-19T11:51:53Z"}
+{"action":"move","agent":"strom-c","detail":"in-progress","task_id":165,"ts":"2026-10-19T11:52:36Z"}
+{"action":"edit","agent":"strom-c","detail":"in-progress","task_id":165,"ts":"2026-10-19T11:57:28Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":166,"ts":"2026-10-19T11:59:56Z"}
+{"action":"move","agent":"claude-k166","detail":"in-progress","task_id":166,"ts":"2026-10-19T12:00:47Z"}
+{"action":"edit","agent":"strom-c","detail":"in-progress","task_id":165,"ts":"2026-10-19T12:04:24Z"}
+{"action":"edit","agent":"strom-c","detail":"in-progress","task_id":165,"ts":"2026-10-19T12:06:09Z"}
+{"action":"edit","agent":"strom-c","detail":"in-progress","task_id":165,"ts":"2026-10-19T12:07:47Z"}
+{"action":"edit","agent":"claude-k166","detail":"in-progress","task_id":166,"ts":"2026-10-19T12:09:22Z"}
+{"action":"handoff","agent":"claude-k166","detail":"review","task_id":166,"ts":"2026-10-19T12:09:29Z"}
+{"action":"edit","agent":"strom-m1","detail":"in-progress","task_id":164,"ts":"2026-10-19T12:13:02Z"}
+{"action":"edit","agent":"strom-m1","detail":"in-progress","task_id":164,"ts":"2026-10-19T12:13:45Z"}
+{"action":"edit","agent":"strom-a2","detail":"in-progress","task_id":161,"ts":"2026-10-19T12:15:44Z"}
+{"action":"move","agent":"claude-k166","detail":"done","task_id":166,"ts":"2026-10-19T12:16:33Z"}
+{"action":"edit","agent":"strom-c","detail":"in-progress","task_id":165,"ts":"2026-10-19T12:34:42Z"}
+{"action":"edit","agent":"strom-m1","detail":"in-progress","task_id":164,"ts":"2026-10-19T12:40:02Z"}
+{"action":"handoff","agent":"strom-c","detail":"review","task_id":165,"ts":"2026-10-19T12:50:18Z"}
+{"action":"edit","agent":"strom-m1","detail":"in-progress","task_id":164,"ts":"2026-10-19T12:55:41Z"}
+{"action":"move","agent":"strom-c","detail":"done","task_id":165,"ts":"2026-10-19T13:02:38Z"}
+{"action":"edit","agent":"strom-c","detail":"done","task_id":165,"ts":"2026-10-19T13:02:40Z"}
+{"action":"edit","agent":"strom-m1","detail":"in-progress","task_id":164,"ts":"2026-10-19T13:04:21Z"}
+{"action":"edit","agent":"strom-m1","detail":"in-progress","task_id":164,"ts":"2026-10-19T13:10:08Z"}
+{"action":"handoff","agent":"strom-m1","detail":"review","task_id":164,"ts":"2026-10-19T13:18:42Z"}
+{"action":"move","agent":"strom-m1","detail":"done","task_id":164,"ts":"2026-10-19T13:28:49Z"}
+{"action":"edit","agent":"strom-m1","detail":"done","task_id":164,"ts":"2026-10-19T13:28:50Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":167,"ts":"2026-10-19T13:29:07Z"}
+{"action":"move","agent":"m2-worker","detail":"in-progress","task_id":167,"ts":"2026-10-19T13:30:03Z"}
+{"action":"edit","agent":"m2-worker","detail":"in-progress","task_id":167,"ts":"2026-10-19T13:38:38Z"}
+{"action":"edit","agent":"strom-a2","detail":"in-progress","task_id":161,"ts":"2026-10-19T13:42:00Z"}
+{"action":"handoff","agent":"strom-a2","detail":"review","task_id":161,"ts":"2026-10-19T13:52:53Z"}
+{"action":"edit","agent":"m2-worker","detail":"in-progress","task_id":167,"ts":"2026-10-19T14:04:27Z"}
+{"action":"edit","agent":"m2-worker","detail":"in-progress","task_id":167,"ts":"2026-10-19T14:05:48Z"}
+{"action":"edit","agent":"m2-worker","detail":"in-progress","task_id":167,"ts":"2026-10-19T14:13:08Z"}
+{"action":"move","agent":"strom-a2","detail":"done","task_id":161,"ts":"2026-10-20T20:31:53Z"}
+{"action":"edit","agent":"strom-a2","detail":"done","task_id":161,"ts":"2026-10-20T20:31:55Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":168,"ts":"2026-10-20T20:32:21Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":169,"ts":"2026-10-20T20:32:23Z"}
+{"action":"move","agent":"m3-worker","detail":"in-progress","task_id":169,"ts":"2026-10-20T20:33:41Z"}
+{"action":"move","agent":"a3-worktrees","detail":"in-progress","task_id":168,"ts":"2026-10-20T20:33:53Z"}
+{"action":"edit","agent":"a3-worktrees","detail":"in-progress","task_id":168,"ts":"2026-10-20T20:37:38Z"}
+{"action":"edit","agent":"m2-worker","detail":"in-progress","task_id":167,"ts":"2026-10-20T20:50:41Z"}
+{"action":"handoff","agent":"m2-worker","detail":"review","task_id":167,"ts":"2026-10-20T20:50:47Z"}
+{"action":"edit","agent":"a3-worktrees","detail":"in-progress","task_id":168,"ts":"2026-10-20T21:10:55Z"}
+{"action":"move","agent":"m2-worker","detail":"done","task_id":167,"ts":"2026-10-20T21:13:01Z"}
+{"action":"handoff","agent":"m3-worker","detail":"review","task_id":169,"ts":"2026-10-20T21:35:34Z"}
+{"action":"move","agent":"m3-worker","detail":"done","task_id":169,"ts":"2026-10-20T21:45:31Z"}
+{"action":"handoff","agent":"a3-worktrees","detail":"review","task_id":168,"ts":"2026-10-20T22:06:32Z"}
+{"action":"edit","agent":"a3-worktrees","detail":"review","task_id":168,"ts":"2026-10-20T22:06:43Z"}
+{"action":"move","agent":"a3-worktrees","detail":"done","task_id":168,"ts":"2026-10-20T22:15:23Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":23,"ts":"2026-10-25T01:12:50Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":23,"ts":"2026-10-25T01:12:56Z"}
+{"action":"move","agent":"raider-worker-k23","detail":"in-progress","task_id":23,"ts":"2026-10-25T01:13:03Z"}
+{"action":"edit","agent":"raider-worker-k23","detail":"in-progress","task_id":23,"ts":"2026-10-25T01:23:29Z"}
+{"action":"handoff","agent":"raider-worker-k23","detail":"review","task_id":23,"ts":"2026-10-25T01:51:29Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":170,"ts":"2026-10-25T01:52:12Z"}
+{"action":"move","agent":"raider-worker-k23","detail":"done","task_id":23,"ts":"2026-10-25T01:53:30Z"}
+{"action":"edit","agent":"raider-worker-k23","detail":"done","task_id":23,"ts":"2026-10-25T01:53:37Z"}
+{"action":"move","agent":"raider-k170-coord","detail":"in-progress","task_id":170,"ts":"2026-10-25T05:00:37Z"}
+{"action":"edit","agent":"raider-k170-coord","detail":"in-progress","task_id":170,"ts":"2026-10-25T05:03:20Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"in-progress","task_id":170,"ts":"2026-10-25T05:03:38Z"}
+{"action":"edit","agent":"raider-worker-k170","detail":"in-progress","task_id":170,"ts":"2026-10-25T05:03:44Z"}
