@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-10-25T06:30:27Z
+id: 175
+priority: low
+status: backlog
+tags:
+- events
+- cli
+- needs-decision
+title: 'Stream P2/P3: Zwischentexte als message, tool.result status denied, text.delta'
+updated: 2026-10-25T06:30:27Z
+---
+
+Aus Events-Audit 2026-10-25 / ADR 0034. (a) Assistant-Text neben Tool-Calls kommt nicht als message. (b) tool.call status dispatched + failed bei Gate-/Hook-Ablehnung, nur ueber permission.denied unterscheidbar -> status denied (neuer Enum-Wert in v1?). (c) text.delta (ADR 0013 vorgesehen). (d) Optional: Subagent-Events in den Stream des Aufrufers (Claude Code --forward-subagent-text).
