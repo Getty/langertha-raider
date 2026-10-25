@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-10-25T06:30:21Z
+id: 174
+priority: low
+status: backlog
+tags:
+- hooks
+- events
+- needs-decision
+title: 'Kompaktierung + fehlende Hooks (P2): context.compacted, PreCompact/PostCompact,
+  SessionEnd, StopFailure, PermissionRequest, tool_use_id fuer PreToolUse'
+updated: 2026-10-25T06:30:21Z
+---
+
+Aus Events-Audit 2026-10-25 / ADR 0034. compress_history_f laeuft ohne Event und Hook (Claude Code: system/compact_boundary, PreCompact/PostCompact, SessionStart compact). SessionEnd, StopFailure, PermissionRequest nicht gefeuert; PreToolUse ohne tool_use_id (ADR 0022 Follow-up). Braucht ADR-Nachtrag zu 0022/0034.
