@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-10-25T07:39:13Z
+claimed_by: raider-worker-k172
+class: standard
+completed: 2026-10-25T07:39:13Z
+created: 2026-10-25T06:29:56Z
+id: 172
+priority: medium
+started: 2026-10-25T06:30:48Z
+status: done
+tags:
+- cli
+- events
+- hooks
+- adr-0034
+title: 'Stream auf Claude-Code-Stand (P1): run.started init-Felder, run.finished.reason,
+  call an permission.*/hook.ran, PostToolUseFailure, Doku+Tests aller Typen'
+updated: 2026-10-25T07:39:19Z
+---
+
+ADR 0034 (neu, uncommittet im Tree; dazu Update ADR 0022). Umfang: (1) run.started +session, run, cwd, permission_mode, tools, raider_version. (2) reason-Code auf --json-Dokument/run.finished bei status != completed (max_iterations Raider.pm:~2462, engine_error, hook_stopped, user_cancel, signal, provider, ...), Codes in bin/raider POD. (3) call an permission.* und tool-bezogenem hook.ran. (4) Hook PostToolUseFailure (Fehler, Gate-Ablehnung, Abbruch). (5) MACHINE OUTPUT in bin/raider listet alle Stream-Typen (heute 13 undokumentiert) + je ein Test ueber --stream-json; Drifts: tool.*-Beispiel ohne call/status, message nicht nur Endantwort, Hooks::Result SYNOPSIS hook.run->hook.ran. Alles additiv in v1. Aus Events-Audit 2026-10-25.
+
+Progress: run.started fields, reason codes, call on permission.*/hook.ran, PostToolUseFailure, MACHINE OUTPUT POD done; new tests t/50_cli_stream_event_catalog.t, t/50_cli_stream_run_reasons.t, t/144_post_tool_use_failure.t pass; full suite running. Drift found (not in scope): an unknown tool name ('No such tool available') returns from _call_mcp_tool_f without _after_tool_call_f -> tool.call without tool.result in stream/journal, and no PostToolUse(Failure). Proposed card for this board.
+
+ADR 0034 P1 implemented, tree commit-ready (not committed). run.started: session, run, cwd, permission_mode, tools, raider_version (tools omitted while a configured MCP server is not connected yet; session/run omitted without session). reason on --json/run.finished: max_iterations, engine_error, hook_blocked, hook_stopped, run_setup, provider, user_cancel, signal, error, refused. call on permission.* (incl. plan tools) and tool-scoped hook.ran. PostToolUseFailure (error, gate/PreToolUse refusal, cancel) with tool_name/tool_input/tool_use_id/error/is_interrupt. bin/raider MACHINE OUTPUT lists all 21 types. New tests t/50_cli_stream_event_catalog.t, t/50_cli_stream_run_reasons.t, t/144_post_tool_use_failure.t; exact-hash tests updated (t/39,49,51,52,103,143). Full suite PASS (235 files, 2060 tests). Drift for a new card: unknown tool name returns without _after_tool_call_f (tool.call without tool.result).
+
+2026-10-25 07:39 Committed as 430345a. Follow-up card for the unknown tool name is k177. Deviation from Claude Code: PostToolUseFailure also fires on permission denial and schema errors. Full suite: 235 files, 2060 tests, PASS, only t/live/10_perl_task.t and t/live/20_claude_task.t skipped (RAIDER_LIVE_TASKS unset).
