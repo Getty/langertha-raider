@@ -109,8 +109,9 @@ sub run_init {
   my @args = @_;
   my %opt;
   local @ARGV = @args;
-  Getopt::Long::GetOptions(\%opt, 'name=s', 'engine=s', 'persona=s', 'help');
+  Getopt::Long::GetOptions(\%opt, 'name=s', 'engine=s', 'provider=s', 'persona=s', 'help');
   return print_init_help() if $opt{help};
+  if (my $why = provider_problem(\%opt)) { die 'raider hall init: '.$why."\n" }
 
   my $name = $opt{name};
   if (!$name) {
@@ -128,6 +129,7 @@ sub run_init {
   $yml{longhouse} = 0;
   $yml{raiders}{$name} = {
     ($opt{engine} ? (engine => $opt{engine}) : ()),
+    (defined $opt{provider} ? (provider => $opt{provider}) : ()),
     persona => $persona,
     packs => [],
   };
@@ -148,12 +150,13 @@ sub run_add_raider {
   my %opt;
   local @ARGV = @args;
   Getopt::Long::GetOptions(\%opt,
-    'engine=s', 'persona=s', 'model=s', 'pack=s@', 'help');
+    'engine=s', 'provider=s', 'persona=s', 'model=s', 'pack=s@', 'help');
   return print_add_raider_help() if $opt{help};
 
   my $name = shift @ARGV;
-  die "Usage: raider hall add-raider NAME [--engine E] [--persona P] [--model M] [--pack X]...\n"
+  die "Usage: raider hall add-raider NAME [--engine E | --provider ALIAS] [--persona P] [--model M] [--pack X]...\n"
     unless $name;
+  if (my $why = provider_problem(\%opt)) { die 'raider hall add-raider: '.$why."\n" }
 
   my $dir = cwd;
   my $cfg_file = path($dir)->child('.raider-hall.yml');
@@ -167,6 +170,7 @@ sub run_add_raider {
 
   $yml->{raiders}{$name} = {
     ($opt{engine} ? (engine => $opt{engine}) : ()),
+    (defined $opt{provider} ? (provider => $opt{provider}) : ()),
     persona  => $opt{persona} // 'caveman',
     ($opt{model} ? (model => $opt{model}) : ()),
     packs    => $opt{pack} // [],
@@ -185,8 +189,10 @@ Append a raider entry to .raider-hall.yml.
 
 Options:
   --engine NAME      Engine (default: none, the raider decides)
+  --provider ALIAS   A provider alias stored with 'raider provider add'
+                     (not with --engine; a host or URL is refused)
   --persona NAME     A pack used as the raider's persona (default: caveman)
-  --model NAME       Model override
+  --model NAME       Model override (with --provider: one of its manifest)
   --pack NAME        Additional pack (repeatable)
 EOF
   exit 0;
@@ -194,7 +200,7 @@ EOF
 
 sub print_init_help {
   print <<"EOF";
-raider hall init [--name NAME] [--engine ENGINE] [--persona PERSONA]
+raider hall init [--name NAME] [--engine ENGINE | --provider ALIAS] [--persona PERSONA]
 
 Bootstrap a new hall directory with a starter .raider-hall.yml.
 Prompts interactively if --name not provided.
@@ -202,9 +208,21 @@ Prompts interactively if --name not provided.
 Options:
   --name NAME        Name of the first raider
   --engine NAME      Engine (default: none, the raider decides)
+  --provider ALIAS   A provider alias stored with 'raider provider add'
+                     (not with --engine; a host or URL is refused)
   --persona NAME     A pack used as the raider's persona (default: caveman)
 EOF
   exit 0;
+}
+
+# Why --provider (with --engine) cannot go into a raider entry: the hall's
+# own check of an entry, so what is written is what the hall accepts.
+sub provider_problem {
+  my ( $opt ) = @_;
+  return Langertha::Raider::Hall->_provider_problem({
+    (defined $opt->{engine}   ? ( engine   => $opt->{engine} )   : ()),
+    (defined $opt->{provider} ? ( provider => $opt->{provider} ) : ()),
+  });
 }
 
 sub run_start {

@@ -1180,6 +1180,11 @@ Revision history for Langertha-Raider
       failed" (the raider was started nevertheless) and no event reached the
       subscriber.
 
+    - A hall raider entry takes provider: ALIAS (raider hall add-raider and
+      init --provider ALIAS) and is spawned with --provider ALIAS. A host or
+      origin, an alias that is not stored in ~/.raider/config.yml, and
+      provider together with engine are refused before writing and at spawn.
+
 
 0.503     2026-10-01 21:25:19Z
 

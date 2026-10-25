@@ -718,6 +718,7 @@ longhouse: false                 # true: longhouse/lib of the hall on every raid
 raiders:
   bjorn:    { engine: anthropic, persona: caveman, packs: [git-guru] }
   lagertha: { engine: openai, model: gpt-4o-mini, persona: polite, packs: [testing-fu] }
+  ivar:     { provider: acme, model: example-model }   # an alias from raider provider add
 cron:
   - { name: 1bjorn, cron: '*/15 * * * *', mission: 'check CI, ping #eng-alerts if red' }
 telegram:
@@ -727,6 +728,12 @@ telegram:
 acp:
   port: 38421
 ```
+
+`provider:` takes only an alias stored with `raider provider add` (`raider hall
+add-raider NAME --provider ALIAS` writes it); the hall starts that raider with
+`--provider ALIAS`. A host or https origin is refused, so is an alias that is not
+stored, and so is `provider` next to `engine` — the hall runs unattended and never
+fetches a provider nobody accepted.
 
 Named raiders spawn as child processes; a `1name` prefix (e.g. `spawn 1bjorn`)
 forces at most one instance, queuing overlapping missions FIFO. Cron entries fire

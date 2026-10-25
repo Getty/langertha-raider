@@ -37,15 +37,21 @@ one. C<raider-hall SUBCOMMAND --help> prints the options of a subcommand.
 
 =head1 COMMANDS
 
-=opt init [--name NAME] [--engine ENGINE] [--persona PACK]
+=opt init [--name NAME] [--engine ENGINE | --provider ALIAS] [--persona PACK]
 
 Write a starter F<.raider-hall.yml> with one raider in the current
 directory; asks for the name without C<--name>. Never overwrites one.
 
-=opt add-raider NAME [--engine E] [--persona P] [--model M] [--pack X]...
+=opt add-raider NAME [--engine E | --provider ALIAS] [--persona P] [--model M] [--pack X]...
 
 Add a raider entry to F<.raider-hall.yml>. A running hall reads the file
 once at start, so restart it to use the new entry.
+
+C<--provider ALIAS> (here and for C<init>) names a provider binding stored
+with C<raider provider add>; the hall starts the raider with
+C<--provider ALIAS>. A host or https origin is refused, and so is
+C<--provider> together with C<--engine>; see
+L<Langertha::Raider::Hall/CONFIG FILE>.
 
 =opt start [DIR] [--daemon] [--acp-port N] [--acp-host H]
 

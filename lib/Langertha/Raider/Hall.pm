@@ -127,6 +127,21 @@ C<--engine> and the spawned raider decides itself: the engine from its
 F<.raider.yml> first, then autodetection from the API keys in the
 environment.
 
+C<provider> on a raider entry is the alias of a provider binding that
+C<raider provider add ALIAS HOST> stored in F<~/.raider/config.yml> (ADR
+0007); the hall passes it as C<--provider ALIAS>, and C<model> next to it
+as C<--model>, which picks the model among the manifest's. Only an alias:
+a host, C<HOST:PORT> or https origin is refused, and so is an alias that
+is not stored -- the hall runs unattended and never fetches a provider
+nobody accepted, so it never passes C<--allow-internal> either (that is
+part of the binding). C<provider> and C<engine> on one entry exclude each
+other. A refused entry starts no raider: the spawn answers with an
+C<error>, and the slot log gets a C<[hall] raider NAME: ...> line. ACP
+sessions of such a raider run on the same provider.
+
+    raiders:
+      ivar: { provider: acme, model: example-model, persona: caveman }
+
 =head1 ENVIRONMENT
 
 =env RAIDER_HALL_RAIDER_BIN
@@ -192,6 +207,7 @@ use IO::Socket::UNIX;
 use File::Which ();
 use Net::Async::HTTP;
 use Langertha::Raider::Binary qw( packed_binary );
+use Langertha::Raider::Config;
 use Langertha::Raider::Hall::ACP;
 use Langertha::Raider::Hall::Cron;
 use Langertha::Raider::Hall::MCP;
@@ -199,6 +215,7 @@ use Langertha::Raider::Hall::PermissionChannel;
 use Langertha::Raider::Hall::Protocol;
 use Langertha::Raider::Hall::Raider;
 use Langertha::Raider::Hall::Telegram;
+use Langertha::Raider::Provider::Binding;
 use Langertha::Raider::SessionStore;
 
 has root => (
@@ -1152,8 +1169,17 @@ sub _spawn_raider {
   my ($self, $slot, $base_name, $mission, $telegram, $binding) = @_;
 
   my $raider_config = $self->config->{raiders}{$base_name} // {};
+  # provider: only a stored alias, never a host the hall would fetch
+  # unattended; the run is refused before anything starts.
+  if (defined(my $why = $self->_provider_refusal($raider_config))) {
+    my $log_dir = $self->_log_dir;
+    $log_dir->mkpath unless -d $log_dir;
+    $log_dir->child("${slot}.log")->append_utf8('[hall] raider '.$base_name.': '.$why."; mission not run\n");
+    return { error => 'raider '.$base_name.': '.$why };
+  }
   # No engine configured: leave it to raider (.raider.yml, then key autodetection).
   my $engine = $raider_config->{engine};
+  my $provider = $raider_config->{provider};
   my $model = $raider_config->{model};
   my @packs = @{ $raider_config->{packs} // [] };
   # The persona is one more pack.
@@ -1164,6 +1190,7 @@ sub _spawn_raider {
 
   my @cmd = ($self->_raider_command, '--stream-json');
   push @cmd, '--engine', $engine if $engine;
+  push @cmd, '--provider', $provider if defined $provider;
   push @cmd, '--model', $model if $model;
   push @cmd, '--pack', $_ for @packs;
   push @cmd, '--permission-mode', $raider_config->{permission_mode}
@@ -1344,6 +1371,45 @@ sub _build_lib_target {
   my ($self) = @_;
   my $target = $self->config->{preferred_lib_target} // '.raider/lib';
   return path($target)->absolute($self->root)->stringify;
+}
+
+sub config_class  { 'Langertha::Raider::Config' }
+sub binding_class { 'Langertha::Raider::Provider::Binding' }
+
+# Why the provider of a raider entry cannot be used, as the entry stands:
+# not with engine, and only an alias -- a HOST or https origin is refused.
+# Nothing for an entry without provider. Hall::CLI checks with it before it
+# writes an entry.
+sub _provider_problem {
+  my ($self, $entry) = @_;
+  return unless defined $entry->{provider};
+  my $provider = $entry->{provider};
+  return 'provider and engine exclude each other; the provider manifest decides the engine'
+    if defined $entry->{engine};
+  return "provider '".$provider."' is no alias; the hall runs only on a binding stored with"
+    .' raider provider add ALIAS HOST, never on a host or URL'
+    unless $self->binding_class->valid_alias($provider);
+  return;
+}
+
+# _provider_problem, and the alias must be stored in ~/.raider/config.yml
+# now: raider --provider takes an unknown name for a host and would fetch
+# it, which the unattended hall never does.
+sub _provider_refusal {
+  my ($self, $entry) = @_;
+  if (defined(my $why = $self->_provider_problem($entry))) {
+    return $why;
+  }
+  return unless defined $entry->{provider};
+  my $alias = $entry->{provider};
+  my $config = $self->config_class->new(root => $self->root->stringify);
+  my $providers = eval { $config->providers };
+  return 'provider: '.($@ =~ s/\s+\z//r) unless $providers;
+  return "provider alias '".$alias."' is not stored in "
+    .($config->home_file // '~/.raider/config.yml')
+    .'; bind it first with raider provider add '.$alias.' HOST'
+    unless exists $providers->{$alias};
+  return;
 }
 
 # Raider entry keys the hall does not read. A config that still carries

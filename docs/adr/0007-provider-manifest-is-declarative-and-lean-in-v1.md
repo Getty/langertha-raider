@@ -55,3 +55,12 @@ endpoint, not the model. Example model entry:
 { "id": "example-model", "endpoint_ref": "chat",
   "capabilities": { "tools_native": true, "streaming": true } }
 ```
+
+## Update (2026-10-25, Hall)
+
+A hall raider reaches a discovery provider only through a stored alias: the raider entry
+takes `provider: ALIAS` (and `raider hall add-raider --provider ALIAS`), and the hall
+spawns the raider with `--provider ALIAS`. A bare HOST and `--allow-internal` are not
+accepted there — the hall runs unattended, so it only uses bindings that were consented to
+and pinned with `raider provider add`. `provider` and `engine` on one entry exclude each
+other. ACP sessions served by the hall inherit this through their raider.
