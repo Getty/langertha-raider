@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-10-25T06:30:33Z
+id: 176
+priority: low
+status: backlog
+tags:
+- acp
+- events
+- adr-0010
+title: 'ACP: reiche session/update (tool_call, plan, current_mode_update, usage_update)
+  im stdio-Server; Hall-ACP leitet raider.* nicht mehr als Modelltext weiter'
+updated: 2026-10-25T06:30:33Z
+---
+
+Aus Events-Audit 2026-10-25 / ADR 0033 Consequences. Hall/ACP.pm sendet nur agent_message_chunk mit Endantwort; sonstige raider.*-Events gehen als JSON-Text in agent_message_chunk (else-Zweig) - sieht im Editor wie Modellantwort aus. request_permission toolCallId perm-N passt zu keinem tool_call. Ziel laut Audit: im stdio-ACP-Server von ADR 0010 (existiert noch nicht) aus tool.*/todo.updated/permission.mode/model.usage abbilden. Den else-Zweig kurzfristig streichen ist ein eigener kleiner Schritt.
