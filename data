@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-10-25T05:20:25Z
+claimed_by: raider-worker-k170
+class: standard
+completed: 2026-10-25T06:29:20Z
+created: 2026-10-25T01:52:12Z
+id: 170
+priority: low
+started: 2026-10-25T05:00:36Z
+status: done
+tags:
+- provider-discovery
+- needs-decision
+title: 'raider --provider NAME: unbekannter Alias wird still als Host abgerufen'
+updated: 2026-10-25T06:29:20Z
+---
+
+Aus k23: raider --provider NAME behandelt einen Namen, der kein gespeicherter Alias in ~/.raider/config.yml ist, als Host und holt https://NAME/.well-known/langertha.json ephemer ab (ohne Zustimmung). Die Hall umgeht das seit k23 mit eigener Alias-Pruefung (Hall::_provider_refusal). Frage an Getty: soll die CLI bei einem Namen ohne Punkt/Port, der kein Alias ist, verweigern statt abzurufen (Tippfehler im Alias -> unerwarteter Netzabruf)? Nebenpunkt: abgelehnte Hall-Missionen (Telegram/Cron/Queue) melden den Grund nur im Slot-Log, kein Event.
+
+2026-10-25 ENTSCHEIDUNG Getty: (1) Name ohne Punkt/Port/Schema ist immer Alias; nicht gespeichert -> Usage-Fehler mit Verweis auf raider provider add, kein Abruf; Hosts brauchen Punkt oder https:// (ADR 0007 Update). (2) Ablehnungs-Event fuer Hall-Missionen gewuenscht -> eigene Karte nach Event-Audit gegen Claude-Code-Stand; #170 deckt nur (1).
+
+2026-10-25 05:10 Impl: Fetch::target_url croaks on a no-scheme target without dot and without :PORT ('is no host ... a bare name is a provider alias') -> covers --provider HOST path, provider inspect, provider add (all exit 2). Main: valid_alias(target) is always the alias path; not stored -> EXIT_USAGE, message points to 'raider provider add NAME HOST', via _provider_failure (--json/--stream-json failed document, as the other --provider usage errors). Hall::_provider_refusal untouched. Tests t/67, t/68, t/73 (old 'any other name still is a host' subtest replaced).
+
+2026-10-25 05:20 Done: bare --provider NAME (valid alias shape) is always the alias path; not stored -> exit 2, message 'provider alias NAME is not stored in ~/.raider/config.yml; bind it with: raider provider add NAME HOST', --json/--stream-json failed document via _provider_failure, no Fetch call. Fetch::target_url rejects a no-scheme target without dot and without :PORT (provider inspect/add exit 2, --provider host path). Hall::_provider_refusal untouched. Docs: Main POD/--help/inspect usage, bin/raider POD, README. Tests: t/67 (target_url bad/good shapes), t/68 (inspect bare name), t/73 (old 'any other name is a host' subtest replaced: unknown bare name usage error with mocked Fetch counting calls, stored alias runs, host:PORT/localhost:PORT/host.tld/https://localhost go the host way, provider add bare HOST refused); new subtests fail on HEAD code. Full suite PASS 230 files/2001 tests, skipped only t/82_live_raider.t and t/live/*. Open: '[::1]' without port now refused (strict ADR reading) - confirm; provider add still says 'needs a terminal' (exit 1) before checking HOST shape when headless.
+
+2026-10-25 06:29 Committed as edfd681. Open: (a) '[::1]' without port is now refused - maintainer decides; (b) provider add without a terminal says 'needs a terminal' (exit 1) before the HOST check. Hall rejection event is its own card.
