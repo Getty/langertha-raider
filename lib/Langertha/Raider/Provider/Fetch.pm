@@ -190,10 +190,11 @@ has ssl_options => (
     my $url = $fetch->target_url('https://provider.example/');
 
 The manifest URL a command-line target names: C<HOST>, C<HOST:PORT>,
-C<[IPv6]:PORT> or an C<https> URL whose path is empty, C</> or the
-well-known path itself. Without C<https://> a host needs a dot
-(C<host.tld>) or a port (C<host:PORT>): a bare name such as C<acme> is a
-provider alias, never a host (ADR 0007, update 2026-10-25). Croaks with the
+C<[IPv6]>, C<[IPv6]:PORT> or an C<https> URL whose path is empty, C</> or
+the well-known path itself. Without C<https://> a host needs a dot
+(C<host.tld>), a port (C<host:PORT>) or brackets (C<[::1]>, an IPv6
+literal): a bare name such as C<acme> is a provider alias, never a host
+(ADR 0007, update 2026-10-25). Croaks with the
 reason on anything else: another scheme (C<http> included), userinfo, a
 query, a fragment, another path or a bare name.
 
@@ -219,9 +220,9 @@ sub target_url {
   croak 'provider target must not carry a fragment' if defined $uri->fragment;
   my $host = $uri->host;
   croak "provider target '".$target."' names no host" unless defined $host && length $host;
-  croak "provider target '".$target."' is no host: a host needs a dot (host.tld), a port (host:PORT) "
-    .'or https://; a bare name is a provider alias (raider provider add)'
-    unless $has_scheme || $host =~ /\./ || $target =~ /:\d+\z/;
+  croak "provider target '".$target."' is no host: a host needs a dot (host.tld), a port (host:PORT), "
+    .'brackets ([IPv6]) or https://; a bare name is a provider alias (raider provider add)'
+    unless $has_scheme || $host =~ /\./ || $target =~ /:\d+\z/ || ( $target =~ /\A\[[^\]]+\]\z/ && $host =~ /:/ );
   croak "provider target '".$target."' has an invalid port" unless $uri->port =~ /\A\d+\z/ && $uri->port > 0 && $uri->port < 65536;
   my $path = $uri->path;
   croak 'the manifest lives at '.WELL_KNOWN_PATH.' of the origin; give the host or the origin, not '.$path

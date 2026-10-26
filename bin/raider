@@ -820,7 +820,8 @@ C<Authorization> header and no cookie, and is bounded:
 
 =item * C<https> only; a target with userinfo, a query, a fragment or
 another path than the well-known one is a usage error. Without
-C<https://> a host needs a dot (C<host.tld>) or a port (C<host:PORT>); a
+C<https://> a host needs a dot (C<host.tld>), a port (C<host:PORT>) or
+brackets (an IPv6 literal such as C<[::1]>, with or without a port); a
 bare name such as C<acme> or C<localhost> is a provider alias, not a host
 (C<localhost:8443> or C<https://localhost> is one).
 

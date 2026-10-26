@@ -674,7 +674,7 @@ sub run {
       unless ( exists $config->providers->{$alias} ) {
         my $text = "raider --provider: provider alias '".$alias."' is not stored in "
           .( $config->home_file // '~/.raider/config.yml' )
-          .'; bind it with: raider provider add '.$alias.' HOST (a host needs a dot, a port or https://)';
+          .'; bind it with: raider provider add '.$alias.' HOST (a host needs a dot, a port, [IPv6] or https://)';
         $self->_warn($text."\n");
         $self->_provider_failure($machine, failed => $text, $alias, $t0);
         return EXIT_USAGE;

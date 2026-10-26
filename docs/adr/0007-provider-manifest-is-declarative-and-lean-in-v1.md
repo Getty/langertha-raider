@@ -71,3 +71,5 @@ other. ACP sessions served by the hall inherit this through their raider.
 it is not stored, raider stops with a usage error that points to `raider provider add` and
 fetches nothing — a typo in an alias never turns into a network fetch. A host needs a dot
 (`host.tld`, `host.tld:PORT`) or an explicit `https://` origin.
+A bracketed IPv6 literal (`[::1]`, `[2001:db8::1]`) is a host too, with or without a port:
+it can never be mistaken for an alias (decided 2026-10-26).

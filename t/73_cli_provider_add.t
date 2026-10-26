@@ -458,6 +458,13 @@ subtest 'a stored alias still runs; a dot or a port is still a HOST (k170)' => s
     like( $err, qr/^raider --provider: refused: .*127\.0\.0\.1.*\(loopback address\)/, "$target: went the host way" );
     is( count_requests(), $before, "$target: refused before any request" );
   }
+
+  # A bracketed IPv6 literal is a host, port or not (k178); ::1 is loopback.
+  my $before = count_requests();
+  ( $exit, $out, $err ) = main_run( '', '--provider', '[::1]', '-k', 'sk', 'hi' );
+  is( $exit, 1, '[::1]: exit 1, refused as a host' );
+  like( $err, qr/^raider --provider: refused: ::1 is \(loopback address\)/, '[::1]: went the host way' );
+  is( count_requests(), $before, '[::1]: refused before any request' );
 };
 
 subtest 'provider add: a bare name is no HOST (k170)' => sub {
@@ -465,7 +472,7 @@ subtest 'provider add: a bare name is no HOST (k170)' => sub {
   for my $target (qw( localhost acme )) {
     my ( $exit, $out, $err ) = main_run( "y\n", qw( provider add other ), $target, qw( --allow-internal --credential-env K ) );
     is( $exit, 2, "$target: exit 2" );
-    like( $err, qr/^raider provider add: provider target '\Q$target\E' is no host: a host needs a dot \(host\.tld\), a port \(host:PORT\) or https:\/\//,
+    like( $err, qr/^raider provider add: provider target '\Q$target\E' is no host: a host needs a dot \(host\.tld\), a port \(host:PORT\), brackets \(\[IPv6\]\) or https:\/\//,
       "$target: says why" );
     ok( !exists stored()->{providers}{other}, "$target: nothing stored" );
   }
