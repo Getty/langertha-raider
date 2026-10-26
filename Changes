@@ -1097,8 +1097,7 @@ Revision history for Langertha-Raider
       raider_version; run.finished and the --json document carry a reason
       code whenever a run did not complete; permission.* and the tool
       hooks' hook.ran name their call; a failed, refused or cancelled tool
-      call runs the PostToolUseFailure hooks (except a call to a tool that is
-      not offered: it has a tool.call, no tool.result and no hook);
+      call runs the PostToolUseFailure hooks;
       bin/raider documents every
       stream event type (ADR 0034).
 

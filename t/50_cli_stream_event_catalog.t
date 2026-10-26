@@ -217,6 +217,31 @@ subtest 'hook.ran, hook.message; the tool hooks name their call' => sub {
     'hook.message: a systemMessage' );
 };
 
+subtest 'a tool the run does not offer: its tool.call gets a failed tool.result and PostToolUseFailure, no PreToolUse (k177)' => sub {
+  my $root = claude_project(
+    hooks => {
+      PreToolUse         => [ hook('${CLAUDE_PROJECT_DIR}/hooks/ok') ],
+      PostToolUseFailure => [ hook('${CLAUDE_PROJECT_DIR}/hooks/ok') ],
+    },
+    scripts => { ok => 'cat >/dev/null; exit 0' },
+  );
+  my ( $exit, $events ) = stream( $root, [
+    { tool_calls => [ [ nonesuch => { x => 1 } ] ] },
+    { text => 'done' },
+  ], '--dangerously-skip-permissions' );
+  is( $exit, 0, 'exits 0' );
+  like( [ of_type( $events, 'tool.call' ) ], [ { call => 'c1', name => 'nonesuch', status => 'dispatched' } ], 'the call' );
+  like( [ of_type( $events, 'tool.result' ) ], [ {
+    call    => 'c1',
+    name    => 'nonesuch',
+    status  => 'failed',
+    ok      => F(),
+    content => '<tool_use_error>Error: No such tool available: nonesuch</tool_use_error>',
+  } ], 'its result: failed, with the error the model gets' );
+  like( [ of_type( $events, 'hook.ran' ) ], [ { hook_event => 'PostToolUseFailure', call => 'c1', outcome => 'success' } ],
+    'PostToolUseFailure ran for it, PreToolUse did not' );
+};
+
 subtest 'message: also before Stop feedback' => sub {
   my $root = claude_project(
     hooks   => { Stop => [ hook('${CLAUDE_PROJECT_DIR}/hooks/stop') ] },

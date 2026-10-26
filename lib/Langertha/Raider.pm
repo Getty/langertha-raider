@@ -2949,7 +2949,8 @@ async sub _dispatch_tool_call_f {
 
   # Resolve (ADR 0005): a name no source offers ends here, before the hook,
   # the gate and any approval -- "unknown tool", not a permission question
-  # about a tool that does not exist. _call_mcp_tool_f answers the error.
+  # about a tool that does not exist. _call_mcp_tool_f answers the error,
+  # through plugin_after_tool_call (k177).
   unless ( $self_tool || $state->{tool_server_map}{$name} ) {
     my $result = await $self->_call_mcp_tool_f($state, $iter, $name, $input, $tool_t0, $ctx);
     push @$results, { tool_call => $tc, result => $result };
@@ -3115,12 +3116,14 @@ async sub _call_mcp_tool_f {
   unless ($mcp) {
     # Claude Code's words (ADR 0026); a name that differs from a tool only in
     # case gets its hint too.
+    # The error takes the plugin_after_tool_call path like any other result,
+    # so its tool.call gets a tool.result and PostToolUseFailure fires (k177).
     my ( $same ) = defined $name ? grep { lc $_ eq lc $name } sort keys %{ $state->{tool_server_map} } : ();
-    return {
+    return await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0, {
       content => [{ type => 'text', text => '<tool_use_error>Error: No such tool available: '.( $name // '' )
         .( defined $same ? '. Tool names are case-sensitive: call '.$same.' instead.' : '' ).'</tool_use_error>' }],
       isError => JSON->true,
-    };
+    }, 1, $ctx);
   }
   return await $self->_after_tool_call_f($state, $iter, $name, $input, $tool_t0,
     $self->_cancelled_tool_result($name), 1, $ctx) if $self->cancel_requested;

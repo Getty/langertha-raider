@@ -118,6 +118,32 @@ subtest 'a call a PreToolUse hook denies' => sub {
     'the PreToolUse hook.ran names the call too' );
 };
 
+subtest 'a call to a tool the run does not offer (k177)' => sub {
+  my $root = project( PreToolUse => [ { hooks => [ { type => 'command', command => '${CLAUDE_PROJECT_DIR}/hooks/record PreToolUse' } ] } ] );
+  my ( $end, $events, $app ) = run_in( $root, script => [
+    { tool_calls => [ [ nonesuch => { x => 1 } ] ] },
+    { text => 'done' },
+  ] );
+  is( $end->{status}, 'completed', 'the run completes' );
+  my $in = inputs($root);
+  is( [ map { $_->{event} } @$in ], ['PostToolUseFailure'], 'PostToolUseFailure, and no PreToolUse (the call ends at resolve, ADR 0005)' );
+  like( $in->[0]{input}, {
+    hook_event_name => 'PostToolUseFailure',
+    tool_name       => 'nonesuch',
+    tool_input      => { x => 1 },
+    tool_use_id     => T(),
+    error           => '<tool_use_error>Error: No such tool available: nonesuch</tool_use_error>',
+    is_interrupt    => F(),
+  }, 'with Claude Code\'s fields; the error is the text the model gets' );
+  like( [ grep { $_->{type} =~ /\Atool\.|\Ahook\.ran\z/ } @$events ], [
+    { type => 'tool.call',   call => 'c1', name => 'nonesuch' },
+    { type => 'hook.ran',    call => 'c1', hook_event => 'PostToolUseFailure' },
+    { type => 'tool.result', call => 'c1', name => 'nonesuch', status => 'failed', ok => F() },
+  ], 'one tool.call, one tool.result' );
+  my $text = join "\n", map { $_->{text} // '' } @{ $app->mock_engine->results->[0]{result}{content} };
+  is( $text, '<tool_use_error>Error: No such tool available: nonesuch</tool_use_error>', 'the model gets the same text as before' );
+};
+
 subtest 'a cancelled call: is_interrupt' => sub {
   my $root = project();
   my ( $end, $events ) = run_in( $root,

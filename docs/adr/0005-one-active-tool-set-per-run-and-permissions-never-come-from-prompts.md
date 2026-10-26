@@ -46,3 +46,10 @@ and incomplete (`perl_*` and hall tools missing), pack fields like `add_allowed_
 
 Proposal: `docs/RAIDER-REDESIGN-HANDOFF.md` §2 (6, 8), §8, §12; tool-source model clarified
 by the maintainer.
+
+## Update (2026-10-26, unknown tool name)
+
+"No hook, policy check or approval sees it" means the steps before execution: a call to a
+tool that is not offered never reaches `PreToolUse`, the gate or an approval. It still ends
+like every failed call — a `tool.result` with `status: failed` and the `PostToolUseFailure`
+hooks (ADR 0034, karr #177).
