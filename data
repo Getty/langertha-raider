@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-10-26T01:22:42Z
+id: 181
+priority: low
+status: backlog
+tags:
+- provider-discovery
+- bug
+title: Provider-Ziel [::1 ohne schliessende Klammer wird als Host akzeptiert
+updated: 2026-10-26T01:22:42Z
+---
+
+Gefunden in k178: [::1 (Klammer fehlt) passiert die Port-Regel (endet auf :1); URI liest Host [: Port 1; Fetch scheitert erst bei der Aufloesung. Bestand vor k178. Erwartung: target_url lehnt unbalancierte Klammern als no host ab.
