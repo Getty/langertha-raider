@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-10-26T03:51:13Z
+claimed_by: raider-worker-k177
+class: standard
+completed: 2026-10-26T19:34:12Z
+created: 2026-10-25T07:23:50Z
+id: 177
+priority: medium
+started: 2026-10-26T03:33:27Z
+status: done
+tags:
+- bug
+- events
+- hooks
+title: 'Unbekannter Toolname: tool.call ohne tool.result, kein PostToolUse/PostToolUseFailure'
+updated: 2026-10-26T19:34:19Z
+---
+
+Gefunden in k172: "No such tool available" kehrt aus _call_mcp_tool_f zurueck, ohne _after_tool_call_f zu durchlaufen. Folge: Stream und Journal haben tool.call ohne tool.result; weder PostToolUse noch PostToolUseFailure feuert. Bestand vorher schon. Erwartung (ADR 0034): tool.result status failed + PostToolUseFailure.
+
+2026-10-26 03:36 Cause: _call_mcp_tool_f returned the 'No such tool available' result without _after_tool_call_f. Fix: route it through _after_tool_call_f (flag_errors 1). Red tests added in t/50 + t/144; t/81 Langfuse expectation updated (unknown tool now traced as an ERROR span). PreToolUse does not fire for an unknown tool (unchanged).
+
+2026-10-26 03:51 Done: _call_mcp_tool_f routes the 'No such tool available' result through _after_tool_call_f (flag_errors 1) -> tool.result status failed/ok false, PostToolUseFailure fires, Langfuse ERROR span. Model text and order (before PreToolUse/gate/approval) unchanged; PreToolUse still does not fire for an unknown tool. New subtests t/50 + t/144 red before, green after; t/81 Langfuse expectation updated. Full suite PASS (235 files, 2062 tests, live skipped). Changes line ~1100-1101 exception to be removed by release manager.
+
+2026-10-26 19:34 Committed as 95b1e0d
