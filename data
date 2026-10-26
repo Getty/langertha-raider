@@ -1,0 +1,48 @@
+{"action":"edit","agent":"raider-worker-k170","detail":"in-progress","task_id":170,"ts":"2026-10-25T05:10:56Z"}
+{"action":"handoff","agent":"raider-worker-k170","detail":"review","task_id":170,"ts":"2026-10-25T05:20:25Z"}
+{"action":"edit","agent":"raider-worker-k170","detail":"review","task_id":170,"ts":"2026-10-25T06:29:14Z"}
+{"action":"move","agent":"raider-worker-k170","detail":"done","task_id":170,"ts":"2026-10-25T06:29:20Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":171,"ts":"2026-10-25T06:29:50Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":172,"ts":"2026-10-25T06:29:56Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":173,"ts":"2026-10-25T06:30:15Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":174,"ts":"2026-10-25T06:30:21Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":175,"ts":"2026-10-25T06:30:27Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":176,"ts":"2026-10-25T06:30:33Z"}
+{"action":"move","agent":"raider-worker-k171","detail":"in-progress","task_id":171,"ts":"2026-10-25T06:30:42Z"}
+{"action":"move","agent":"raider-worker-k172","detail":"in-progress","task_id":172,"ts":"2026-10-25T06:30:48Z"}
+{"action":"edit","agent":"raider-worker-k171","detail":"in-progress","task_id":171,"ts":"2026-10-25T06:38:32Z"}
+{"action":"edit","agent":"raider-worker-k171","detail":"in-progress","task_id":171,"ts":"2026-10-25T06:43:57Z"}
+{"action":"edit","agent":"raider-worker-k172","detail":"in-progress","task_id":172,"ts":"2026-10-25T07:00:16Z"}
+{"action":"handoff","agent":"raider-worker-k171","detail":"review","task_id":171,"ts":"2026-10-25T07:16:09Z"}
+{"action":"edit","agent":"raider-worker-k171","detail":"review","task_id":171,"ts":"2026-10-25T07:19:58Z"}
+{"action":"move","agent":"raider-worker-k171","detail":"done","task_id":171,"ts":"2026-10-25T07:20:04Z"}
+{"action":"handoff","agent":"raider-worker-k172","detail":"review","task_id":172,"ts":"2026-10-25T07:23:08Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":177,"ts":"2026-10-25T07:23:50Z"}
+{"action":"move","agent":"raider-worker-k172","detail":"done","task_id":172,"ts":"2026-10-25T07:39:13Z"}
+{"action":"edit","agent":"raider-worker-k172","detail":"done","task_id":172,"ts":"2026-10-25T07:39:19Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":178,"ts":"2026-10-26T01:03:44Z"}
+{"action":"move","agent":"raider-worker-k178","detail":"in-progress","task_id":178,"ts":"2026-10-26T01:03:55Z"}
+{"action":"edit","agent":"raider-worker-k178","detail":"in-progress","task_id":178,"ts":"2026-10-26T01:16:42Z"}
+{"action":"handoff","agent":"raider-worker-k178","detail":"review","task_id":178,"ts":"2026-10-26T01:22:01Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":179,"ts":"2026-10-26T01:22:30Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":180,"ts":"2026-10-26T01:22:36Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":181,"ts":"2026-10-26T01:22:42Z"}
+{"action":"move","agent":"raider-worker-k178","detail":"done","task_id":178,"ts":"2026-10-26T01:24:40Z"}
+{"action":"edit","agent":"raider-worker-k178","detail":"done","task_id":178,"ts":"2026-10-26T01:24:46Z"}
+{"action":"move","agent":"raider-worker-k177","detail":"in-progress","task_id":177,"ts":"2026-10-26T03:33:27Z"}
+{"action":"edit","agent":"raider-worker-k177","detail":"in-progress","task_id":177,"ts":"2026-10-26T03:36:37Z"}
+{"action":"handoff","agent":"raider-worker-k177","detail":"review","task_id":177,"ts":"2026-10-26T03:51:13Z"}
+{"action":"move","agent":"raider-worker-k177","detail":"done","task_id":177,"ts":"2026-10-26T19:34:12Z"}
+{"action":"edit","agent":"raider-worker-k177","detail":"done","task_id":177,"ts":"2026-10-26T19:34:19Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":182,"ts":"2026-10-26T19:57:19Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":183,"ts":"2026-10-26T19:57:26Z"}
+{"action":"move","agent":"raider-binary-worker-k182","detail":"in-progress","task_id":182,"ts":"2026-10-26T19:57:37Z"}
+{"action":"move","agent":"raider-worker-k183","detail":"in-progress","task_id":183,"ts":"2026-10-26T19:57:43Z"}
+{"action":"edit","agent":"raider-binary-worker-k182","detail":"in-progress","task_id":182,"ts":"2026-10-26T19:58:27Z"}
+{"action":"handoff","agent":"raider-worker-k183","detail":"review","task_id":183,"ts":"2026-10-26T20:04:30Z"}
+{"action":"handoff","agent":"raider-binary-worker-k182","detail":"review","task_id":182,"ts":"2026-10-26T20:07:07Z"}
+{"action":"handoff","agent":"raider-worker-k183","detail":"review","task_id":183,"ts":"2026-10-26T20:10:41Z"}
+{"action":"move","agent":"raider-binary-worker-k182","detail":"done","task_id":182,"ts":"2026-10-26T20:11:36Z"}
+{"action":"move","agent":"raider-worker-k183","detail":"done","task_id":183,"ts":"2026-10-26T20:11:41Z"}
+{"action":"edit","agent":"raider-binary-worker-k182","detail":"done","task_id":182,"ts":"2026-10-26T20:11:46Z"}
+{"action":"edit","agent":"raider-worker-k183","detail":"done","task_id":183,"ts":"2026-10-26T20:11:50Z"}
