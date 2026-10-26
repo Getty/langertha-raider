@@ -52,7 +52,7 @@ Never `git commit`: leave the tree commit-ready and report what changed and why,
 ## Verification
 
 The installed Langertha is usually stale — run against the dev tree:
-`prove -I/home/getty/dev/langertha/lib -Ilib -r t` (same `-I` for `bin/raider`).
+`prove -I../langertha/lib -Ilib -r t` (same `-I` for `bin/raider`).
 Public vs internal API: ADR 0017.
 
 Anything that changes what the standalone binary carries — a new dependency,

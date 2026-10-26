@@ -30,7 +30,7 @@ merely because a key happens to be set (karr #13). Read the ticket, the relevant
 ADRs in `docs/adr/` and the existing `t/` numbering before adding a file.
 
 Verify against the dev Langertha (the installed one is usually stale):
-`prove -I/home/getty/dev/langertha/lib -Ilib -It/lib -r t` — recursive, `t/` has
+`prove -I../langertha/lib -Ilib -It/lib -r t` — recursive, `t/` has
 subdirectories. Report skipped live tests as skipped. Never `git commit` — commits
 belong to `raider-release-manager`; findings outside the brief go as a note on your
 karr card.

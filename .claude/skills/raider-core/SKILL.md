@@ -133,7 +133,7 @@ money. Once opted in, nothing skips any more: a missing key, an unusable provide
 failed run is a **failure**, not a skip.
 
 Verify against the dev Langertha (the installed one is usually stale):
-`prove -I/home/getty/dev/langertha/lib -Ilib -It/lib -r t` — recursive, `t/` has subdirectories.
+`prove -I../langertha/lib -Ilib -It/lib -r t` — recursive, `t/` has subdirectories.
 
 ## Release wiring
 
