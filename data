@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-10-26T01:24:40Z
+claimed_by: raider-worker-k178
+class: standard
+completed: 2026-10-26T01:24:40Z
+created: 2026-10-26T01:03:44Z
+id: 178
+priority: low
+started: 2026-10-26T01:03:55Z
+status: done
+tags:
+- provider-discovery
+title: IPv6-Literal ohne Port wieder als Host erlauben (provider)
+updated: 2026-10-26T01:24:46Z
+---
+
+Entscheidung Getty 2026-10-26 (ADR 0007, Zusatz zum Update alias or host): ein IPv6-Literal in eckigen Klammern ist ein Host, auch ohne Port. Seit k170 (edfd681) lehnt Fetch::target_url [::1] ohne Port ab. Loopback/Link-Local bleiben wie bisher nur mit --allow-internal.
+
+2026-10-26 01:16 Fix: Fetch::target_url accepts a target that is wholly a bracketed literal whose URI host contains ':' ([::1], [2001:db8::1], [fe80::1%eth0]); [::1]: and [foo] still 'no host'. Message now: 'a host needs a dot (host.tld), a port (host:PORT), brackets ([IPv6]) or https://'. Address checks unchanged: --provider [::1] is refused as loopback before any request. Also found (pre-existing, not fixed): '[::1' (unclosed bracket) is accepted, because it ends in ':1' and URI parses host '[:' port 1 -> https://[::1/.well-known/langertha.json; the fetch would then fail on resolving. Candidate follow-up card on this board.
+
+2026-10-26 01:22 Done: Fetch::target_url takes a bracketed IPv6 literal without a port as a host ([::1], [2001:db8::1]); message/POD/help/README now say 'a dot, a port, brackets ([IPv6]) or https://'. Address checks unchanged (--provider [::1] refused as loopback, no request). Tests: t/67 (+2 valid, [::1]: and [foo] still refused), t/73 (+[::1] host-way CLI case, message regex). Verified: t/67 t/68 t/70 t/73 t/75 t/59 pass; full prove -j2 -r t: Files=235 Tests=2060 PASS (only t/live skipped, opt-in). Not committed.
+
+2026-10-26 01:24 Committed a2320a5. Follow-up: k181 (unbalanced '[::1' is accepted as a host).
