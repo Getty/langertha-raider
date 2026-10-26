@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-10-26T01:22:36Z
+id: 180
+priority: low
+status: backlog
+tags:
+- pod
+- docs
+title: 'POD: unresolved internal link L</loop> in Application.pm, leere Abschnitte
+  in Monitor.pm'
+updated: 2026-10-26T01:22:36Z
+---
+
+Release-Audit 2026-10-26: podchecker auf dem gebauten Dist meldet 4 Fehler unresolved internal link loop in Application.pm (gebaut ~3875, 4051, 4260, 4283) und Warnungen zu leeren Abschnitten in Monitor.pm. pod-syntax-Autortest prueft keine Links.
