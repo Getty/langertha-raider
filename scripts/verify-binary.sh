@@ -82,21 +82,22 @@ run --export-skill "$work/RAIDER-SKILL.md" >/dev/null 2>&1 && [ -s "$work/RAIDER
   || fail "--export-skill"
 # provider inspect loads Langertha::Manifest and resolves the host through
 # IO::Async's resolver (IO::Async::Resolver, loaded by name, runs lookups
-# in a forked worker). localhost resolves offline, and to loopback, so the
-# fetch is refused before any connection: exit 1 and a refused document.
+# in a forked worker). localhost:443 resolves offline, and to loopback, so
+# the fetch is refused before any connection: exit 1 and a refused document.
+# The port is what makes it a host: a bare name is a provider alias (k170).
 expect "provider inspect --help" '^Usage: raider provider inspect' "$BIN" provider inspect --help
 rc=0
-prov=$(run provider inspect localhost --json 2>&1) || rc=$?
-[ "$rc" -eq 1 ] || fail "provider inspect localhost: exit $rc, not 1 (124 is the ${tmo}s timeout): $prov"
+prov=$(run provider inspect localhost:443 --json 2>&1) || rc=$?
+[ "$rc" -eq 1 ] || fail "provider inspect localhost:443: exit $rc, not 1 (124 is the ${tmo}s timeout): $prov"
 grep -q '"status" : "refused"' <<< "$prov" && grep -q 'loopback address' <<< "$prov" \
-  || fail "provider inspect localhost: no refused loopback document: $prov"
+  || fail "provider inspect localhost:443: no refused loopback document: $prov"
 # --provider runs the same fetch through Langertha::Raider::Provider::Activation
 # before any engine class is loaded: refused the same way, exit 1.
 rc=0
-prov=$(run --provider localhost -k none --no-session "hi" 2>&1) || rc=$?
-[ "$rc" -eq 1 ] || fail "--provider localhost: exit $rc, not 1 (124 is the ${tmo}s timeout): $prov"
+prov=$(run --provider localhost:443 -k none --no-session "hi" 2>&1) || rc=$?
+[ "$rc" -eq 1 ] || fail "--provider localhost:443: exit $rc, not 1 (124 is the ${tmo}s timeout): $prov"
 grep -q '^raider --provider: refused: .*loopback address' <<< "$prov" \
-  || fail "--provider localhost: not refused as loopback: $prov"
+  || fail "--provider localhost:443: not refused as loopback: $prov"
 echo "subcommands (hall: 11, acp: 3, config explain, session list, --export-skill, provider inspect, --provider): OK"
 
 # --- 3. the packed module set ---------------------------------------------------
