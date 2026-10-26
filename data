@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-10-26T20:11:46Z
+claimed_by: raider-binary-worker-k182
+class: standard
+completed: 2026-10-26T20:11:36Z
+created: 2026-10-26T19:57:19Z
+id: 182
+priority: high
+started: 2026-10-26T19:57:37Z
+status: done
+tags:
+- binary
+- release-blocker
+title: 'verify-binary.sh: Provider-Checks nutzen localhost, seit k170 ein Alias (Release-Blocker)'
+updated: 2026-10-26T20:11:46Z
+---
+
+Binary-Probelauf 2026-10-26: FAIL provider inspect localhost: exit 2, not 1 (bare name is a provider alias). scripts/verify-binary.sh Zeilen ~89 und ~96 nutzen localhost; seit edfd681 (k170) ist ein nackter Name ein Alias. Fix: localhost -> localhost:443 (am gepackten Binary geprueft: refused, loopback, exit 1; gepatchte Kopie verify: OK). Ohne Fix bricht release-binaries.yml in "Verify binary" auf beiden Arch ab.
+
+2026-10-26 19:58 scripts/verify-binary.sh: both provider checks now target localhost:443, comment says why (bare name = alias since k170), fail messages follow. grep scripts/, .github/workflows/, t/: no other bare host as provider target; the bare names in t/ (localhost, acme, ghost) are deliberate alias/refusal cases. Full niced verify run against the 0.504 binary started (script has no partial-run switch).
+
+2026-10-26 20:07 Done: scripts/verify-binary.sh provider inspect + --provider checks target localhost:443 (bare name is an alias since k170); comment explains the port, fail messages follow. No other bare host as provider target in scripts/, .github/workflows/, t/ (bare names in t/ are intentional alias/refusal cases). Verified: full nice -n 10 run of the repo script against the existing raider-0.504-linux-x86_64 -> verify: OK, exit 0 (no partial-run switch in the script; no new pack run).
+
+Committed 1c79d05
