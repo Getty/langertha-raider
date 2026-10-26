@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-10-26T01:22:30Z
+id: 179
+priority: low
+status: backlog
+tags:
+- test
+- flaky
+title: t/256_mcp_scenarios.t Test 11 flaky unter prove -j2
+updated: 2026-10-26T01:22:30Z
+---
+
+Release-Audit 2026-10-26: einmal unter prove -j2 -Ilib -It/lib -r t (gegen installiertes Langertha 0.504) Test 11 rot; allein 15/15 gruen, auch mit -I ~/dev/langertha/lib. Vermutlich Timing. Ursache nicht gesucht.
