@@ -82,13 +82,11 @@ with 'Langertha::Role::PluginHost', 'Langertha::Role::Runnable';
 
 =head1 DESCRIPTION
 
-B<Status: in development.> Langertha-Raider is released as a developer
-release. The engine, the C<raider> command line and the Hall are usable, but
-the whole is not yet covered end to end: an acceptance suite that drives every
-tool through a scripted model is being built up step by step (F<t/scenarios/>),
-and parts of the planned design (policy and executor, provider discovery with
-re-consent, ACP integration of providers) are not finished. Expect interface
-changes between releases.
+B<Status: 0.x.> The engine, the C<raider> command line and the Hall are
+covered by the test suite and an acceptance suite that drives the tools through
+a scripted model (F<t/scenarios/>). Interfaces can still change between 0.x
+releases; the documented wire formats (machine output, session journal, hall
+event bus) only change with a new format version.
 
 Langertha::Raider is an autonomous agent that wraps a Langertha engine
 with MCP tools. It maintains conversation history across multiple

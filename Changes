@@ -447,11 +447,6 @@ Revision history for Langertha-Raider
       cron).
 
 
-  [Status]
-    - Marked as in development (POD and README): a developer release, not yet
-      covered end to end. Release it with `dzil release --trial`.
-
-
   [Engines]
     - `-e mock` (alias `virtual`) selects Langertha::Engine::Virtual, the rule-driven
       engine without network or key (`-o rules_file=rules.yml`), so raider can be run
