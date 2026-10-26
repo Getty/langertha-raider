@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-10-26T20:11:50Z
+claimed_by: raider-worker-k183
+class: standard
+completed: 2026-10-26T20:11:41Z
+created: 2026-10-26T19:57:26Z
+id: 183
+priority: low
+started: 2026-10-26T19:57:43Z
+status: done
+tags:
+- cli
+- events
+title: run.finished elapsed bei --provider-Fehler ungerundet
+updated: 2026-10-26T20:11:50Z
+---
+
+Binary-Probelauf 2026-10-26: im Provider-Fehlerfall elapsed 0.00113487243652344 statt 3 Nachkommastellen; _provider_failure in CLI/Main.pm (~1316) rundet nicht.
+
+2026-10-26 20:04 Done: _provider_failure (CLI/Main.pm) now sets elapsed via $self->runner_class->elapsed_since($t0), the same rounding as Runner and interrupt_startup (0 + sprintf '%.3f'). That covers the option-clash failure and the three stored-alias failures. Regression: t/70 k150 subtest checks that elapsed in the option-clash document matches \A\d+(\.\d{1,3})?\z. Without the fix it was red on 3 of 3 runs (e.g. 4.69684600830078e-05); with the fix it is green. Targeted set t/39, t/49_*, t/50_*, t/70, t/73: PASS (8 files, 105 tests). Grep found no other unrounded elapsed (Application, Subagent, Provider::Fetch, Runner all round). Also found, not fixed: Provider->failure_document (CLI/Provider.pm ~241, the activate path: refused, not fetched, model or endpoint problems, no key) writes NO elapsed at all, which breaks ADR 0013's {error, elapsed} failure shape. It is new in this release (k150). The fix is small: pass $t0 into activate and failure_document and set elapsed through elapsed_since. Dispatcher decides.
+
+2026-10-26 20:10 Addition (coordinator): Provider->failure_document (activate path) now writes elapsed too, per ADR 0013 {error, elapsed}. Provider.pm has a new runner_class resolver (Langertha::Raider::CLI::Runner, loaded with use). failure_document takes $t0 as its 5th argument and sets elapsed => $self->runner_class->elapsed_since($t0), with no second rounding. activate takes t0 => $t0 (default: the start of the activation), and Main passes its $t0. POD for activate and failure_document updated. t/70 k150 subtest: elapsed checked on the failed (multi-endpoint), refused (loopback) and no-key documents; all three were red without the fix (undef), green with it. Targeted t/39, t/49_*, t/50_*, t/68, t/70, t/73, t/75: PASS (10 files, 122 tests).
+
+Committed 1c66989
