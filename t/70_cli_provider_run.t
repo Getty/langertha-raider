@@ -297,12 +297,14 @@ subtest 'a model on several endpoints: refused, the user chooses (k150)' => sub 
 };
 
 subtest 'a --provider error with --json is a refused or failed document on stdout (k150)' => sub {
-  my $json = JSON::MaybeXS->new;
+  my $json   = JSON::MaybeXS->new;
+  my $millis = qr/\A\d+(?:\.\d{1,3})?\z/;
   my ( $exit, $out, $err ) = provider_run( '/multi.json', '-k', 'sk', '-m', 'm1', '--json', 'hi' );
   is( $exit, 1, 'failed: exit code unchanged' );
   my $doc = $json->decode($out);
   is( [ @$doc{qw( version status provider )} ], [ 1, 'failed', $host ], 'the failed document' );
   like( $doc->{error}, qr/model 'm1' is offered on several endpoints/, 'with the error' );
+  like( $doc->{elapsed}, $millis, 'elapsed to the millisecond, as in every document (k183)' );
   like( $err, qr/^raider --provider: failed: /, 'stderr keeps the message' );
 
   ( $exit, $out, $err ) = main_run( '--provider', $host, '-k', 'sk', '--json', 'hi' );
@@ -310,16 +312,20 @@ subtest 'a --provider error with --json is a refused or failed document on stdou
   $doc = $json->decode($out);
   is( $doc->{status}, 'refused', 'the refused document' );
   like( $doc->{error}, qr/127\.0\.0\.1 is \(loopback address\); only --allow-internal/, 'with the reason' );
+  like( $doc->{elapsed}, $millis, 'a refused document has elapsed too (k183)' );
 
   ( $exit, $out, $err ) = main_run( '--provider', $host, '--allow-internal', '--json', 'hi' );
   is( $exit, 2, 'a usage error (no key): exit 2' );
   $doc = $json->decode($out);
   is( $doc->{status}, 'failed', 'a document too' );
   like( $doc->{error}, qr/needs an API key/, 'with the reason' );
+  like( $doc->{elapsed}, $millis, 'and elapsed (k183)' );
 
   ( $exit, $out, $err ) = main_run( '--provider', $host, '-e', 'openai', '--json', 'hi' );
   is( $exit, 2, 'an option clash: exit 2' );
-  like( $json->decode($out)->{error}, qr/^--provider: not with -e\/--engine/, 'a document too' );
+  $doc = $json->decode($out);
+  like( $doc->{error}, qr/^--provider: not with -e\/--engine/, 'a document too' );
+  like( $doc->{elapsed}, $millis, 'and elapsed (k183)' );
 
   ( $exit, $out, $err ) = main_run( '--provider', $host, '-e', 'openai', 'hi' );
   is( $out, '', 'without --json stdout stays empty' );

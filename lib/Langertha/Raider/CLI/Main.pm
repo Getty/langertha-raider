@@ -707,6 +707,7 @@ sub run {
       model          => $opt->{model} // $cli_opts->{model},
       endpoint       => $opt->{provider_endpoint},
       machine        => $machine,
+      t0             => $t0,
       has_api_key    => length($opt->{api_key} // $cli_opts->{api_key} // $args{api_key} // '') ? 1 : 0,
       %binding,
     );
@@ -1313,7 +1314,8 @@ sub _provider_failure {
   my ( $self, $machine, $status, $error, $target, $t0 ) = @_;
   return unless $machine;
   $machine->finish($machine->document($status,
-    reason => 'provider', error => $error, provider => $target, elapsed => Time::HiRes::time() - $t0));
+    reason => 'provider', error => $error, provider => $target,
+    elapsed => $self->runner_class->elapsed_since($t0)));
   return;
 }
 

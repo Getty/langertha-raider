@@ -3,12 +3,14 @@ package Langertha::Raider::CLI::Provider;
 our $VERSION = '0.504';
 use Moose;
 use namespace::autoclean;
+use Time::HiRes ();
 use Langertha::Manifest;
 use Langertha::Manifest::Builder;
 use URI;
 use Langertha::Raider::Provider::Activation;
 use Langertha::Raider::Provider::Binding;
 use Langertha::Raider::Provider::Fetch;
+use Langertha::Raider::CLI::Runner;
 
 =head1 SYNOPSIS
 
@@ -97,6 +99,7 @@ sub fetch_class      { 'Langertha::Raider::Provider::Fetch' }
 sub binding_class    { 'Langertha::Raider::Provider::Binding' }
 sub activation_class { 'Langertha::Raider::Provider::Activation' }
 sub manifest_class   { 'Langertha::Manifest' }
+sub runner_class     { 'Langertha::Raider::CLI::Runner' }
 
 has _known_capability => (
   is      => 'ro',
@@ -178,7 +181,8 @@ sub _fetch_manifest {
 
     my ( $exit, $activation ) = $provider->activate($target,
       allow_internal => $bool, model => $model, endpoint => $id, has_api_key => $bool,
-      machine => $machine, binding => { alias => $alias, entry => $entry, credential_env => $name });
+      machine => $machine, t0 => $t0,
+      binding => { alias => $alias, entry => $entry, credential_env => $name });
 
 With C<binding> (C<raider --provider ALIAS>) the manifest must still be
 what the alias accepted (L<Langertha::Raider::Provider::Binding/verify>);
@@ -193,12 +197,15 @@ L</err>; or, after writing why to L</err>, just the exit status: C<2> when
 the command line has to change (a target that is none, a model the
 manifest does not list, no model where it lists several, no key where
 the endpoint needs one), C<1> when the provider cannot be used as it is
-(refused, not fetched, not valid, not usable by this raider).
+(refused, not fetched, not valid, not usable by this raider). C<t0>, the
+L<Time::HiRes> time the run started, is where the C<elapsed> of a failure
+document counts from; without it, the start of the activation.
 
 =cut
 
 sub activate {
   my ( $self, $target, %opt ) = @_;
+  my $t0 = $opt{t0} // Time::HiRes::time();
   my $activation = $self->activation_class->new(
     fetch => $self->fetcher(allow_internal => $opt{allow_internal} ? 1 : 0),
   );
@@ -217,7 +224,7 @@ sub activate {
   unless ($got->{status} eq 'completed') {
     my $status = $got->{status} eq 'usage' ? '' : $got->{status}.': ';
     $self->_err('raider --provider: '.$status.$self->output->error_text($got->{error})."\n");
-    $self->failure_document($opt{machine}, $got->{status}, $got->{error}, $target) if $opt{machine};
+    $self->failure_document($opt{machine}, $got->{status}, $got->{error}, $target, $t0) if $opt{machine};
     return $got->{status} eq 'usage' ? 2 : 1;
   }
   $self->_err('raider --provider: warning: '.$_."\n") for @{ $got->{warnings} };
@@ -226,25 +233,28 @@ sub activate {
 
 =method failure_document
 
-    $provider->failure_document($machine, 'refused', $error, $target);
+    $provider->failure_document($machine, 'refused', $error, $target, $t0);
 
 With a machine format (C<--json> and friends), the C<--provider> that could
 not run is also a document on stdout, as for a run that failed (ADR 0013):
 C<status> C<refused> for a policy refusal (address, redirect, origin, a
 stored alias that no longer matches), else C<failed> (also for a usage
 error, whose exit status stays C<2>), C<reason> C<provider>, C<error> and
-the C<provider> target.
+the C<provider> target, and C<elapsed>: the seconds since the
+L<Time::HiRes> time C<$t0>, to the millisecond
+(L<Langertha::Raider::CLI::Runner/elapsed_since>).
 The message on L</err> is kept.
 
 =cut
 
 sub failure_document {
-  my ( $self, $machine, $status, $error, $target ) = @_;
+  my ( $self, $machine, $status, $error, $target, $t0 ) = @_;
   $machine->finish($machine->document(
     ( $status eq 'refused' ? 'refused' : 'failed' ),
     reason   => 'provider',
     error    => $self->output->error_text($error),
     provider => $target,
+    elapsed  => $self->runner_class->elapsed_since($t0),
   ));
   return;
 }
