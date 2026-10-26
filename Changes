@@ -37,20 +37,6 @@ Revision history for Langertha-Raider
       (ADR 0027). See [Claude Code layout and skills].
 
 
-  [Release order]
-    - Skilletor 0.001 (the perl/ dist of the skilletor repository) goes to
-      CPAN first: raider requires it, and `cpanm --installdeps .` cannot
-      fetch it before.
-
-    - Langertha 0.504 (the release after 0.503, with
-      Langertha::Engine::Virtual and stream_usage) goes to CPAN before raider:
-      `-e mock` / `-e virtual` and the scenario suites need
-      Langertha::Engine::Virtual. The cpanfile floor (still 0.503) moves
-      to it in the release audit; knarr's floor moves to the same Langertha.
-
-    - Then this release; the standalone binaries are built from it.
-
-
   [File tools]
     - read_file asks the engine whether images and PDFs may go back as
       content: supports('tool_result_images') and supports('tool_result_pdf')
@@ -74,7 +60,8 @@ Revision history for Langertha-Raider
       on disk since ("File has been modified since read, ..."). New files
       need no read; what the tools wrote counts as read; a read with
       offset/limit counts. The record is per run (begin_run empties it) and
-      holds in every layout.
+      holds in every layout. The CLAUDE.md / AGENTS.md files in the prompt
+      count as read, so they can be edited without a read_file first.
 
     - INCOMPATIBLE: read_file returns cat -n lines ("N<TAB>line") and takes
       offset (1-based) and limit; at most 2000 lines by default with a note
@@ -84,7 +71,10 @@ Revision history for Langertha-Raider
       are refused with a message. Images (PNG, JPEG, GIF, WebP) and PDFs go
       back as image/document content when the model sees images and its wire
       carries them in a tool result, else a clear refusal; Jupyter notebooks
-      come back as their cells with outputs.
+      come back as their cells with outputs. A read over 25000 tokens (bytes
+      / 4) is refused as in Claude Code; pages ("1-5", at most 20) reads
+      PDF pages as text through pdftotext (poppler, looked up on PATH; a
+      PDF of more than 10 pages needs it) (ADR 0023 addendum).
 
     - New tool multi_edit(path, edits) like Claude Code's MultiEdit: edits
       applied in order on the content in memory, atomic, the failing edit
@@ -98,6 +88,8 @@ Revision history for Langertha-Raider
       not cover edits outside, bypassPermissions reaches it, deny rules hold.
       A symbolic link out of the root counts as outside. Every other layout
       stays confined ("Path escapes root"), also in bypassPermissions.
+      FileTools and SearchTools share one confinement
+      (Langertha::Raider::PathConfine).
 
 
   [Shell tools]
@@ -179,8 +171,9 @@ Revision history for Langertha-Raider
       JSON permissionDecisionReason is handed through as it stands, no reason
       "PreToolUse:Bash hook blocked the tool call". A call to a tool that is
       not offered (never, or since /reload or a mode change) is answered
-      "<tool_use_error>Error: No such tool available: X</tool_use_error>",
-      with " Tool names are case-sensitive: call Y instead." when only the
+      at once, before the hook, the permission gate and any approval, with
+      "<tool_use_error>Error: No such tool available: X</tool_use_error>"
+      and " Tool names are case-sensitive: call Y instead." when only the
       case differs. The old "denied: PreToolUse hook: ..." and "unknown tool
       X" are gone.
 
@@ -239,14 +232,6 @@ Revision history for Langertha-Raider
       the application keeps them per model. /stats shows the total and one
       line per model (also with --no-trace), the metrics of a run gain
       "usage". Tests t/240-t/244, scenarios 170-174; ADR 0026 addendum.
-
-    - read_file: a read over 25000 tokens (bytes / 4) is refused as in
-      Claude Code; pages ("1-5", at most 20) reads PDF pages as text
-      through pdftotext (poppler, looked up on PATH; a PDF of more than 10
-      pages needs it). The CLAUDE.md / AGENTS.md files in the prompt count
-      as read, so they can be edited without a read_file first. FileTools
-      and SearchTools share one confinement (Langertha::Raider::PathConfine).
-      Tests t/235-t/239, scenarios 165-169; ADR 0023 addendum.
 
     - Tests: t/203-t/206, scenarios t/scenarios/130-135;
       Test::Raider::LocalHTTP serves web pages to scenarios (http:), and
@@ -763,8 +748,8 @@ Revision history for Langertha-Raider
       API engine -- elsewhere the agent inherits the caller's model. config
       explain lists every agent with its tools, model, declared skills,
       unused keys, shadowed agents and files that are not agents. New config
-      keys agent_models (model per alias) and max_agent_depth (default 1)
-      are read. The lenient frontmatter reader
+      keys agent_models (model per alias) and max_agent_depth are read. The
+      lenient frontmatter reader
       now keeps one level of nesting (briefing: / skills: / - item).
 
     - The agent tool (ADR 0020, second step) starts a subagent in the same
@@ -794,8 +779,7 @@ Revision history for Langertha-Raider
     - Hooks and subagents (ADR 0020 section 7): SubagentStart (context in
       front of the prompt) and SubagentStop (Stop-style continuation) fire
       with agent_id and agent_type, a subagent's tool calls run PreToolUse
-      and PostToolUse, and the briefing plugin's briefing-preload is skipped
-      because raider briefs agents itself.
+      and PostToolUse.
 
     - Subagents and the Claude Code tools (ADR 0023, ADR 0025): a subagent
       reads a file itself before it writes it (a read state of its own, as
@@ -814,8 +798,8 @@ Revision history for Langertha-Raider
       listing. A file agent of the same name replaces either, as for
       general-purpose.
 
-    - Subagents nest up to three levels by default (max_agent_depth 3, was
-      1; ADR 0027 section 8). Without the config key,
+    - Subagents nest up to three levels by default (max_agent_depth, ADR
+      0027 section 8). Without the config key,
       CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH sets it in the Claude layout
       (also from the settings env); config explain shows where the value
       comes from and lists a value that does not fit as ignored.
@@ -878,13 +862,13 @@ Revision history for Langertha-Raider
       when they end on their own or are stopped, in Claude Code's form
       (<status> completed, failed or killed; "Background command "..."
       completed (exit code N)", "failed with exit code N", "was stopped");
-      ADR 0024's "no notification" no longer holds, and bash's texts say
-      "You will be notified when it completes." Nothing waits for a
+      bash's texts say "You will be notified when it completes." Nothing
+      waits for a
       background shell: a run, raider -p included, ends while one runs.
       bash_output with block lets the loop run while it waits. A subagent's
-      background shells outlive its run, as before.
+      background shells outlive its run.
 
-    - The first Ctrl-C no longer ends the foreground command of a
+    - The first Ctrl-C does not end the foreground command of a
       background subagent: it belongs to the session, like a background
       shell (BashTools background_pids). Leaving raider still ends it.
 
@@ -1018,7 +1002,7 @@ Revision history for Langertha-Raider
     - Plan mode: the new exit_plan_mode tool (after Claude Code's
       ExitPlanMode) presents the plan; accepted in the REPL the mode becomes
       default, refused the model gets the feedback, and with nobody to ask
-      it gives the plan as its answer.
+      it is refused.
 
     - Additional directories (additionalDirectories / additional_directories)
       can be read, searched and, as the mode allows, written by the file and
@@ -1068,11 +1052,6 @@ Revision history for Langertha-Raider
       mistakes an agent request for the response of its own call. Hall
       scenarios 109 to 113, t/172 to t/174; ADR 0021 Nachtrag P2.
 
-    - A tool call naming a tool no source offers is answered "unknown tool"
-      at once, before the PreToolUse hook, the permission gate and any
-      approval; in default mode it used to read "needs approval" (ADR 0005:
-      resolve comes before policy).
-
 
   [CLI and REPL]
     - New raider provider add ALIAS HOST [--credential-env NAME]
@@ -1084,8 +1063,9 @@ Revision history for Langertha-Raider
       Without a terminal nothing is fetched or stored. raider --provider
       ALIAS runs on the stored binding: its origin and allow_internal, the
       key from its credential_env (or -k); when origin, issuer, an
-      endpoint's origin or dialect or the auth types changed since it was
-      accepted, or the entry was edited, the run stops until provider add is
+      endpoint's origin or dialect, the auth types or the credential_env
+      changed since it was accepted, or the entry was edited, the run stops
+      until provider add is
       run again. A model-list or capability change does not. API keys in the
       environment never select an alias; providers: in a project file is
       ignored.
@@ -1095,11 +1075,6 @@ Revision history for Langertha-Raider
       (never a secret) and fetch nothing, remove asks on a terminal and needs
       --yes without one. The aliases also appear in raider config explain and
       the REPL banner.
-
-    - credential_env of a stored alias is part of the pin: another variable,
-      by hand or through provider add, needs the renewed acceptance, and
-      raider --provider ALIAS stops until then. Aliases stored before this
-      release are asked for again once.
 
     - A model offered on several usable endpoints of a provider manifest is
       refused with the endpoints named; the new --provider-endpoint ID
@@ -1122,7 +1097,9 @@ Revision history for Langertha-Raider
       raider_version; run.finished and the --json document carry a reason
       code whenever a run did not complete; permission.* and the tool
       hooks' hook.ran name their call; a failed, refused or cancelled tool
-      call runs the PostToolUseFailure hooks; bin/raider documents every
+      call runs the PostToolUseFailure hooks (except a call to a tool that is
+      not offered: it has a tool.call, no tool.result and no hook);
+      bin/raider documents every
       stream event type (ADR 0034).
 
 
@@ -1166,8 +1143,9 @@ Revision history for Langertha-Raider
       LOADGUARD_CPU_WEIGHT). New Langertha::Raider::Loadguard.
 
     - New Langertha::Raider::ToolNames: the table of Claude Code tool names
-      and the raider tools they stand for (Read -> read_file, Edit and
-      MultiEdit -> edit_file, Glob -> glob, Task and Agent -> agent, ...;
+      and the raider tools they stand for (Read -> read_file, Edit ->
+      edit_file, MultiEdit -> multi_edit, Glob -> glob, Task and Agent ->
+      agent, ...;
       mcp__* pass through) for the Claude-mode surfaces.
 
 
