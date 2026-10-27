@@ -139,9 +139,10 @@ Verify against the dev Langertha (the installed one is usually stale):
 
 `dist.ini` is `[@Author::GETTY]` plus what this repo adds:
 
-- `gather_exclude_match` for `^\.claude/`, `^CLAUDE\.md$`, `^CONTEXT\.md$`, `^docs/`,
-  `^\.github/`, `^scripts/`, `^maint/`, `^assets/` — development infrastructure has to be
-  excluded explicitly, or `Git::GatherDir` silently ships it in the CPAN tarball.
+- `.claude/`, `CLAUDE.md`, `CONTEXT.md`, `.github/` and `misc/agent-context/` ship with the
+  dist (the bundle default). `gather_exclude_match` keeps `^docs/`, `^scripts/`, `^maint/`
+  and `^assets/` out — `Git::GatherDir` gathers every tracked file, so a new top-level
+  directory ships unless it gets its own line.
 - `docker_image = raudssus/raider` with `docker_tags = latest %V %v` — the bundle's
   Docker::API talks to the container engine at `DOCKER_HOST` over the Engine HTTP API (no
   docker binary; rootless Podman works) and builds the image from the built dist in
