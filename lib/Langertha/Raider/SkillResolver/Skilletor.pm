@@ -1,6 +1,6 @@
 package Langertha::Raider::SkillResolver::Skilletor;
 # ABSTRACT: Internal skill resolver over the sources of skilletor.json, read without installing
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Path::Tiny;

@@ -1,6 +1,6 @@
 package Langertha::Raider::Binary;
 # ABSTRACT: Internal check whether raider runs as the standalone binary
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 
 use strict;
 use warnings;

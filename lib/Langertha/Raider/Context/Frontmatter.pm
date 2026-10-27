@@ -1,6 +1,6 @@
 package Langertha::Raider::Context::Frontmatter;
 # ABSTRACT: Internal lenient reader of the YAML frontmatter of skill and agent files
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use strict;
 use warnings;
 use YAML::PP ();

@@ -1,6 +1,6 @@
 package Langertha::Raider::Briefing;
 # ABSTRACT: Internal briefing of a subagent: its declared skills in front of its task
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use utf8;

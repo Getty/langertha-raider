@@ -1,6 +1,6 @@
 package Langertha::Raider::SkillResolver::Catalog;
 # ABSTRACT: Internal skill resolver over the skill catalogue of a context
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 

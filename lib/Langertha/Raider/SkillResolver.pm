@@ -1,6 +1,6 @@
 package Langertha::Raider::SkillResolver;
 # ABSTRACT: Internal chain of skill resolvers: a skill name to its directory and SKILL.md
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 

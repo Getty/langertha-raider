@@ -1,6 +1,6 @@
 package Langertha::Raider::Loadguard;
 # ABSTRACT: Internal gate that refuses heavy shell commands while the host is out of room
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

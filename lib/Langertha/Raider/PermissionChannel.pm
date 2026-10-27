@@ -1,6 +1,6 @@
 package Langertha::Raider::PermissionChannel;
 # ABSTRACT: Internal client of the hall's permission channel: asks a call over a Unix socket, never answers yes by accident
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use IO::Select;

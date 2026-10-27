@@ -1,6 +1,6 @@
 package Langertha::Raider::AskTools;
 # ABSTRACT: Internal question tool of raider: ask_user
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use MCP::Server;

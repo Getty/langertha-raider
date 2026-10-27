@@ -1,5 +1,5 @@
 package Langertha::Raider::Hall::Cron;
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 # ABSTRACT: Internal non-blocking cron scheduler for the raider hall
 
 =head1 DESCRIPTION

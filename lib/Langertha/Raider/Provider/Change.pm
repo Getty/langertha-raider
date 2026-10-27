@@ -1,6 +1,6 @@
 package Langertha::Raider::Provider::Change;
 # ABSTRACT: Internal classification of what changed between an accepted and a newly fetched provider manifest
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

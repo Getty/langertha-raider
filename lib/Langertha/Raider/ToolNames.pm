@@ -1,6 +1,6 @@
 package Langertha::Raider::ToolNames;
 # ABSTRACT: Internal table of Claude Code tool names and the raider tools they stand for
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use strict;
 use warnings;
 use Carp qw( croak );

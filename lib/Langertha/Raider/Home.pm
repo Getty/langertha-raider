@@ -1,6 +1,6 @@
 package Langertha::Raider::Home;
 # ABSTRACT: Internal resolver of the home and project .raider directories
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use strict;
 use warnings;
 use Path::Tiny;

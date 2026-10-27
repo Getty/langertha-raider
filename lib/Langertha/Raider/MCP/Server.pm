@@ -1,6 +1,6 @@
 package Langertha::Raider::MCP::Server;
 # ABSTRACT: Internal client of one configured MCP server, mounted as an engine MCP server
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

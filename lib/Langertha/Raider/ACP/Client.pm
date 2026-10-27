@@ -1,5 +1,5 @@
 package Langertha::Raider::ACP::Client;
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 # ABSTRACT: Minimal synchronous ACP client over TCP
 
 use strict;

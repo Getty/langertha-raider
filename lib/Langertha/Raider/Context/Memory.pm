@@ -1,6 +1,6 @@
 package Langertha::Raider::Context::Memory;
 # ABSTRACT: Internal reader of the Claude Code memory files (CLAUDE.md hierarchy)
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Path::Tiny;

@@ -1,6 +1,6 @@
 package Langertha::Raider::Session::Journal;
 # ABSTRACT: Internal read-only view of one session journal
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use JSON::MaybeXS ();

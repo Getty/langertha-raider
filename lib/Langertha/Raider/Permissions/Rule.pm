@@ -1,6 +1,6 @@
 package Langertha::Raider::Permissions::Rule;
 # ABSTRACT: Internal permission rule in Claude Code syntax, parsed and matched against tool calls
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

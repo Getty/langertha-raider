@@ -1,6 +1,6 @@
 package Langertha::Raider::Context::Layout;
 # ABSTRACT: Internal decision which project layout raider reads
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Path::Tiny;

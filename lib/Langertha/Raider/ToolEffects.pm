@@ -1,6 +1,6 @@
 package Langertha::Raider::ToolEffects;
 # ABSTRACT: Internal static table of what each built-in tool can do (effect classes)
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use strict;
 use warnings;
 use Carp qw( croak );

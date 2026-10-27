@@ -1,6 +1,6 @@
 package Langertha::Raider::Hooks;
 # ABSTRACT: Internal runner of Claude Code hooks from settings and plugins
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

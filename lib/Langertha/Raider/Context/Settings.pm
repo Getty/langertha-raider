@@ -1,6 +1,6 @@
 package Langertha::Raider::Context::Settings;
 # ABSTRACT: Internal reader of the Claude Code settings files (user, project, local)
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use JSON::MaybeXS qw( is_bool );

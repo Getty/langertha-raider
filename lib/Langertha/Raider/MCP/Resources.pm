@@ -1,6 +1,6 @@
 package Langertha::Raider::MCP::Resources;
 # ABSTRACT: Internal MCP resources of the configured servers: list/read tools and @server:uri mentions
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use JSON::MaybeXS ();

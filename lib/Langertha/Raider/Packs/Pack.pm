@@ -1,5 +1,5 @@
 package Langertha::Raider::Packs::Pack;
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 # ABSTRACT: A single raider pack - persona or power bundle
 
 =head1 DESCRIPTION

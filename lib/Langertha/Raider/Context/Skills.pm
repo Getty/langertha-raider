@@ -1,6 +1,6 @@
 package Langertha::Raider::Context::Skills;
 # ABSTRACT: Internal catalogue of the skills raider lists and loads on demand
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Path::Tiny;

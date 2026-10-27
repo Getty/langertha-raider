@@ -1,5 +1,5 @@
 package Langertha::Raider::Plugin::ClaudeHooks;
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 # ABSTRACT: Internal plugin that runs the Claude Code PostToolUse and PostToolUseFailure hooks on tool results
 
 use Moose;

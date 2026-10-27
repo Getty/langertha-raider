@@ -1,6 +1,6 @@
 package Langertha::Raider::Context::Agents;
 # ABSTRACT: Internal catalogue of the agent files a run can start as subagents
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Module::Runtime ();

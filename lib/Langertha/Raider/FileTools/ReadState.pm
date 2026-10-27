@@ -1,6 +1,6 @@
 package Langertha::Raider::FileTools::ReadState;
 # ABSTRACT: Internal record of the files a run has read, for read-before-write in the file tools
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

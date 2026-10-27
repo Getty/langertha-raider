@@ -1,6 +1,6 @@
 package Langertha::Raider::CLI::PromptBuilder;
 # ABSTRACT: Internal prompt-builder sub-agent of the raider CLI (/prompt)
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use utf8;

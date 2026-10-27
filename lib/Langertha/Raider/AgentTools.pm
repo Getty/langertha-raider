@@ -1,6 +1,6 @@
 package Langertha::Raider::AgentTools;
 # ABSTRACT: Internal subagent tools of raider: agent and send_message
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Future;

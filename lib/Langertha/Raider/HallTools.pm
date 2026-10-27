@@ -1,5 +1,5 @@
 package Langertha::Raider::HallTools;
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 # ABSTRACT: MCP::Server factory with hall-side tools (telegram_reply, hall_status, hall_spawn)
 
 use strict;

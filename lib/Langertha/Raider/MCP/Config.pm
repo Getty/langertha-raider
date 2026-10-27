@@ -1,6 +1,6 @@
 package Langertha::Raider::MCP::Config;
 # ABSTRACT: Internal model of the configured MCP servers: sources, precedence, expansion, approvals
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

@@ -1,6 +1,6 @@
 package Langertha::Raider::Permissions::ReadOnlyBash;
 # ABSTRACT: Internal fixed allowlist of read-only bash commands for the auto permission mode
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Langertha::Raider::Permissions::Rule;

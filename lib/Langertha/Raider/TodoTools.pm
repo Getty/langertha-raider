@@ -1,6 +1,6 @@
 package Langertha::Raider::TodoTools;
 # ABSTRACT: Internal task-list tools of raider: task_create, task_update, task_list, task_get and todo_write
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

@@ -1,6 +1,6 @@
 package Langertha::Raider::Application;
 # ABSTRACT: Internal application service that builds and runs a raider for a workspace
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use IO::Async::Loop;

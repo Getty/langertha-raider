@@ -1,6 +1,6 @@
 package Langertha::Raider::EngineResolver;
 # ABSTRACT: Internal choice of engine, model and API key for a raider
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

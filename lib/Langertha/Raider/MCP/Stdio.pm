@@ -1,6 +1,6 @@
 package Langertha::Raider::MCP::Stdio;
 # ABSTRACT: Internal JSON-RPC over the stdin and stdout of an MCP server process
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

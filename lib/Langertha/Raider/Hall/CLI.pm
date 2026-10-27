@@ -1,5 +1,5 @@
 package Langertha::Raider::Hall::CLI;
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 # ABSTRACT: Internal dispatcher of the raider hall subcommands
 
 =head1 DESCRIPTION

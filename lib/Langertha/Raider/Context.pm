@@ -1,6 +1,6 @@
 package Langertha::Raider::Context;
 # ABSTRACT: Internal context of an application: layout mode, Claude memory and settings, skills, agents
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Path::Tiny;

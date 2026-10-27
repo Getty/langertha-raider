@@ -1,6 +1,6 @@
 package Langertha::Raider::Cron;
 # ABSTRACT: Internal five-field cron expressions: validation, the next fire time and Claude Code's jitter
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use strict;
 use warnings;
 use Carp qw( croak );

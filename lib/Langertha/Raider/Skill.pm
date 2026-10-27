@@ -1,5 +1,5 @@
 package Langertha::Raider::Skill;
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 # ABSTRACT: Generate a "how to use raider" documentation file from a live Langertha::Raider::CLI configuration
 
 use Moose;

@@ -1,6 +1,6 @@
 package Langertha::Raider::Tasks;
 # ABSTRACT: Internal registry of raider's background work and its notification queue
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

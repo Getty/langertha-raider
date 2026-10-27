@@ -1,6 +1,6 @@
 package Langertha::Raider::CLI::Provider;
 # ABSTRACT: Internal provider commands of the raider CLI: inspect a manifest, bind an alias, activate it for --provider
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Time::HiRes ();

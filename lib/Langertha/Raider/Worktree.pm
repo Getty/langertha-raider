@@ -1,6 +1,6 @@
 package Langertha::Raider::Worktree;
 # ABSTRACT: Internal git worktrees of raider: create, lock, inspect and remove them with the git command line
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use IPC::Run ();

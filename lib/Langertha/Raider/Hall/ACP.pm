@@ -1,5 +1,5 @@
 package Langertha::Raider::Hall::ACP;
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 # ABSTRACT: Internal ACP (Agent Client Protocol) adapter that exposes the hall over TCP
 
 use strict;

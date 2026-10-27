@@ -1,6 +1,6 @@
 package Langertha::Raider::Context::Plugins;
 # ABSTRACT: Internal resolver of the installed and enabled Claude Code plugins
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use JSON::MaybeXS ();

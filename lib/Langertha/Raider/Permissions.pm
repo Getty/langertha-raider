@@ -1,6 +1,6 @@
 package Langertha::Raider::Permissions;
 # ABSTRACT: Internal permission policy of a raider session: mode, rules with sources, session rules
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

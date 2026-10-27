@@ -1,6 +1,6 @@
 package Langertha::Raider::BashTools;
 # ABSTRACT: Internal shell tools of raider: bash, bash_output, kill_shell and monitor
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

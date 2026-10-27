@@ -1,5 +1,5 @@
 package Langertha::Raider::Hall::Protocol;
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 # ABSTRACT: Internal control-socket command handlers for the raider hall
 
 =head1 DESCRIPTION

@@ -1,5 +1,5 @@
 package Langertha::Raider::Plugin::NestedMemory;
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 # ABSTRACT: Internal plugin that appends nested CLAUDE.md files to the results of file tools
 
 use Moose;

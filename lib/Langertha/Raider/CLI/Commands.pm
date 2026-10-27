@@ -1,6 +1,6 @@
 package Langertha::Raider::CLI::Commands;
 # ABSTRACT: Internal slash commands of the raider REPL
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use utf8;

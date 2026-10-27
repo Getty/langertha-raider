@@ -1,6 +1,6 @@
 package Langertha::Raider::Hooks::Result;
 # ABSTRACT: Internal value of one hook event: the merged answer of its hooks and a report per run
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 

@@ -1,5 +1,5 @@
 package Langertha::Raider::Plugin::Events;
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 # ABSTRACT: Report a raid's tool calls and results as machine-output events
 
 use Moose;

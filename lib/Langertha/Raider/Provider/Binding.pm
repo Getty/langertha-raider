@@ -1,6 +1,6 @@
 package Langertha::Raider::Provider::Binding;
 # ABSTRACT: Internal stored binding of a provider alias: what is pinned, and whether a fetched manifest still matches
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

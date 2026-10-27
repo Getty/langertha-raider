@@ -1,6 +1,6 @@
 package Langertha::Raider::Session;
 # ABSTRACT: Internal writer of one session journal, holding its lock
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

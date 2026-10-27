@@ -1,6 +1,6 @@
 package Langertha::Raider::Hall::PermissionChannel;
 # ABSTRACT: Internal per-run Unix socket on which a hall raider asks the ACP client for permission
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Future;

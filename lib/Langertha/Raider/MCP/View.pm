@@ -1,6 +1,6 @@
 package Langertha::Raider::MCP::View;
 # ABSTRACT: Internal filtered view of a configured MCP server, for a subagent
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Future;

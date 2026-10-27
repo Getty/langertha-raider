@@ -1,5 +1,5 @@
 package Langertha::Raider::Hall::Raider;
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 # ABSTRACT: Internal record of a raider process spawned by the hall
 
 =head1 DESCRIPTION

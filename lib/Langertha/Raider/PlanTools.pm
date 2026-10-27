@@ -1,6 +1,6 @@
 package Langertha::Raider::PlanTools;
 # ABSTRACT: Internal plan-mode tools of raider: enter_plan_mode and exit_plan_mode
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

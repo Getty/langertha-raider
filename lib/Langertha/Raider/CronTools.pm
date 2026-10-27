@@ -1,6 +1,6 @@
 package Langertha::Raider::CronTools;
 # ABSTRACT: Internal session-scoped scheduled prompts: cron_create, cron_delete and cron_list
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

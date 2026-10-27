@@ -1,6 +1,6 @@
 package Langertha::Raider::Monitor;
 # ABSTRACT: Internal event stream of one background command: every stdout line becomes a notification
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Encode ();

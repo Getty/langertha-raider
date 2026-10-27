@@ -1,6 +1,6 @@
 package Langertha::Raider::Detect;
 # ABSTRACT: Internal evaluator for declarative pack detection rules
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

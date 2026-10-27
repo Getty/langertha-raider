@@ -1,6 +1,6 @@
 package Langertha::Raider::ToolArgs;
 # ABSTRACT: Internal check of a tool call's arguments against the tool's inputSchema
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 
 use strict;
 use warnings;

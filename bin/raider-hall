@@ -5,7 +5,7 @@
 use strict;
 use warnings;
 
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 
 use Langertha::Raider::Hall::CLI;
 

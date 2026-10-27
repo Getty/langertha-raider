@@ -1,6 +1,6 @@
 package Langertha::Raider::Provider::Fetch;
 # ABSTRACT: Internal bounded fetch of a provider manifest from /.well-known/langertha.json
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

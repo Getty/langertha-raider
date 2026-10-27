@@ -1,5 +1,5 @@
 package Langertha::Raider::Hall::Telegram;
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 # ABSTRACT: Internal multi-bot Telegram long-poll adapter for the raider hall
 
 =head1 DESCRIPTION

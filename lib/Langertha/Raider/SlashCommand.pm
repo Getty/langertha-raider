@@ -1,6 +1,6 @@
 package Langertha::Raider::SlashCommand;
 # ABSTRACT: Internal renderer of a skill or command body for /name and the skill tool
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );

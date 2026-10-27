@@ -1,6 +1,6 @@
 package Langertha::Raider::MCP;
 # ABSTRACT: Internal set of the configured MCP servers of one application
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Future;

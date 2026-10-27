@@ -1,6 +1,6 @@
 package Langertha::Raider::Subagent;
 # ABSTRACT: Internal subagent run of raider: one agent call, its own raider, tools and journal
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Future;

@@ -1,5 +1,5 @@
 package Langertha::Raider::SkillTools;
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 # ABSTRACT: Internal MCP::Server factory with the skill tool (load a skill on demand)
 
 use strict;

@@ -1,6 +1,6 @@
 package Langertha::Raider::SearchTools;
 # ABSTRACT: Internal search tools of raider: glob (files by name) and grep (files by content)
-our $VERSION = '0.504';
+our $VERSION = '0.505';
 use Moose;
 use namespace::autoclean;
 use Carp qw( croak );
