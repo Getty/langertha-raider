@@ -1,6 +1,6 @@
 Revision history for Langertha-Raider
 
-{{$NEXT}}
+0.504     2026-10-27 15:45:56Z
 
   [Before you upgrade]
     - INCOMPATIBLE: every tool call passes a permission policy, always on
