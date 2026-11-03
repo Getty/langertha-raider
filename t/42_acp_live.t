@@ -9,7 +9,7 @@ use JSON::MaybeXS;
 use YAML::PP;
 use POSIX qw( WNOHANG );
 use lib 't/lib';
-use Test::Raider::Env qw( isolate_home );
+use Test::Raider::Env qw( isolate_home dev_raider );
 use Test::Raider::Hall qw( fake_hall wait_until );
 use Langertha::Raider::Hall;
 use Langertha::Raider::Hall::ACP;
@@ -130,17 +130,8 @@ subtest 'live: real hall, real paid LLM round-trip' => sub {
   my $port = $probe->sockport;
   close $probe;
 
-  # Locate our dev raider binary so the hall spawns the in-tree one, not
-  # whatever is on $PATH from a previous install. cwd during `prove -l`
-  # is the distribution root.
-  my $repo = Path::Tiny::path('.')->absolute;
-  my $raider_bin = $repo->child('bin', 'raider');
-  die "bin/raider not executable: $raider_bin" unless -x $raider_bin;
-  $ENV{RAIDER_HALL_RAIDER_BIN} = $raider_bin->stringify;
-
-  # Make sure the spawned raider finds Langertha::Raider::CLI from the tree too.
-  $ENV{PERL5LIB} = join ':', grep { defined && length }
-    ($repo->child('lib')->stringify, $ENV{PERL5LIB});
+  # The hall spawns the raider of this distribution (and its lib), not whatever is on $PATH.
+  dev_raider();
 
   my $tmp = tempdir(CLEANUP => 1);
   path("$tmp/.raider-hall.yml")->spew_utf8(YAML::PP->new->dump_string({

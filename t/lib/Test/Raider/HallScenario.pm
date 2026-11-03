@@ -17,6 +17,7 @@ use POSIX qw( WNOHANG );
 use Time::HiRes ();
 use YAML::PP;
 use Langertha::Raider::Hall ();
+use Test::Raider::Env ();
 
 our @EXPORT_OK = qw( free_port run_hall_scenario );
 
@@ -522,7 +523,7 @@ YAML
     my $home = $self->{root}->child('home');
     $home->mkpath;
     $ENV{HOME} = $home->stringify;
-    $ENV{RAIDER_HALL_RAIDER_BIN} = path($INC{'Langertha/Raider/Hall.pm'})->absolute->parent(4)->child('bin', 'raider')->stringify;
+    Test::Raider::Env::dev_raider();
     my @lib = map { path( $INC{$_} )->absolute->parent( scalar( () = $_ =~ m{/}g ) + 1 )->stringify }
       qw( Langertha/Raider/Hall.pm Langertha/Engine/Virtual.pm );
     my %seen;

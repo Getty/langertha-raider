@@ -4,7 +4,7 @@ use warnings;
 use Path::Tiny;
 use lib 't/lib';
 use Test::More;
-use Test::Raider::Env qw( clear_engine_env isolate_home );
+use Test::Raider::Env qw( clear_engine_env isolate_home dev_raider );
 isolate_home();
 use Langertha::Raider::Hall;
 use JSON::MaybeXS ();
@@ -14,11 +14,7 @@ use File::Temp qw( tempdir );
 use Langertha::Raider::CLI;  # for pack discovery path
 use Langertha::Raider::CLI::Main;
 
-BEGIN {
-  my $repo = Path::Tiny::path(__FILE__)->parent->parent->absolute;
-  my $bin = $repo->child('bin', 'raider');
-  $ENV{RAIDER_HALL_RAIDER_BIN} = $bin->stringify if -x $bin;
-}
+dev_raider();
 
 # 'spawn result structure' below has the hall exec the real bin/raider
 # (RAIDER_HALL_RAIDER_BIN above); it never reaches an engine because its

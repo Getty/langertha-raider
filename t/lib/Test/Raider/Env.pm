@@ -6,7 +6,7 @@ use warnings;
 use Exporter 'import';
 use File::Temp qw( tempdir );
 
-our @EXPORT_OK = qw( clear_engine_env isolate_home );
+our @EXPORT_OK = qw( clear_engine_env isolate_home dev_raider );
 
 # Envs the installed Langertha engines read for a base URL or token but
 # that don't end in _API_KEY, so the regex below doesn't catch them
@@ -62,6 +62,34 @@ sub isolate_home {
   delete $ENV{CLAUDE_CONFIG_DIR};
   $ENV{HOME} = tempdir(CLEANUP => 1);
   return $ENV{HOME};
+}
+
+=func dev_raider
+
+    use Test::Raider::Env qw( dev_raider );
+    my $raider = dev_raider();
+
+Points C<RAIDER_HALL_RAIDER_BIN> at the F<raider> of the distribution under
+test and returns its path: F<bin/raider> beside the F<lib> that
+L<Langertha::Raider::Hall> was loaded from (C<prove -l>), F<script/raider>
+beside F<blib/lib> (C<make test> in the C<dzil> build). A hall started by the
+test runs that raider whatever F<raider> a C<$PATH> or an installed older
+release offers, and the raider loads the modules of that same F<lib>
+(first in C<PERL5LIB>). Dies when the distribution carries no executable
+F<raider>.
+The tests that start a hall call it; none sets the variable on its own.
+
+=cut
+
+sub dev_raider {
+  require Langertha::Raider::Hall;
+  require Path::Tiny;
+  my $lib  = Path::Tiny::path( $INC{'Langertha/Raider/Hall.pm'} )->absolute->parent(3);
+  my $root = $lib->parent;
+  my ($bin) = grep { -x } map { $root->child( @$_ ) } [ 'bin', 'raider' ], [ 'script', 'raider' ];
+  die "no executable raider in $root (bin/raider, script/raider)\n" unless $bin;
+  $ENV{PERL5LIB} = join ':', grep { defined && length } "$lib", grep { $_ ne "$lib" } split /:/, $ENV{PERL5LIB} // '';
+  return $ENV{RAIDER_HALL_RAIDER_BIN} = $bin->stringify;
 }
 
 1;

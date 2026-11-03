@@ -10,12 +10,13 @@ use IO::Socket::IP;
 use POSIX qw( WNOHANG );
 use FindBin;
 use lib "$FindBin::Bin/lib";
-use Test::Raider::Env qw( isolate_home );
+use Test::Raider::Env qw( isolate_home dev_raider );
 BEGIN {
   eval { require Langertha::Engine::Virtual; 1 }
     or plan skip_all => 'needs Langertha::Engine::Virtual (Langertha 0.504 or later)';
 }
 isolate_home();
+dev_raider();
 
 # The setup we run in practice: an agent (the hall) on another machine, a
 # client that opens a session on it and hands it a prompt. Here "another
