@@ -620,6 +620,13 @@ EOF
   exit 0;
 }
 
+# Whether this process runs inside a container: the marker file Docker
+# leaves, or the container variable of systemd-nspawn and Podman.
+our $DOCKERENV = '/.dockerenv';
+sub _in_container {
+  return ( -f $DOCKERENV || ( $ENV{container} // '' ) ne '' ) ? 1 : 0;
+}
+
 sub run_install {
   my (@args) = @_;
   my %opt;
@@ -633,7 +640,7 @@ sub run_install {
   $dir = path($dir);
   my $cwd = $dir->stringify;
   my $unit_name = $opt{name} // 'raider-hall';
-  my $in_container = -f '/.dockerenv' || ($ENV{container} // '') ne '';
+  my $in_container = _in_container();
 
   # The hard truth: systemd lives on the host. Writing to
   # ~/.config/systemd/user/ from inside a container puts the unit in

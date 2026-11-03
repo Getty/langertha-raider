@@ -232,7 +232,8 @@ subtest 'install --docker --stdout: docker unit content' => sub {
 
 subtest 'install: inside a container, --docker or --host must be chosen' => sub {
   my $tmp = tempdir( CLEANUP => 1 );
-  local $ENV{container} = 'oci';
+  no warnings 'redefine';
+  local *Langertha::Raider::Hall::CLI::_in_container = sub { 1 };
   my ( $rv, $out, $died ) = run_hall_cli_in( $tmp, undef, 'install', '--stdout' );
   like( $died, qr/^Detected container environment/, 'refuses the ambiguous case' );
 
@@ -244,7 +245,8 @@ subtest 'install: outside a container, writes the unit under XDG_CONFIG_HOME' =>
   my $tmp = tempdir( CLEANUP => 1 );
   my $xdg = tempdir( CLEANUP => 1 );
   local $ENV{XDG_CONFIG_HOME} = $xdg;
-  local $ENV{container};
+  no warnings 'redefine';
+  local *Langertha::Raider::Hall::CLI::_in_container = sub { 0 };
   my ( $rv, $out, $died ) = run_hall_cli_in( $tmp, undef, 'install', '--host', '--name', 'myhall2' );
   is( $died, undef, 'lives' );
   my $unit = path($xdg)->child('systemd', 'user', 'myhall2.service');
@@ -254,13 +256,25 @@ subtest 'install: outside a container, writes the unit under XDG_CONFIG_HOME' =>
 
 subtest 'install: inside a container without --stdout, stages the unit for the host to copy' => sub {
   my $tmp = tempdir( CLEANUP => 1 );
-  local $ENV{container} = 'oci';
+  no warnings 'redefine';
+  local *Langertha::Raider::Hall::CLI::_in_container = sub { 1 };
   my ( $rv, $out, $died ) = run_hall_cli_in( $tmp, undef, 'install', '--host', '--name', 'myhall3' );
   is( $died, undef, 'lives' );
   my $unit = path($tmp)->child('.raider-hall', 'systemd', 'myhall3.service');
   ok( -f $unit, 'unit staged inside the (bind-mounted) hall dir' );
   like( $out, qr/inside a container/, 'explains why it only staged the file' );
   like( $out, qr/cp \.raider-hall\/systemd\/myhall3\.service/, 'gives the host-side copy command' );
+};
+
+subtest 'the container detection: the container variable or the marker file, whatever the host' => sub {
+  my $marker = path( tempdir( CLEANUP => 1 ) )->child('dockerenv');
+  local $Langertha::Raider::Hall::CLI::DOCKERENV = "$marker";
+  local $ENV{container};
+  ok( !Langertha::Raider::Hall::CLI::_in_container(), 'neither: outside' );
+  { local $ENV{container} = 'oci'; ok( Langertha::Raider::Hall::CLI::_in_container(), 'the container variable: inside' ); }
+  { local $ENV{container} = '';    ok( !Langertha::Raider::Hall::CLI::_in_container(), 'an empty container variable: outside' ); }
+  $marker->touch;
+  ok( Langertha::Raider::Hall::CLI::_in_container(), 'the marker file: inside' );
 };
 
 done_testing;

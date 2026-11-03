@@ -318,7 +318,11 @@ subtest 'DIR is consumed before the positionals that follow it' => sub {
   like( $err, qr/Invalid PID file/, 'stop: reads the pidfile of DIR' );
 
   my $out;
-  ( undef, undef, $err, $out ) = run_in( $cwd, 'install', "$hall", '--stdout' );
+  {
+    no warnings 'redefine';
+    local *Langertha::Raider::Hall::CLI::_in_container = sub { 0 };
+    ( undef, undef, $err, $out ) = run_in( $cwd, 'install', "$hall", '--stdout' );
+  }
   is( $err, undef, 'install DIR --stdout lives' );
   like( $out, qr/^WorkingDirectory=\Q$hall\E$/m, 'install: unit runs in DIR' );
 };
