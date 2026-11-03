@@ -14,5 +14,5 @@ script:
 expect:
   answer: done
   tools:
-    - { name: mcp__t__big, text: "\\A(?s:x{100000})\\n.*\\[MCP tool output truncated: about 30000 tokens, the limit is 25000 tokens \\(MAX_MCP_OUTPUT_TOKENS\\)" }
+    - { name: mcp__t__big, text: "\\A(?:x{50000}){2}\\n.*\\[MCP tool output truncated: about 30000 tokens, the limit is 25000 tokens \\(MAX_MCP_OUTPUT_TOKENS\\)" }
     - { name: mcp__t__big, text: "\\A(?s:x{500})\\z" }
