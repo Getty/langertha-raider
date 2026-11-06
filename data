@@ -1,0 +1,18 @@
+---
+class: standard
+created: 2026-11-06T05:29:05Z
+id: 184
+priority: medium
+status: backlog
+tags:
+- tests
+- live
+- spend
+title: Live-Gate TEST_LIVE auf TEST_LANGERTHA_LIVE angleichen (+EXPENSIVE für Premium-Pins)
+updated: 2026-11-06T05:29:05Z
+---
+
+Langertha-Core (k391, 2026-11-06) gated alle Live-Tests jetzt auf den Hauptschalter TEST_LANGERTHA_LIVE=1; Pro/Opus-Pins brauchen zusätzlich TEST_LANGERTHA_LIVE_EXPENSIVE=1, Bildgenerierung alle vier (LIVE, EXPENSIVE, ULTRALARGE, IMAGES). Anlass: ~110 USD OpenAI-Spend durch scharf geschaltete Live-Tests.
+
+Hier: t/82_live_raider.t:13 gated auf TEST_LIVE — generischer Name, den andere Tools schon setzen können, und weicht von der Familie ab. Auf TEST_LANGERTHA_LIVE umstellen; EXPENSIVE überall, wo Premium-Modelle (Opus, *-pro) gepinnt sind. Schalter nie in .env.
+Quelle: langertha-reviewer zu k391.
