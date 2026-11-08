@@ -18,9 +18,9 @@ L<Net::Async::HTTP> loads some modules only when it opens a connection:
 L<IO::Async::Internals::Connector> for every connection, L<IO::Async::SSL>
 (with L<IO::Socket::SSL>, L<Net::SSLeay> and the system's libssl) for https.
 When such a load dies, Net::Async::HTTP 0.50 keeps the connection slot for
-that host taken, and every later request to the host waits forever (karr
-k107). Raider asks this module before it sends, so a missing module is an
-error with its name instead of a hang.
+that host taken, and every later request to the host waits forever. Raider
+asks this module before it sends, so a missing module is an error with its
+name instead of a hang.
 
 =func connect_error
 

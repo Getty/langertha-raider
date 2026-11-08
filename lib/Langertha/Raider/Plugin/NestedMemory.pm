@@ -33,7 +33,7 @@ Any tool counts whose arguments carry a C<path> or C<file_path> string:
 C<read_file>, C<write_file>, C<edit_file>, C<list_files> and every later
 tool of that shape. A result that is an error (C<isError>) or was cut off
 by a cancel is left alone and uses up nothing. The same touch brings in
-skills (k157): the F<.claude/skills> of a subtree and the skills whose
+skills: the F<.claude/skills> of a subtree and the skills whose
 C<paths:> match the file, announced in a second block of the same kind
 (L<Langertha::Raider::Context/nested_skills_for>). The application mounts
 the plugin always; outside the Claude layout only the C<paths:> skills of
