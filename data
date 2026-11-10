@@ -1,0 +1,28 @@
+---
+class: standard
+created: 2026-11-10T03:01:22Z
+id: 185
+priority: high
+status: todo
+tags:
+- ci
+title: 'release-binaries red for 0.504: XS::Parse::Infix missing from the packed archive'
+updated: 2026-11-10T03:01:22Z
+---
+
+The `release-binaries` workflow failed for tag 0.504 (2026-10-27, the latest run of that workflow) on x86_64 and aarch64, step "Verify binary". Run: `gh run view 40557655238 -R Getty/langertha-raider --log-failed`.
+
+    Langertha::Engine::AKIOpenAI: Can't locate XS/Parse/Infix.pm in @INC (@INC entries checked: .../archive/lib) at .../archive/lib/DynaLoader.pm line 223.
+    FAIL: packed module set
+
+An XS module loaded at run time (`XS::Parse::Infix`, pulled in by a syntax module the engine classes use) is missing from the packed archive, so the release 0.504 has no working binaries attached.
+
+## Steps
+
+1. Find what loads `XS::Parse::Infix` (`perl -MLangertha::Engine::AKIOpenAI -e 'print join "\n", grep /Parse/, keys %INC'`) and add it, with its shared object, to the binary build's module list.
+2. Run the binary build and the "packed module set" check locally the way the workflow does.
+3. Say on the card whether the 0.504 binaries should be rebuilt on the tag or whether the next release carries the fix; that choice is the maintainer's.
+
+## Proof
+
+The packed-module check passes locally for every engine class, and the workflow's next run is green.
